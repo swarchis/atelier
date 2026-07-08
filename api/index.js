@@ -351,6 +351,65 @@ Do not invent details not supported by the text. Return a JSON object with exact
   }
 });
 
+// Scores how well a vendor fits a specific product — category/specialty match,
+// rough MOQ-vs-budget unit economics, location/lead-time risk against the brand's
+// risk tolerance, and anything red-flaggy in the founder's own notes or quote
+// history. Same score+notes shape as design analysis, same disclaimer: this is a
+// starting-point estimate, not a verified judgment — the founder decides.
+app.post('/api/analyze-vendor-fit', async (req, res) => {
+  console.log("📥 Received vendor fit request...");
+  try {
+    const { vendor, product, brand, quoteHistory } = req.body;
+    if (!vendor || !product) return res.status(400).json({ ok: false, error: 'Vendor and product are required' });
+
+    const prompt = `You are a sourcing advisor helping a fashion brand founder judge whether a vendor is a good fit for a specific product. Be honest and specific — flag real risks rather than being generically positive.
+
+Vendor:
+Name: ${vendor.name}
+Category: ${vendor.category || 'unknown'}
+Location: ${vendor.location || 'unknown'}
+MOQ: ${vendor.moq ?? 'unknown'}
+Lead time: ${vendor.lead_time || 'unknown'}
+Specialties: ${(vendor.specialties || []).join(', ') || 'none listed'}
+Rating: ${vendor.rating ?? 'no rating'}
+Founder's own notes about this vendor: ${vendor.notes || 'none'}
+Trust label: ${vendor.label}
+
+Product to be made:
+Name: ${product.name}
+Category: ${product.category}
+Budget: $${product.budget}
+Risk tolerance for this product: ${product.risk}
+Factory readiness score: ${product.readiness}%
+
+Brand context:
+Quality tier: ${brand?.qualityTier || 'unknown'}
+Budget philosophy: ${brand?.budgetPhilosophy || 'unknown'}
+Sustainability preference: ${brand?.sustainability || 'unknown'}
+Global risk tolerance: ${brand?.globalRisk || 'unknown'}
+
+Quote history with this vendor for this product: ${quoteHistory && quoteHistory.length ? JSON.stringify(quoteHistory) : 'none yet'}
+
+Assess: category/specialty match, whether the MOQ makes sense against the stated budget (rough unit economics — flag it if MOQ × even a low per-unit cost would blow the budget), location/lead-time risk relative to the stated risk tolerance, and anything concerning in the notes or quote history (e.g. a quoted price far above budget, no specialties overlap, no track record at all).
+If there's very little data available (no quotes, no notes, no rating), say so explicitly and reflect that as lower confidence rather than inventing certainty.
+
+Return a JSON object with exactly this structure:
+{
+  "score": <number 0-100, overall fit/profitability confidence>,
+  "notes": [
+    { "severity": "green" | "amber" | "blue" | "red", "text": "specific, actionable feedback string" }
+  ]
+}`;
+
+    const analysis = await callGeminiText(prompt);
+    console.log("✅ Vendor fit analysis successful");
+    res.json({ ok: true, analysis });
+  } catch (error) {
+    console.error('❌ Endpoint Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🧠 Backend running on http://localhost:${PORT}`);

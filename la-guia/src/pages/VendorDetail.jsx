@@ -8,12 +8,18 @@ import PriceHistoryChart from '../components/PriceHistoryChart.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 
 const TECHPACK_STAGES = ['techpack', 'sourcing', 'sampling', 'production', 'launched'];
+const SEVERITY_ICON = { amber: 'ph-warning', blue: 'ph-info', green: 'ph-check-circle', red: 'ph-x-circle' };
 
 export default function VendorDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { vendors, quotes, requestQuote, updateVendor, toggleFavorite, toggleBlock } = useVendors();
-  const { products } = useProducts();
+  const { products, activeBrand } = useProducts();
+
+  const [fitProduct, setFitProduct] = useState('');
+  const [analyzingFit, setAnalyzingFit] = useState(false);
+  const [fitResult, setFitResult] = useState(null);
+  const [fitError, setFitError] = useState(null);
 
   const [showRequest, setShowRequest] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState('');
@@ -112,6 +118,30 @@ export default function VendorDetail() {
     window.location.href = mailto;
   };
 
+  const analyzeFit = async () => {
+    if (!fitProduct) return;
+    setAnalyzingFit(true);
+    setFitError(null);
+    try {
+      const productObj = products.find(p => p.id === fitProduct);
+      const productQuotes = vendorQuotes
+        .filter(q => q.product_id === fitProduct)
+        .map(q => ({ status: q.status, amount: q.amount, preferences: q.preferences }));
+      const res = await fetch('http://localhost:3001/api/analyze-vendor-fit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendor, product: productObj, brand: activeBrand, quoteHistory: productQuotes }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      setFitResult(data.analysis);
+    } catch (err) {
+      setFitError(err.message || 'Could not analyze fit.');
+    } finally {
+      setAnalyzingFit(false);
+    }
+  };
+
   return (
     <>
       <div className="topbar">
@@ -159,6 +189,51 @@ export default function VendorDetail() {
           <div className="stat-card" style={{ '--stat-accent': 'var(--c-vendors)' }}>
             <div className="stat-label">Quotes exchanged</div>
             <div className="stat-value">{vendorQuotes.length}</div>
+          </div>
+        </div>
+
+        <div className="card-raised" style={{ marginBottom: 24 }}>
+          <div className="corner-fold" style={{ '--fold-color': 'var(--c-finalcheck)' }} />
+          <div className="card-header"><span className="card-title">AI fit &amp; profitability</span></div>
+          <div className="card-body">
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: fitResult ? 18 : 0 }}>
+              <div className="form-group" style={{ flex: 1, minWidth: 220, marginBottom: 0 }}>
+                <label className="form-label">Assess fit for which product?</label>
+                <select className="form-select" value={fitProduct} onChange={e => { setFitProduct(e.target.value); setFitResult(null); }}>
+                  <option value="" disabled>Choose a product</option>
+                  {techPackProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <button className="btn btn-primary" onClick={analyzeFit} disabled={analyzingFit || !fitProduct}>
+                {analyzingFit ? <><i className="ph ph-circle-notch" /> Analyzing…</> : <><i className="ph ph-magic-wand" /> Analyze fit</>}
+              </button>
+            </div>
+            {techPackProducts.length === 0 && <div className="form-hint" style={{ marginTop: 8 }}>No products have a tech pack yet — convert a design first.</div>}
+            {fitError && <div className="form-hint" style={{ color: 'var(--red)', marginTop: 8 }}>{fitError}</div>}
+
+            {fitResult && (
+              <div className="enter">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 30, fontWeight: 700, color: fitResult.score >= 80 ? 'var(--green)' : fitResult.score >= 55 ? 'var(--amber)' : 'var(--red)' }}>
+                    {fitResult.score}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                    Fit &amp; profitability estimate<br />based on category match, MOQ-vs-budget economics, and risk tolerance
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+                  {fitResult.notes.map((n, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 10, padding: '11px 13px', borderRadius: 8, background: `var(--${n.severity}-bg)`, border: `1px solid var(--${n.severity}-border)`, color: `var(--${n.severity})`, fontSize: 13.5 }}>
+                      <i className={`ph ${SEVERITY_ICON[n.severity]}`} style={{ marginTop: 2, flexShrink: 0 }} />
+                      <span>{n.text}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-4)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <i className="ph ph-warning" /> AI-generated estimate, not a verified judgment — it can be wrong, especially with limited vendor data. Treat as a starting point.
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
