@@ -21,6 +21,7 @@ export default function DesignDetail() {
   const { products, designs, getUploadedFile } = useProducts();
   
   const [analyzing, setAnalyzing] = useState(false);
+  const [generatingTP, setGeneratingTP] = useState(false); // New state for Tech Pack Gen
   const [localAnalysis, setLocalAnalysis] = useState(null);
   const [canvasStatus, setCanvasStatus] = useState('loading');
   const [expanded, setExpanded] = useState(false);
@@ -56,20 +57,18 @@ export default function DesignDetail() {
     );
   }
 
-  // Use local state if we just generated it, otherwise use DB state
   const analysis = localAnalysis || design.analysis;
   const statusMeta = CANVAS_STATUS[canvasStatus];
 
+  // 1. Capture Canvas and get Analysis
   const captureAndAnalyze = async () => {
     setCaptureError(null);
     setAnalyzing(true);
     
     try {
-      // 1. Grab snapshot from Photopea iframe
       const url = await photopeaRef.current.capture();
       setSnapshot(url);
 
-      // 2. Convert Blob URL to Base64
       const response = await fetch(url);
       const blob = await response.blob();
       const reader = new FileReader();
@@ -79,7 +78,6 @@ export default function DesignDetail() {
         try {
           const base64data = reader.result.split(',')[1];
           
-          // 3. Send to our Node.js Backend API
           const apiRes = await fetch('http://localhost:3001/api/analyze-design', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -89,13 +87,7 @@ export default function DesignDetail() {
           const data = await apiRes.json();
           if (data.ok) {
             setLocalAnalysis(data.analysis);
-            
-            // 4. Persist to Supabase Database
-            await supabase
-              .from('designs')
-              .update({ analysis: data.analysis })
-              .eq('product_id', product.id);
-
+            await supabase.from('designs').update({ analysis: data.analysis }).eq('product_id', product.id);
           } else {
             throw new Error(data.error);
           }
@@ -108,6 +100,64 @@ export default function DesignDetail() {
     } catch (err) {
       setCaptureError(err.message || 'Could not capture the canvas');
       setAnalyzing(false);
+    }
+  };
+
+  // 2. Generate Tech Pack using the captured snapshot
+  const handleConvertToTechPack = async () => {
+    if (!snapshot) {
+      alert("Please click 'Capture & Analyze' to freeze your design before converting to a Tech Pack.");
+      return;
+    }
+
+    setGeneratingTP(true);
+    try {
+      // Get base64 string from the snapshot URL we already have
+      const response = await fetch(snapshot);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      reader.readAsDataURL(blob);
+      
+      reader.onloadend = async () => {
+        try {
+          const base64data = reader.result.split(',')[1];
+          
+          // Ask Node backend to generate BOM and Measurements
+          const apiRes = await fetch('http://localhost:3001/api/generate-tech-pack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: base64data })
+          });
+          
+          const data = await apiRes.json();
+          if (!data.ok) throw new Error(data.error);
+
+          // Save the AI generated data to Supabase
+          const { error } = await supabase
+            .from('tech_packs')
+            .upsert({
+              product_id: product.id,
+              bom: data.techPackData.bom,
+              measurements: data.techPackData.measurements,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'product_id' });
+
+          if (error) throw error;
+          
+          // Update product stage to techpack
+          await supabase.from('products').update({ stage: 'techpack' }).eq('id', product.id);
+          
+          // Navigate to the newly filled tech pack!
+          navigate(`/tech-packs/${product.id}`);
+
+        } catch (err) {
+          alert("Failed to generate Tech Pack: " + err.message);
+          setGeneratingTP(false);
+        }
+      };
+    } catch (err) {
+      alert("Error processing image: " + err.message);
+      setGeneratingTP(false);
     }
   };
 
@@ -134,10 +184,10 @@ export default function DesignDetail() {
             <span className="canvas-panel-dot" style={{ background: statusMeta.color }} />
             {statusMeta.label}
           </span>
-          <span className="canvas-panel-badge">powered by <a href="https://www.photopea.com" target="_blank" rel="noreferrer" style={{ marginLeft: 3 }}>Photopea</a> — opens .psd &amp; .ai natively</span>
+          <span className="canvas-panel-badge">powered by <a href="https://www.photopea.com" target="_blank" rel="noreferrer" style={{ marginLeft: 3 }}>Photopea</a></span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button className="btn btn-sm btn-primary" onClick={captureAndAnalyze} disabled={canvasStatus !== 'ready' || analyzing}>
+          <button className="btn btn-sm btn-primary" onClick={captureAndAnalyze} disabled={canvasStatus !== 'ready' || analyzing || generatingTP}>
             {analyzing ? '🤖 Analyzing...' : '🤖 Capture & Analyze'}
           </button>
           <button className="btn btn-sm" onClick={toggleExpand} disabled={toggling}>
@@ -167,8 +217,13 @@ export default function DesignDetail() {
           <div className="page-sub">{product.category}</div>
         </div>
         <div className="topbar-right">
-          <button className="btn btn-primary" onClick={() => navigate(`/tech-packs/${product.id}`)}>
-            <i className="ph ph-ruler" /> Continue to Tech Pack
+          {/* AI Generator Button */}
+          <button className="btn btn-primary" onClick={handleConvertToTechPack} disabled={generatingTP || analyzing}>
+            {generatingTP ? (
+              <><i className="ph ph-spinner ph-spin" /> Generating Tech Pack...</>
+            ) : (
+              <><i className="ph ph-magic-wand" /> Auto-Generate Tech Pack</>
+            )}
           </button>
         </div>
       </div>
@@ -201,9 +256,9 @@ export default function DesignDetail() {
                 </div>
               </div>
             </div>
-
+            
             <div className="card-raised">
-              <div className="card-header"><span className="card-title">Creative Cloud sync</span></div>
+              <div className="card-header"><span className="card-title">Creative Cloud</span></div>
               <div className="card-body">
                 <p style={{ fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.6, marginBottom: 14 }}>
                   Link Adobe Creative Cloud to pass this mockup back and forth with Photoshop or Illustrator.

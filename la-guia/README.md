@@ -11,7 +11,7 @@ It takes a founder from a rough sketch to a manufactured, selling product.
 
 Grainline uses a hybrid architecture, combining the rapid development of BaaS with the power of a custom AI orchestration backend.
 
-*   **Frontend (`la guia/`)**: React + Vite. Styled with a bespoke, CSS-variable-driven design system (no heavy UI frameworks).
+*   **Frontend (`la-guia/`)**: React + Vite. Styled with a bespoke, CSS-variable-driven design system (no heavy UI frameworks).
 *   **Database & Auth**: Supabase (PostgreSQL, GoTrue). Uses strict Row Level Security (RLS) for multi-tenant brand isolation.
 *   **AI Engine (`api/`)**: Node.js + Express. Directly integrates with Anthropic Claude 3.5 Sonnet (Vision) to analyze visual designs and generate technical feedback.
 *   **Design Canvas**: Embedded Photopea integration via `postMessage` API.
@@ -20,7 +20,7 @@ Grainline uses a hybrid architecture, combining the rapid development of BaaS wi
 
 ```text
 grainline/
-├── la guia/                 # The React/Vite Frontend
+├── la-guia/                 # The React/Vite Frontend
 │   ├── src/
 │   │   ├── components/      # Reusable UI (Sidebar, Canvas, Empty States)
 │   │   ├── context/         # AuthContext & ProductsContext (Supabase sync)
@@ -64,10 +64,10 @@ node index.js
 
 ### 3. Frontend Setup (UI)
 ```bash
-cd "la guia"
+cd "la-guia"
 npm install
 ```
-Create a `la guia/.env.local` file:
+Create a `la-guia/.env.local` file:
 ```text
 VITE_SUPABASE_URL=your_supabase_project_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
