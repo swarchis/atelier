@@ -243,14 +243,17 @@ app.post('/api/search-vendors', async (req, res) => {
     // Two Tavily calls run in parallel: a tight query (as the founder typed it) and
     // a loosened one (category/location only) so there's always a wider pool to draw
     // "broader" candidates from, even when the specific query is too narrow to surface much.
+    // Both are phrased to bias toward manufacturers-for-hire, not retail clothing brands —
+    // "manufacturer" alone surfaces brands who just mention their own production.
     const broadQuery = query.split(/[,.]|(?:\bwith\b)|(?:\bthat\b)/)[0].trim();
+    const MFG_BIAS = 'private label OR white label OR OEM ODM OR contract manufacturer OR wholesale factory -shop -"our collection"';
     const [tightRes, broadRes] = await Promise.all([
       fetch('https://api.tavily.com/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           api_key: process.env.TAVILY_API_KEY,
-          query: `${query} manufacturer OR supplier OR factory contact`,
+          query: `${query} ${MFG_BIAS}`,
           search_depth: 'advanced',
           max_results: 12,
         }),
@@ -260,7 +263,7 @@ app.post('/api/search-vendors', async (req, res) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           api_key: process.env.TAVILY_API_KEY,
-          query: `${broadQuery} manufacturer OR supplier`,
+          query: `${broadQuery} ${MFG_BIAS}`,
           search_depth: 'basic',
           max_results: 10,
         }),
@@ -280,21 +283,27 @@ app.post('/api/search-vendors', async (req, res) => {
       return res.json({ ok: true, recommended: [], broader: [] });
     }
 
-    const prompt = `A fashion brand founder searched for vendors with this request: "${query}"
+    const prompt = `A fashion brand founder searched for a MANUFACTURER with this request: "${query}"
 
 Here are real web search results (some from a tightly-matched search, some from a broader category search, mixed together):
 ${results.map((r, i) => `[${i}] ${r.title}\nURL: ${r.url}\n${(r.content || '').slice(0, 900)}`).join('\n\n')}
 
-Extract candidate manufacturers/vendors. Be generous, not just literal — include anything plausibly relevant, not only exact matches. Skip only results that are clearly not about a specific company (generic blog posts with no vendor named, marketplace homepages with no specific seller, unrelated pages).
+CRITICAL FILTER — apply this before anything else:
+The founder needs a company that will MANUFACTURE GARMENTS FOR THEM based on a design/tech pack they send in — private label, white label, OEM/ODM, contract manufacturing, cut-make-trim, "start your own clothing line" production partners.
+EXCLUDE any company that is itself a clothing BRAND selling finished products under its own name directly to end consumers — even if it mentions organic cotton, sustainable materials, or "manufactured ethically." A brand talking about how ITS OWN products are made is not a match.
+Signals a result IS a manufacturer-for-hire (include): "private label," "white label," "wholesale," "MOQ for your brand," "start your clothing line," "we manufacture for brands," "contract manufacturing," "OEM/ODM," "sample and bulk production," "sourcing agent," "factory partner," pricing/MOQ framed around a business customer.
+Signals a result is a retail BRAND instead (exclude): online shop / storefront language, "shop now," "add to cart," "our collection," a founder's personal story about their own product line, sizing charts for individual customers, no mention of producing for other businesses.
+If you are not reasonably confident a result is a manufacturer-for-hire rather than a retail brand, LEAVE IT OUT — do not guess, and do not include it "just in case." Precision matters more than volume here.
 
-Split them into two groups:
-- "recommended": vendors that match essentially everything specific in the founder's request (e.g. if they gave a material, price range, MOQ, or location, these hit all of it).
-- "broader": plausible vendors that match the general category/product but miss one or more of the specific details — include these too, don't drop them, since "recommended" can be wrong and the founder should still see other real options.
+After applying that filter, split what's left into two groups:
+- "recommended": manufacturers that match essentially everything specific in the founder's request (e.g. if they gave a material, price range, MOQ, or location, these hit all of it).
+- "broader": manufacturers that match the general category but miss one or more of the specific details — still include these, don't drop them, since "recommended" can be wrong and the founder should see other real options.
 If the founder's request was vague/generic, most results likely belong in "broader" since there's nothing specific to fully match yet.
+It's completely fine for a group to be empty if nothing qualifies — an empty list beats a wrong one.
 
-For each vendor, figure out the source carefully:
-- If the result IS the vendor's own website/page (domain matches the company, or it's their official site/contact page/storefront), set "sourceType": "vendor" and "sourceUrl" to that link.
-- If the result is actually a THIRD PARTY talking about the vendor (an Instagram account that reviews manufacturers, a blog post, a directory listing, a marketplace aggregator page) rather than the vendor's own presence, set "sourceType": "review". If the snippet text itself mentions the vendor's own website, email, or handle, put THAT as "sourceUrl" and put the original review/mention link as "reviewUrl". If no direct vendor link can be found anywhere, "sourceUrl" should be the review link itself (still set "sourceType": "review" so the founder knows it's not the vendor's own page).
+For each manufacturer, figure out the source carefully:
+- If the result IS the manufacturer's own website/page (domain matches the company, or it's their official site/contact page), set "sourceType": "vendor" and "sourceUrl" to that link.
+- If the result is actually a THIRD PARTY talking about the manufacturer (an Instagram account that reviews manufacturers, a blog post, a directory listing, a marketplace aggregator page) rather than their own presence, set "sourceType": "review". If the snippet text itself mentions the manufacturer's own website, email, or handle, put THAT as "sourceUrl" and put the original review/mention link as "reviewUrl". If no direct link can be found anywhere, "sourceUrl" should be the review link itself (still set "sourceType": "review").
 
 Do not invent details not supported by the text. Return a JSON object with exactly this structure:
 {
@@ -305,8 +314,37 @@ Do not invent details not supported by the text. Return a JSON object with exact
 }`;
 
     const parsed = await callGeminiText(prompt);
+
+    // Quick live check for parked/expired/for-sale domains — catches the "clicked
+    // through to a domain-for-sale page" case. Doesn't punish timeouts or bot-blocked
+    // sites (inconclusive ≠ dead), only drops on an explicit for-sale signal.
+    const PARKING_SIGNALS = ['buy this domain', 'domain is for sale', 'this domain may be for sale', 'domain for sale', 'sedo.com', 'hugedomains', 'afternic', 'dan.com', 'godaddy.com/domainsearch', 'the lease to own', 'inquire about this domain'];
+    async function isLikelyAlive(url) {
+      if (!url) return true;
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const r = await fetch(url, { signal: controller.signal, redirect: 'follow' });
+        clearTimeout(timeout);
+        if (!r.ok) return true; // non-200 could just be bot-blocking — inconclusive, don't punish
+        const text = (await r.text()).toLowerCase().slice(0, 5000);
+        return !PARKING_SIGNALS.some(s => text.includes(s));
+      } catch {
+        return true; // network error/timeout — inconclusive, don't punish
+      }
+    }
+    async function filterAlive(list) {
+      const checks = await Promise.all((list || []).map(async v => ({ v, alive: await isLikelyAlive(v.sourceUrl) })));
+      return checks.filter(c => c.alive).map(c => c.v);
+    }
+
+    const [recommended, broader] = await Promise.all([
+      filterAlive(parsed.recommended),
+      filterAlive(parsed.broader),
+    ]);
+
     console.log("✅ Vendor search successful");
-    res.json({ ok: true, recommended: parsed.recommended || [], broader: parsed.broader || [] });
+    res.json({ ok: true, recommended, broader });
   } catch (error) {
     console.error('❌ Endpoint Error:', error.message);
     res.status(500).json({ ok: false, error: error.message });
