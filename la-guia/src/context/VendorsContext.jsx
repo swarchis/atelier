@@ -45,7 +45,7 @@ export function VendorsProvider({ children }) {
     }
   }
 
-  const addVendor = async ({ name, category, location, specialties, sourceNote }) => {
+  const addVendor = async ({ name, category, location, specialties, sourceNote, moq, leadTime, label }) => {
     const { data, error } = await supabase
       .from('vendors')
       .insert([{
@@ -53,9 +53,11 @@ export function VendorsProvider({ children }) {
         name,
         category: category || null,
         location: location || null,
-        label: 'Imported by user',
+        label: label || 'Imported by user',
         specialties: specialties || [],
         source_note: sourceNote || null,
+        moq: moq ?? null,
+        lead_time: leadTime || null,
       }])
       .select()
       .single();

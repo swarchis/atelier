@@ -225,6 +225,60 @@ Write a concise, professional email (under 200 words). Return a JSON object with
   }
 });
 
+// Real-time vendor search — no local database involved. Tavily runs an actual
+// web search (Gemini's own Search grounding needs a billing-enabled Google
+// Cloud project, confirmed via direct testing, so this stays a separate call),
+// then Gemini reads the real results and extracts candidate vendor profiles.
+// The founder reviews and explicitly saves whichever ones they want — nothing
+// here is written to their vendor list automatically.
+app.post('/api/search-vendors', async (req, res) => {
+  console.log("📥 Received vendor search request...");
+  try {
+    const { query } = req.body;
+    if (!query || !query.trim()) return res.status(400).json({ ok: false, error: 'No search query provided' });
+    if (!process.env.TAVILY_API_KEY || process.env.TAVILY_API_KEY.startsWith('get_a_free_key')) {
+      return res.status(400).json({ ok: false, error: 'TAVILY_API_KEY is not set in api/.env — get a free key at tavily.com' });
+    }
+
+    const tavilyRes = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: process.env.TAVILY_API_KEY,
+        query: `${query} manufacturer OR supplier OR factory contact`,
+        search_depth: 'basic',
+        max_results: 8,
+      }),
+    });
+    const tavilyData = await tavilyRes.json();
+    if (!tavilyRes.ok) throw new Error(tavilyData.error || `Tavily error: ${tavilyRes.status}`);
+
+    const results = tavilyData.results || [];
+    if (results.length === 0) {
+      return res.json({ ok: true, vendors: [] });
+    }
+
+    const prompt = `A fashion brand founder searched for: "${query}"
+Here are real web search results:
+${results.map((r, i) => `[${i}] ${r.title}\nURL: ${r.url}\n${(r.content || '').slice(0, 500)}`).join('\n\n')}
+
+From these results, extract candidate manufacturers/vendors that plausibly match the search. Only include entries clearly about an actual company/vendor — skip blog posts, marketplaces-as-a-whole (e.g. general "Alibaba" results with no specific company), directories, or irrelevant results.
+Do not invent details not supported by the snippet. Return a JSON object with exactly this structure:
+{
+  "vendors": [
+    { "name": "string", "category": "string", "location": "string or empty", "description": "one sentence, why this matched", "sourceUrl": "string" }
+  ]
+}`;
+
+    const parsed = await callGeminiText(prompt);
+    console.log("✅ Vendor search successful");
+    res.json({ ok: true, vendors: parsed.vendors || [] });
+  } catch (error) {
+    console.error('❌ Endpoint Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🧠 Backend running on http://localhost:${PORT}`);

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVendors } from '../context/VendorsContext.jsx';
 import { trustTagClass } from '../lib/format.js';
@@ -49,6 +49,31 @@ function VendorRow({ v, onClick, onToggleFavorite }) {
   );
 }
 
+function SearchResultCard({ result, onAdd, adding, added }) {
+  return (
+    <div className="card-raised" style={{ padding: '16px 18px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+        <div>
+          <div style={{ fontSize: 14.5, fontWeight: 700 }}>{result.name}</div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{result.category || 'Uncategorized'} · {result.location || 'Location unknown'}</div>
+        </div>
+        <span className={trustTagClass('neutral')}>External source</span>
+      </div>
+      <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 10 }}>{result.description}</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        {result.sourceUrl && (
+          <a href={result.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <i className="ph ph-arrow-square-out" /> Source
+          </a>
+        )}
+        <button className="btn btn-sm" onClick={() => onAdd(result)} disabled={adding || added}>
+          {added ? <><i className="ph ph-check" /> Added</> : adding ? 'Adding…' : <><i className="ph ph-plus" /> Add to my vendors</>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function VendorDiscovery() {
   const navigate = useNavigate();
   const { vendors, loading, addVendor, toggleFavorite } = useVendors();
@@ -59,22 +84,18 @@ export default function VendorDiscovery() {
   const [pasteText, setPasteText] = useState('');
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState(null);
-  const [filters, setFilters] = useState({ category: '', location: '', maxMoq: '', label: '' });
+
+  // Live web search — no local database involved in finding these.
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+  const [results, setResults] = useState(null);
+  const [addingIndex, setAddingIndex] = useState(null);
+  const [addedUrls, setAddedUrls] = useState([]);
 
   const visible = vendors.filter(v => !v.blocked);
   const favorites = vendors.filter(v => v.favorited && !v.blocked);
   const blocked = vendors.filter(v => v.blocked);
-
-  const categories = useMemo(() => [...new Set(visible.map(v => v.category).filter(Boolean))], [visible]);
-  const locations = useMemo(() => [...new Set(visible.map(v => v.location).filter(Boolean))], [visible]);
-
-  const filteredVendors = visible.filter(v => {
-    if (filters.category && v.category !== filters.category) return false;
-    if (filters.location && v.location !== filters.location) return false;
-    if (filters.maxMoq && v.moq && v.moq > Number(filters.maxMoq)) return false;
-    if (filters.label && v.label !== filters.label) return false;
-    return true;
-  });
 
   const handleParse = async () => {
     if (!pasteText.trim()) return;
@@ -129,6 +150,47 @@ export default function VendorDiscovery() {
     }
   };
 
+  const handleSearch = async e => {
+    e.preventDefault();
+    if (!query.trim()) return;
+    setSearching(true);
+    setSearchError(null);
+    setResults(null);
+    try {
+      const res = await fetch('http://localhost:3001/api/search-vendors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      setResults(data.vendors);
+    } catch (err) {
+      setSearchError(err.message || 'Search failed.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleAddResult = async (result, index) => {
+    setAddingIndex(index);
+    try {
+      await addVendor({
+        name: result.name,
+        category: result.category,
+        location: result.location,
+        specialties: [],
+        sourceNote: result.sourceUrl,
+        label: 'External source',
+      });
+      setAddedUrls(prev => [...prev, result.sourceUrl]);
+    } catch (err) {
+      alert('Could not add vendor: ' + err.message);
+    } finally {
+      setAddingIndex(null);
+    }
+  };
+
   return (
     <>
       <div className="topbar">
@@ -152,114 +214,132 @@ export default function VendorDiscovery() {
             </div>
 
             {mode === 'import' ? (
-              <form className="card-raised" style={{ marginBottom: 24 }} onSubmit={handleAdd}>
-                <div className="card-body">
-                  <div className="form-group">
-                    <label className="form-label">Paste a link, email, or notes — AI will pre-fill the fields below</label>
-                    <textarea
-                      className="form-textarea" style={{ minHeight: 60 }}
-                      placeholder="e.g. an Alibaba listing URL, a forwarded vendor email, or a screenshot's transcribed text"
-                      value={pasteText} onChange={e => setPasteText(e.target.value)}
-                    />
-                    <button type="button" className="btn btn-sm" style={{ marginTop: 8 }} onClick={handleParse} disabled={parsing || !pasteText.trim()}>
-                      <i className="ph ph-magic-wand" /> {parsing ? 'Reading…' : 'Auto-fill with AI'}
+              <>
+                <form className="card-raised" style={{ marginBottom: 24 }} onSubmit={handleAdd}>
+                  <div className="card-body">
+                    <div className="form-group">
+                      <label className="form-label">Paste a link, email, or notes — AI will pre-fill the fields below</label>
+                      <textarea
+                        className="form-textarea" style={{ minHeight: 60 }}
+                        placeholder="e.g. an Alibaba listing URL, a forwarded vendor email, or a screenshot's transcribed text"
+                        value={pasteText} onChange={e => setPasteText(e.target.value)}
+                      />
+                      <button type="button" className="btn btn-sm" style={{ marginTop: 8 }} onClick={handleParse} disabled={parsing || !pasteText.trim()}>
+                        <i className="ph ph-magic-wand" /> {parsing ? 'Reading…' : 'Auto-fill with AI'}
+                      </button>
+                      {parseError && <div className="form-hint" style={{ color: 'var(--red)' }}>{parseError}</div>}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '18px 0', color: 'var(--ink-4)' }}>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                      <span className="section-label" style={{ marginBottom: 0 }}>or fill in manually</span>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                    </div>
+
+                    <div className="grid-3">
+                      <div className="form-group">
+                        <label className="form-label">Vendor name *</label>
+                        <input className="form-input" placeholder="e.g. Norte Textile Co." value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Category</label>
+                        <input className="form-input" placeholder="e.g. Denim" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Location</label>
+                        <input className="form-input" placeholder="e.g. Guadalajara, MX" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="grid-3">
+                      <div className="form-group">
+                        <label className="form-label">Specialties</label>
+                        <input className="form-input" placeholder="Comma-separated" value={form.specialties} onChange={e => setForm(f => ({ ...f, specialties: e.target.value }))} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">MOQ</label>
+                        <input className="form-input" type="number" placeholder="e.g. 300" value={form.moq} onChange={e => setForm(f => ({ ...f, moq: e.target.value }))} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Lead time</label>
+                        <input className="form-input" placeholder="e.g. 45 days" value={form.leadTime} onChange={e => setForm(f => ({ ...f, leadTime: e.target.value }))} />
+                      </div>
+                    </div>
+                    <button className="btn btn-primary" type="submit" disabled={saving || !form.name.trim()}>
+                      <i className="ph ph-plus" /> {saving ? 'Adding…' : 'Add vendor'}
                     </button>
-                    {parseError && <div className="form-hint" style={{ color: 'var(--red)' }}>{parseError}</div>}
                   </div>
+                </form>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '18px 0', color: 'var(--ink-4)' }}>
-                    <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                    <span className="section-label" style={{ marginBottom: 0 }}>or fill in manually</span>
-                    <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                <div className="section-label">All vendors</div>
+                {loading ? (
+                  <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-3)' }}><i className="ph ph-circle-notch" /> Loading…</div>
+                ) : visible.length ? (
+                  <div className="card" style={{ marginBottom: 24 }}>
+                    {visible.map(v => <VendorRow key={v.id} v={v} onClick={() => navigate(`/vendors/${v.id}`)} onToggleFavorite={toggleFavorite} />)}
                   </div>
+                ) : (
+                  <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5, marginBottom: 24 }}>
+                    No vendors yet — add your first one above.
+                  </div>
+                )}
 
-                  <div className="grid-3">
-                    <div className="form-group">
-                      <label className="form-label">Vendor name *</label>
-                      <input className="form-input" placeholder="e.g. Norte Textile Co." value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Category</label>
-                      <input className="form-input" placeholder="e.g. Denim" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Location</label>
-                      <input className="form-input" placeholder="e.g. Guadalajara, MX" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
-                    </div>
+                <div className="section-label">Trust labels</div>
+                <div className="card-raised">
+                  <div className="card-body" style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    {TRUST_LABELS.map(t => <span key={t.label} className={trustTagClass(t.tone)}>{t.label}</span>)}
                   </div>
-                  <div className="grid-3">
-                    <div className="form-group">
-                      <label className="form-label">Specialties</label>
-                      <input className="form-input" placeholder="Comma-separated" value={form.specialties} onChange={e => setForm(f => ({ ...f, specialties: e.target.value }))} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">MOQ</label>
-                      <input className="form-input" type="number" placeholder="e.g. 300" value={form.moq} onChange={e => setForm(f => ({ ...f, moq: e.target.value }))} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Lead time</label>
-                      <input className="form-input" placeholder="e.g. 45 days" value={form.leadTime} onChange={e => setForm(f => ({ ...f, leadTime: e.target.value }))} />
-                    </div>
-                  </div>
-                  <button className="btn btn-primary" type="submit" disabled={saving || !form.name.trim()}>
-                    <i className="ph ph-plus" /> {saving ? 'Adding…' : 'Add vendor'}
-                  </button>
                 </div>
-              </form>
+              </>
             ) : (
-              <div className="card-raised" style={{ marginBottom: 24 }}>
-                <div className="card-body">
-                  <div className="grid-3">
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Category</label>
-                      <select className="form-select" value={filters.category} onChange={e => setFilters(f => ({ ...f, category: e.target.value }))}>
-                        <option value="">Any category</option>
-                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
+              <>
+                <form className="card-raised" style={{ marginBottom: 24 }} onSubmit={handleSearch}>
+                  <div className="card-body">
+                    <div className="form-group" style={{ marginBottom: 12 }}>
+                      <label className="form-label">Describe what you're looking for</label>
+                      <input
+                        className="form-input"
+                        placeholder="e.g. Looking for sustainable organic cotton hoodie manufacturers in Portugal"
+                        value={query} onChange={e => setQuery(e.target.value)}
+                      />
+                      <div className="form-hint">Runs a real web search, then AI extracts candidate vendors from actual results — nothing here is pre-loaded or made up.</div>
                     </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Location</label>
-                      <select className="form-select" value={filters.location} onChange={e => setFilters(f => ({ ...f, location: e.target.value }))}>
-                        <option value="">Any location</option>
-                        {locations.map(l => <option key={l} value={l}>{l}</option>)}
-                      </select>
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Max MOQ</label>
-                      <input className="form-input" type="number" placeholder="e.g. 500 units" value={filters.maxMoq} onChange={e => setFilters(f => ({ ...f, maxMoq: e.target.value }))} />
-                    </div>
+                    <button className="btn btn-primary" type="submit" disabled={searching || !query.trim()}>
+                      <i className="ph ph-magnifying-glass" /> {searching ? 'Searching…' : 'Search the web'}
+                    </button>
                   </div>
-                  <div className="form-group" style={{ marginTop: 16, marginBottom: 0 }}>
-                    <label className="form-label">Trust label</label>
-                    <select className="form-select" value={filters.label} onChange={e => setFilters(f => ({ ...f, label: e.target.value }))}>
-                      <option value="">Any</option>
-                      {TRUST_LABELS.map(t => <option key={t.label} value={t.label}>{t.label}</option>)}
-                    </select>
+                </form>
+
+                {searchError && (
+                  <div className="alert" style={{ display: 'flex', gap: 10, padding: '11px 13px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', fontSize: 13, marginBottom: 20 }}>
+                    <i className="ph ph-warning" style={{ marginTop: 1 }} />
+                    {searchError}
                   </div>
-                  <div className="form-hint" style={{ marginTop: 10 }}>Public vendor search isn't connected yet — this filters vendors you've already added via Import.</div>
-                </div>
-              </div>
-            )}
+                )}
 
-            <div className="section-label">{mode === 'search' ? `${filteredVendors.length} matching vendors` : 'All vendors'}</div>
-            {loading ? (
-              <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-3)' }}><i className="ph ph-circle-notch" /> Loading…</div>
-            ) : filteredVendors.length ? (
-              <div className="card" style={{ marginBottom: 24 }}>
-                {filteredVendors.map(v => <VendorRow key={v.id} v={v} onClick={() => navigate(`/vendors/${v.id}`)} onToggleFavorite={toggleFavorite} />)}
-              </div>
-            ) : (
-              <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5, marginBottom: 24 }}>
-                {vendors.length === 0 ? 'No vendors yet — add your first one above.' : 'No vendors match those filters.'}
-              </div>
+                {results && (
+                  <>
+                    <div className="section-label">{results.length} result{results.length === 1 ? '' : 's'} — unverified, review before contacting</div>
+                    {results.length ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {results.map((r, i) => (
+                          <SearchResultCard
+                            key={i}
+                            result={r}
+                            onAdd={res => handleAddResult(res, i)}
+                            adding={addingIndex === i}
+                            added={addedUrls.includes(r.sourceUrl)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>
+                        No clear vendor matches — try a broader or more specific query.
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
             )}
-
-            <div className="section-label">Trust labels</div>
-            <div className="card-raised">
-              <div className="card-body" style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                {TRUST_LABELS.map(t => <span key={t.label} className={trustTagClass(t.tone)}>{t.label}</span>)}
-              </div>
-            </div>
           </>
         )}
 
