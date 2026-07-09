@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar.jsx';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { ProductsProvider } from './context/ProductsContext.jsx';
 import { VendorsProvider } from './context/VendorsContext.jsx';
+import { ProductionProvider } from './context/ProductionContext.jsx';
 
 import Welcome from './pages/auth/Welcome.jsx';
 import SignUp from './pages/auth/SignUp.jsx';
@@ -31,17 +32,11 @@ import ContentHub from './pages/ContentHub.jsx';
 import Settings from './pages/Settings.jsx';
 import NotificationsInbox from './pages/NotificationsInbox.jsx';
 
-// Protects routes from unauthenticated users
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   const location = useLocation();
-
-  if (loading) return null; // Or a subtle loading spinner
-  
-  if (!user) {
-    return <Navigate to="/welcome" state={{ from: location }} replace />;
-  }
-
+  if (loading) return null;
+  if (!user) return <Navigate to="/welcome" state={{ from: location }} replace />;
   return children;
 }
 
@@ -82,19 +77,21 @@ export default function App() {
     <AuthProvider>
       <ProductsProvider>
         <VendorsProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/welcome" element={<Welcome />} />
-              <Route path="/signup" element={<SignUp />} />
-              <Route path="/login" element={<LogIn />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
-              <Route path="/*" element={
-                <ProtectedRoute>
-                  <AppShell />
-                </ProtectedRoute>
-              } />
-            </Routes>
-          </BrowserRouter>
+          <ProductionProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/welcome" element={<Welcome />} />
+                <Route path="/signup" element={<SignUp />} />
+                <Route path="/login" element={<LogIn />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/*" element={
+                  <ProtectedRoute>
+                    <AppShell />
+                  </ProtectedRoute>
+                } />
+              </Routes>
+            </BrowserRouter>
+          </ProductionProvider>
         </VendorsProvider>
       </ProductsProvider>
     </AuthProvider>
