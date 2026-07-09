@@ -356,19 +356,6 @@ img { max-width: 100%; display: block; }
 .readiness-gate { position: absolute; top: -2px; width: 2px; height: 11px; background: var(--ink-4); }
 .readiness-value { font-family: var(--mono); font-size: 12.5px; font-weight: 700; min-width: 34px; text-align: right; }
 
-/* ── Empty state ──────────────────────────────────────────────────────────── */
-.empty-state { text-align: center; padding: 60px 24px; }
-.empty-state-icon {
-  width: 52px; height: 52px; border-radius: 50%; margin: 0 auto 18px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 22px; background: var(--es-bg, var(--accent-bg)); color: var(--es-color, var(--accent));
-}
-.empty-state-title { font-family: var(--serif); font-style: italic; font-size: 21px; font-weight: 500; color: var(--ink); margin-bottom: 9px; }
-.empty-state-sub { font-size: 14px; color: var(--ink-3); line-height: 1.7; max-width: 400px; margin: 0 auto; }
-
-/* ── Swatch ───────────────────────────────────────────────────────────────── */
-.swatch { width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08); }
-
 /* ── Flow stepper (per-product cross-navigation) — stitched, tag-shaped ──── */
 .flow-stepper { display: flex; align-items: center; gap: 0; overflow-x: auto; padding: 4px 2px; }
 .flow-node {
@@ -569,3 +556,42 @@ img { max-width: 100%; display: block; }
 /* ── Auth screens ─────────────────────────────────────────────────────────── */
 .auth-shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .auth-card { width: 100%; max-width: 420px; background: var(--bg-1); border: 1.5px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 40px 36px; }
+
+/* ── PRINT MEDIA QUERY FOR PDF TECH PACK EXPORT ────────────── */
+.print-only { display: none; }
+
+@media print {
+  @page { margin: 20mm; size: A4 portrait; }
+  
+  body { 
+    background: white !important; 
+    color: black !important; 
+    -webkit-print-color-adjust: exact; 
+    print-color-adjust: exact; 
+  }
+  
+  .shell > nav, .topbar, .tab-bar, .flow-stepper, .btn, .alert, .stats-row, .corner-fold, .empty-state, .photo-pin { 
+    display: none !important; 
+  }
+  
+  .main-content { overflow: visible !important; width: 100% !important; }
+  .content { padding: 0 !important; }
+  
+  .print-only { display: block !important; }
+  .no-print { display: none !important; }
+  
+  .tech-pack-print { font-family: var(--sans); color: #000; }
+  .tech-pack-print h1 { font-family: var(--serif); font-size: 28px; margin-bottom: 4px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+  .tech-pack-print h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 24px; margin-bottom: 12px; color: #333; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+
+  .tech-pack-print .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; font-size: 14px; }
+  .tech-pack-print .meta-item strong { color: #666; margin-right: 8px; text-transform: uppercase; font-size: 12px; }
+
+  .tech-pack-print table { width: 100%; border-collapse: collapse; margin-bottom: 24px; page-break-inside: auto; }
+  .tech-pack-print tr { page-break-inside: avoid; page-break-after: auto; }
+  .tech-pack-print th, .tech-pack-print td { border: 1px solid #ccc; padding: 10px 12px; text-align: left; font-size: 12px; }
+  .tech-pack-print th { background: #f5f5f5 !important; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; }
+  
+  .tech-pack-print .hero-image { max-width: 100%; max-height: 400px; object-fit: contain; border: 1px solid #eee; padding: 8px; margin-bottom: 24px; background: #fff; page-break-inside: avoid; }
+  .tech-pack-print .footer { margin-top: 40px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 10px; color: #666; text-align: center; }
+}
