@@ -14,6 +14,13 @@ const TABS = [
   { key: 'sampling', label: 'Sampling', icon: 'ph-scissors' },
 ];
 
+const DEFAULT_CHECKLIST = [
+  { id: 'c-proto', label: 'Proto sample approved', status: 'pending' },
+  { id: 'c-fit', label: 'Fit sample approved', status: 'pending' },
+  { id: 'c-sizeset', label: 'Size set approved', status: 'pending' },
+  { id: 'c-pp', label: 'Pre-production (PP) sample approved', status: 'pending' }
+];
+
 export default function TechPackDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -25,6 +32,7 @@ export default function TechPackDetail() {
   const [bom, setBom] = useState([{ id: 'bom-init', material: '', supplier: '', qtyPerUnit: '', unitCost: '' }]);
   const [measurements, setMeasurements] = useState([{ id: 'meas-init', size: 'M', chest: '', length: '', sleeve: '' }]);
   const [materialWarnings, setMaterialWarnings] = useState([]);
+  const [readinessChecklist, setReadinessChecklist] = useState(DEFAULT_CHECKLIST);
   
   const [loadingData, setLoadingData] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,6 +52,7 @@ export default function TechPackDetail() {
           if (data.bom && data.bom.length > 0) setBom(data.bom);
           if (data.measurements && data.measurements.length > 0) setMeasurements(data.measurements);
           if (data.material_warnings) setMaterialWarnings(data.material_warnings);
+          if (data.readiness_checklist && data.readiness_checklist.length > 0) setReadinessChecklist(data.readiness_checklist);
         }
       } catch (err) {
         console.error('Error fetching tech pack:', err);
@@ -58,33 +67,47 @@ export default function TechPackDetail() {
     return <div className="content"><EmptyState icon="ph-magnifying-glass" title="Tech pack not found" sub="This workspace doesn't exist yet." /></div>;
   }
 
+  // BOM Handlers
   const updateBom = (rowId, field, value) => setBom(prev => prev.map(item => item.id === rowId ? { ...item, [field]: value } : item));
   const addBomRow = () => setBom(prev => [...prev, { id: `bom-${Date.now()}`, material: '', supplier: '', qtyPerUnit: '', unitCost: '' }]);
   const removeBomRow = (rowId) => setBom(prev => prev.filter(item => item.id !== rowId));
 
+  // Measurement Handlers
   const updateMeas = (rowId, field, value) => setMeasurements(prev => prev.map(item => item.id === rowId ? { ...item, [field]: value } : item));
   const addMeasRow = () => setMeasurements(prev => [...prev, { id: `meas-${Date.now()}`, size: '', chest: '', length: '', sleeve: '' }]);
   const removeMeasRow = (rowId) => setMeasurements(prev => prev.filter(item => item.id !== rowId));
+
+  // Sampling Checklist Handlers
+  const toggleChecklistStatus = (itemId) => setReadinessChecklist(prev => prev.map(item => item.id === itemId ? { ...item, status: item.status === 'done' ? 'pending' : 'done' } : item));
+  const updateChecklistItem = (itemId, newLabel) => setReadinessChecklist(prev => prev.map(item => item.id === itemId ? { ...item, label: newLabel } : item));
+  const addChecklistItem = () => setReadinessChecklist(prev => [...prev, { id: `c-${Date.now()}`, label: '', status: 'pending' }]);
+  const removeChecklistItem = (itemId) => setReadinessChecklist(prev => prev.filter(item => item.id !== itemId));
 
   // --- Dynamic Readiness Engine ---
   const calculateReadiness = () => {
     let score = 0;
     
-    // Base 20 points for having a visual reference
-    if (imageUrl) score += 20;
+    // Base 10 points for having a visual reference
+    if (imageUrl) score += 10;
     
-    // BOM Evaluation (Up to 40 points)
+    // BOM Evaluation (Up to 30 points)
     const validBom = bom.filter(b => b.material && b.qtyPerUnit);
     if (validBom.length > 0) {
-      score += 20; // Has valid materials
-      // Bonus 20 points if all valid materials are priced (budgeted)
+      score += 15; // Has valid materials
+      // Bonus 15 points if all valid materials are priced (budgeted)
       const pricedBom = validBom.filter(b => b.unitCost);
-      if (pricedBom.length === validBom.length) score += 20;
+      if (pricedBom.length === validBom.length) score += 15;
     }
 
-    // Measurements Evaluation (Up to 40 points)
+    // Measurements Evaluation (Up to 30 points)
     const validMeas = measurements.filter(m => m.size && m.chest && m.length);
-    if (validMeas.length > 0) score += 40; // Has basic graded sizing
+    if (validMeas.length > 0) score += 30; // Has basic graded sizing
+
+    // Sampling Evaluation (Up to 30 points)
+    if (readinessChecklist.length > 0) {
+      const doneCount = readinessChecklist.filter(c => c.status === 'done').length;
+      score += Math.floor((doneCount / readinessChecklist.length) * 30);
+    }
 
     return score;
   };
@@ -101,6 +124,7 @@ export default function TechPackDetail() {
           product_id: id,
           bom,
           measurements,
+          readiness_checklist: readinessChecklist,
           updated_at: new Date().toISOString()
         }, { onConflict: 'product_id' });
 
@@ -307,7 +331,41 @@ export default function TechPackDetail() {
                 </div>
               )}
 
-              {tab === 'sampling' && <EmptyState icon="ph-scissors" title="No samples logged" color="var(--c-materials)" sub="Track proto → fit → revised → size set → pre-production here." />}
+              {tab === 'sampling' && (
+                <div className="card">
+                  <div className="card-header">
+                    <span className="card-title">Sampling & Validation</span>
+                  </div>
+                  <div className="card-body" style={{ padding: 0 }}>
+                    {readinessChecklist.map((item) => (
+                      <div key={item.id} className="list-row" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <button 
+                          onClick={() => toggleChecklistStatus(item.id)}
+                          style={{
+                            width: 22, height: 22, borderRadius: 6, border: `1.5px solid ${item.status === 'done' ? 'var(--green)' : 'var(--border-2)'}`,
+                            background: item.status === 'done' ? 'var(--green)' : 'var(--bg-1)',
+                            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s'
+                          }}
+                        >
+                          {item.status === 'done' && <i className="ph ph-check" style={{ fontSize: 14 }} />}
+                        </button>
+                        <input 
+                          className="form-input" 
+                          style={{ flex: 1, padding: '8px 12px', fontSize: 13.5, background: 'transparent', border: 'none', boxShadow: 'none', textDecoration: item.status === 'done' ? 'line-through' : 'none', color: item.status === 'done' ? 'var(--ink-3)' : 'var(--ink)' }}
+                          value={item.label} 
+                          onChange={e => updateChecklistItem(item.id, e.target.value)} 
+                          placeholder="Checklist item description"
+                        />
+                        <button onClick={() => removeChecklistItem(item.id)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 18, opacity: 0.6 }}>×</button>
+                      </div>
+                    ))}
+                    <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+                      <button className="btn btn-sm" onClick={addChecklistItem}><i className="ph ph-plus" /> Add Step</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -372,6 +430,30 @@ export default function TechPackDetail() {
             ))}
           </tbody>
         </table>
+
+        {readinessChecklist.length > 0 && (
+          <>
+            <h2>4. Sampling & Validation Checklist</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: '20%' }}>Status</th>
+                  <th>Requirement</th>
+                </tr>
+              </thead>
+              <tbody>
+                {readinessChecklist.map((c, i) => (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 'bold', color: c.status === 'done' ? '#228B22' : '#666' }}>
+                      {c.status === 'done' ? '✓ APPROVED' : 'PENDING'}
+                    </td>
+                    <td>{c.label}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
 
         <div className="footer">
           Generated via Grainline Production OS • {new Date().toLocaleDateString()}

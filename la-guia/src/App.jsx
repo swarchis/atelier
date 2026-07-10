@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { ProductsProvider } from './context/ProductsContext.jsx';
 import { VendorsProvider } from './context/VendorsContext.jsx';
 import { ProductionProvider } from './context/ProductionContext.jsx';
+import { NotificationsProvider } from './context/NotificationsContext.jsx';
 
 import Welcome from './pages/auth/Welcome.jsx';
 import SignUp from './pages/auth/SignUp.jsx';
@@ -78,19 +79,21 @@ export default function App() {
       <ProductsProvider>
         <VendorsProvider>
           <ProductionProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/welcome" element={<Welcome />} />
-                <Route path="/signup" element={<SignUp />} />
-                <Route path="/login" element={<LogIn />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
-                <Route path="/*" element={
-                  <ProtectedRoute>
-                    <AppShell />
-                  </ProtectedRoute>
-                } />
-              </Routes>
-            </BrowserRouter>
+            <NotificationsProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/welcome" element={<Welcome />} />
+                  <Route path="/signup" element={<SignUp />} />
+                  <Route path="/login" element={<LogIn />} />
+                  <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route path="/*" element={
+                    <ProtectedRoute>
+                      <AppShell />
+                    </ProtectedRoute>
+                  } />
+                </Routes>
+              </BrowserRouter>
+            </NotificationsProvider>
           </ProductionProvider>
         </VendorsProvider>
       </ProductsProvider>

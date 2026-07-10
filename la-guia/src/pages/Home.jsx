@@ -2,9 +2,10 @@ import React, { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, LayoutGroup } from 'framer-motion';
-import { STAGES, notifications } from '../data/mockData.js';
+import { STAGES } from '../data/mockData.js';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useProduction } from '../context/ProductionContext.jsx';
+import { useNotifications } from '../context/NotificationsContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { riskTagClass, readinessColor, currency, stageLink, swatchGradient, tiltForId, SECTION_COLOR } from '../lib/format.js';
 import { PinnedPhoto, PhotoPanel, WaxSeal, DriedFlower, Thumbtack } from '../components/decor.jsx';
@@ -26,10 +27,6 @@ function stageColor(stageKey) {
 const MENU_WIDTH = 208;
 const MENU_HEIGHT_ESTIMATE = 260;
 
-// Portaled to <body> with position:fixed — piece cards sit inside elements that
-// have a CSS transform (for the hand-tilt), and a transform creates a new
-// stacking context, which traps a nested z-index and lets later sections paint
-// over it. Escaping to a body-level portal sidesteps that entirely.
 function MoveMenu({ productId, current, anchorRect, onMove, onClose }) {
   const spaceBelow = window.innerHeight - anchorRect.bottom;
   const openUpward = spaceBelow < MENU_HEIGHT_ESTIMATE && anchorRect.top > MENU_HEIGHT_ESTIMATE;
@@ -117,6 +114,7 @@ export default function Home() {
   const { user } = useAuth();
   const { products, collections, moveProduct } = useProducts();
   const { orders: productionOrders } = useProduction();
+  const { notifications } = useNotifications();
   const [draggingId, setDraggingId] = useState(null);
   const [overStage, setOverStage] = useState(null);
 
@@ -131,8 +129,6 @@ export default function Home() {
   const totalBudget = products.reduce((s, p) => s + p.budget, 0);
   const gateFlags = products.filter(p => p.readiness < 80 && p.stage === 'sourcing').length;
 
-  // The most active in-motion piece — featured in the hero, mirroring a "spotlight"
-  // product panel. Falls back to the first product if everything is still concept-stage.
   const featured = products.find(p => !['concept', 'launched'].includes(p.stage)) || products[0];
   const featuredStageIdx = featured ? STAGES.findIndex(s => s.key === featured.stage) : -1;
   const nextStage = featuredStageIdx >= 0 && featuredStageIdx < STAGES.length - 1 ? STAGES[featuredStageIdx + 1] : null;
@@ -186,8 +182,6 @@ export default function Home() {
           <div style={{ fontSize: 13.5, color: 'var(--ink-3)', marginTop: 6 }}>Here's what's happening in your atelier.</div>
         </div>
 
-        {/* ── Hero spotlight — pinned photographs on a paper background, not
-             flush bordered tiles ────────────────────────────────────────── */}
         {featured && (
           <div className="card-raised enter" style={{ marginBottom: 24, display: 'grid', gridTemplateColumns: '0.85fr 1.3fr 1fr', gap: 26, padding: '26px 28px', overflow: 'visible', position: 'relative', alignItems: 'center' }}>
             <PinnedPhoto
@@ -257,7 +251,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ── Collections / Quick actions / Notes ────────────────────────── */}
         <div className="enter enter-2" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 0.9fr', gap: 18, marginBottom: 30, alignItems: 'stretch' }}>
           <div className="card-raised" style={{ padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
@@ -299,7 +292,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ── Production flow / status ────────────────────────────────────── */}
         <div className="enter enter-3" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 18, marginBottom: 30, alignItems: 'stretch' }}>
           <div className="card-raised" style={{ padding: 22 }}>
             <div className="card-title" style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11, marginBottom: 4 }}>Production flow</div>
@@ -349,18 +341,19 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ── Recent activity / Upcoming / flat-lay ──────────────────────── */}
         <div className="enter enter-4" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 34, alignItems: 'stretch' }}>
           <div className="card-raised" style={{ padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
               <span className="card-title" style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11 }}>Recent activity</span>
             </div>
-            {notifications.slice(0, 4).map(n => (
+            {notifications.length === 0 ? (
+               <div style={{ fontSize: 12.5, color: 'var(--ink-4)', fontStyle: 'italic', padding: '14px 0' }}>No recent activity.</div>
+            ) : notifications.slice(0, 4).map(n => (
               <div key={n.id} style={{ display: 'flex', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border)' }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: NOTIFICATION_DOT[n.type] || 'var(--ink-4)', marginTop: 5, flexShrink: 0 }} />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-2)' }}>{n.title}</div>
-                  <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{n.time}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.body}</div>
                 </div>
               </div>
             ))}

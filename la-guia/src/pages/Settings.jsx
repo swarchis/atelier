@@ -13,17 +13,21 @@ const TABS = [
 
 const RISK_LEVELS = ['Conservative', 'Balanced', 'Aggressive'];
 
-function Toggle({ defaultOn = true }) {
-  const [on, setOn] = useState(defaultOn);
+function Toggle({ on, onToggle }) {
   return (
     <button
-      onClick={() => setOn(o => !o)}
+      onClick={onToggle}
       style={{
         width: 38, height: 22, borderRadius: 99, border: 'none', cursor: 'pointer', position: 'relative',
         background: on ? 'var(--accent)' : 'var(--bg-3)', transition: 'background 0.15s', flexShrink: 0,
       }}
     >
-      <span style={{ position: 'absolute', top: 3, left: on ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
+      <span style={{ 
+        position: 'absolute', top: 3, left: on ? 19 : 3, 
+        width: 16, height: 16, borderRadius: '50%', 
+        background: '#fff', transition: 'left 0.15s', 
+        boxShadow: '0 1px 3px rgba(0,0,0,0.25)' 
+      }} />
     </button>
   );
 }
@@ -35,7 +39,7 @@ export default function Settings() {
   
   const [saving, setSaving] = useState(false);
   
-  // Form State
+  // Unified Form State for all database columns
   const [form, setForm] = useState({
     name: '',
     target_customer: '',
@@ -43,10 +47,16 @@ export default function Settings() {
     budget_philosophy: '',
     sustainability: '',
     manufacturer_preferences: '',
-    global_risk: 'Balanced'
+    global_risk: 'Balanced',
+    notification_settings: {
+      readiness: true,
+      quotes: true,
+      materials: true,
+      timeline: true
+    }
   });
 
-  // Sync state when activeBrand loads
+  // Sync state when activeBrand loads or changes
   useEffect(() => {
     if (activeBrand) {
       setForm({
@@ -56,18 +66,30 @@ export default function Settings() {
         budget_philosophy: activeBrand.budget_philosophy || '',
         sustainability: activeBrand.sustainability || '',
         manufacturer_preferences: activeBrand.manufacturer_preferences || '',
-        global_risk: activeBrand.global_risk || 'Balanced'
+        global_risk: activeBrand.global_risk || 'Balanced',
+        notification_settings: activeBrand.notification_settings || {
+          readiness: true,
+          quotes: true,
+          materials: true,
+          timeline: true
+        }
       });
     }
   }, [activeBrand]);
 
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
+  // Helper to toggle specific notification keys
+  const toggleNotification = (key) => {
+    const nextSettings = { ...form.notification_settings, [key]: !form.notification_settings[key] };
+    f('notification_settings', nextSettings);
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
       await updateBrand(form);
-      alert("Settings saved successfully!");
+      alert("✓ Brand settings successfully updated.");
     } catch (err) {
       alert("Failed to save settings: " + err.message);
     } finally {
@@ -75,7 +97,11 @@ export default function Settings() {
     }
   };
 
-  if (!activeBrand) return <div className="content" style={{ textAlign: 'center', padding: 40 }}><i className="ph ph-spinner ph-spin" /></div>;
+  if (!activeBrand) return (
+    <div className="content" style={{ textAlign: 'center', padding: 40 }}>
+      <i className="ph ph-spinner ph-spin" style={{ fontSize: 24 }} />
+    </div>
+  );
 
   return (
     <>
@@ -88,7 +114,7 @@ export default function Settings() {
         </div>
         <div className="topbar-right">
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-            <i className="ph ph-check" /> {saving ? 'Saving...' : 'Save'}
+            <i className="ph ph-check" /> {saving ? 'Saving...' : 'Save All Changes'}
           </button>
         </div>
       </div>
@@ -158,20 +184,33 @@ export default function Settings() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div>
                   <div style={{ fontSize: 18, fontWeight: 600 }}>Founder Trial</div>
-                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>14 days remaining</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>{Math.max(0, 14 - Math.floor((new Date() - new Date(user?.created_at)) / (1000 * 60 * 60 * 24)))} days remaining</div>
                 </div>
                 <span className="tag tag-accent">Trial</span>
               </div>
-              <button className="btn btn-primary">Upgrade plan</button>
+              <button className="btn btn-primary" disabled style={{ opacity: 0.6, cursor: 'not-allowed' }}>Billing coming soon</button>
             </div>
           </div>
         )}
 
         {tab === 'notifications' && (
           <div className="card" style={{ maxWidth: 520 }}>
-            {['Readiness score changes', 'Vendor quote received', 'Material price alerts', 'Timeline conflicts'].map(label => (
-              <div className="list-row" key={label}><span style={{ fontSize: 13.5 }}>{label}</span><Toggle /></div>
-            ))}
+            <div className="list-row">
+              <span style={{ fontSize: 13.5 }}>Readiness score changes</span>
+              <Toggle on={form.notification_settings.readiness} onToggle={() => toggleNotification('readiness')} />
+            </div>
+            <div className="list-row">
+              <span style={{ fontSize: 13.5 }}>Vendor quote received</span>
+              <Toggle on={form.notification_settings.quotes} onToggle={() => toggleNotification('quotes')} />
+            </div>
+            <div className="list-row">
+              <span style={{ fontSize: 13.5 }}>Material price alerts</span>
+              <Toggle on={form.notification_settings.materials} onToggle={() => toggleNotification('materials')} />
+            </div>
+            <div className="list-row">
+              <span style={{ fontSize: 13.5 }}>Timeline conflicts</span>
+              <Toggle on={form.notification_settings.timeline} onToggle={() => toggleNotification('timeline')} />
+            </div>
           </div>
         )}
 

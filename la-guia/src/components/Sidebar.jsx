@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { brands, activeBrandId, notifications } from '../data/mockData.js';
+import { brands } from '../data/mockData.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useProducts } from '../context/ProductsContext.jsx';
+import { useNotifications } from '../context/NotificationsContext.jsx';
 import { WaxSeal } from './decor.jsx';
 
-// Grouped to mirror the atelier reference (Navigation / Production / Analytics / Tools),
-// but only real routes appear here — the reference's Sampling/Final Check/Calendar/Tasks/
-// Messages/Files don't map to anything this app actually does, so they're left out rather
-// than added as dead links.
 const NAV_GROUPS = [
   { label: 'Navigation', items: [
     { path: '/', icon: 'ph-house', label: 'Home', color: 'var(--c-home)' },
@@ -53,11 +51,14 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const [brandOpen, setBrandOpen] = useState(false);
   const { user, logOut } = useAuth();
-  const [activeBrand, setActiveBrand] = useState(brands.find(b => b.id === activeBrandId));
+  const { activeBrand } = useProducts();
+  const { notifications } = useNotifications();
+  
   const [collapsed, setCollapsed] = useState(() => {
     try { return JSON.parse(localStorage.getItem('grainline_nav_collapsed')) || []; } catch { return []; }
   });
-  const unread = notifications.filter(n => !n.read).length;
+
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   const displayName = user?.email
     ? user.email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
@@ -69,6 +70,8 @@ export default function Sidebar() {
     try { localStorage.setItem('grainline_nav_collapsed', JSON.stringify(next)); } catch {}
     return next;
   });
+
+  if (!activeBrand) return null;
 
   return (
     <nav
@@ -82,7 +85,6 @@ export default function Sidebar() {
         height: '100vh', position: 'sticky', top: 0, overflowY: 'auto', zIndex: 5,
       }}
     >
-      {/* Wordmark + bell */}
       <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid var(--sb-border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -97,11 +99,10 @@ export default function Sidebar() {
         </div>
         <button className="bell-btn" onClick={() => navigate('/notifications')} title="Notifications">
           <i className="ph ph-bell" style={{ fontSize: 14 }} />
-          {unread > 0 && <span className="bell-dot" />}
+          {unreadCount > 0 && <span className="bell-dot" />}
         </button>
       </div>
 
-      {/* Brand switcher */}
       <div style={{ padding: '15px 18px', borderBottom: '1px solid var(--sb-border)', position: 'relative' }}>
         <div
           onClick={() => setBrandOpen(o => !o)}
@@ -119,7 +120,7 @@ export default function Sidebar() {
           <i className="ph ph-caret-up-down" style={{ fontSize: 13, color: 'var(--sb-ink-3)' }} />
         </div>
         <div style={{ marginTop: 10 }}>
-          <span className="tag" style={{ background: 'var(--sb-hover)', borderColor: 'var(--sb-border)', color: 'var(--sb-accent)' }}>{activeBrand.globalRisk} · default risk</span>
+          <span className="tag" style={{ background: 'var(--sb-hover)', borderColor: 'var(--sb-border)', color: 'var(--sb-accent)' }}>{activeBrand.global_risk || 'Balanced'} · default risk</span>
         </div>
 
         {brandOpen && (
@@ -128,7 +129,7 @@ export default function Sidebar() {
               <div
                 key={b.id}
                 className="brand-switch-item"
-                onClick={() => { setActiveBrand(b); setBrandOpen(false); }}
+                onClick={() => { setBrandOpen(false); }}
               >
                 <span style={{ fontWeight: b.id === activeBrand.id ? 600 : 400 }}>{b.name}</span>
                 {b.id === activeBrand.id && <i className="ph ph-check" style={{ color: 'var(--accent)' }} />}
@@ -141,7 +142,6 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Nav */}
       <div style={{ flex: 1, padding: '4px 0 8px' }}>
         {NAV_GROUPS.map(group => {
           const isCollapsed = collapsed.includes(group.label);
@@ -173,7 +173,6 @@ export default function Sidebar() {
         })}
       </div>
 
-      {/* Footer */}
       <div style={{ padding: '10px 12px 14px', borderTop: '1px solid var(--sb-border)' }}>
         <NavLink to="/settings" className="nav-item" style={({ isActive }) => ({
           color: isActive ? 'var(--sb-ink)' : 'var(--sb-ink-2)',

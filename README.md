@@ -1,5 +1,4 @@
 ### 1. `README.md`
-**Copy and save this to the root of your project.**
 
 ```markdown
 # Grainline — Production OS for Independent Clothing Brands
@@ -16,9 +15,9 @@ Takes a founder from a rough sketch to a manufactured, sellable product — desi
 grainline/
 ├── la-guia/                 React + Vite frontend
 │   ├── src/
-│   │   ├── components/      Sidebar, Photopea embed, garment silhouettes, charts, shared UI
-│   │   ├── context/         AuthContext, ProductsContext, VendorsContext — all Supabase-backed
-│   │   ├── lib/              Supabase client, formatters
+│   │   ├── components/      Sidebar, Photopea embed, garment silhouettes, shared UI
+│   │   ├── context/         Auth, Products, Vendors, Production, Notifications (Supabase-backed)
+│   │   ├── lib/             Supabase client, formatters
 │   │   └── pages/            One file per route
 │   ├── .env.local           VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (not committed)
 │   └── package.json
@@ -30,7 +29,7 @@ grainline/
     └── migrations/           SQL Schema for your Supabase project
 ```
 
-**The split is deliberate:** the frontend talks to Supabase *directly* for all data (products, designs, vendors, quotes), protected by Row Level Security — no backend round-trip needed for CRUD. The Express backend (`api/`) exists **only** for calls that need a secret key that can't live in browser code (Gemini, Tavily).
+**The split is deliberate:** the frontend talks to Supabase *directly* for all data (products, designs, vendors, quotes, etc.), protected by Row Level Security — no backend round-trip needed for CRUD. The Express backend (`api/`) exists **only** for calls that need a secret key that can't live in browser code (Gemini, Tavily).
 
 **Design canvas:** the Design Studio embeds [Photopea](https://www.photopea.com) via `postMessage`. Vendor web search uses Tavily feeding real results to Gemini for structuring.
 
@@ -41,10 +40,10 @@ grainline/
 The frontend was scaffolded with static mock data first, then converted page-by-page to real Supabase data. 
 
 **Real (Supabase-backed):**
-Auth · Brands · Products · Designs · Tech Packs · Collections · Materials · Vendors · Quotes · Production Orders (Creation & List view) · Readiness Review
+Auth · Brands · Products · Designs · Tech Packs (BOM, Measurements, Sampling Checklist) · Collections · Materials (Library & Usage Analysis) · Vendors · Quotes · Production Orders (Detail, Creation & List view) · Notifications · Settings
 
 **Still static mock data** (`la-guia/src/data/mockData.js`):
-`ProductionOrderDetail.jsx` (Needs refactor) · `SalesDashboard.jsx` · `ContentHub.jsx` · `NotificationsInbox.jsx`
+`SalesDashboard.jsx` · `ContentHub.jsx`
 
 ---
 
@@ -52,7 +51,7 @@ Auth · Brands · Products · Designs · Tech Packs · Collections · Materials 
 
 ### 1. Supabase project
 You need access to your Supabase project. Run these in the SQL Editor in order:
-1. `supabase/migrations/001_initial_schema.sql` (Initial core tables)
+1. `supabase/migrations/001_initial_schema.sql` (Initial core tables + notifications)
 2. `supabase/migrations/002_vendors_and_quotes.sql`
 3. `supabase/migrations/003_vendor_enhancements.sql`
 
@@ -94,9 +93,9 @@ Open **http://localhost:5173**. Both servers must be running.
 
 ## Known gaps / next up
 
-- **Task 1.2:** Refactor `ProductionOrderDetail.jsx` to remove `mockData.js`.
 - **Task 2.1:** Implement backend AI Text-to-SVG logic for silhouette generation.
 - **Phase 3:** Replace Sales and Content dashboards with real Shopify/Social integrations.
+- **Task 4.1:** Inventory risk math engine based on sales velocity and brand risk profile.
 
 ## Gotchas
 

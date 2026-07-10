@@ -62,8 +62,22 @@ export function ProductionProvider({ children }) {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, stage } : o));
   };
 
+  // Generic update function to handle things like checking off checklist items
+  const updateOrder = async (id, updates) => {
+    const { data, error } = await supabase
+      .from('production_orders')
+      .update(updates)
+      .eq('id', id)
+      .select('*, products(name), vendors(name)')
+      .single();
+
+    if (error) throw error;
+    setOrders(prev => prev.map(o => o.id === id ? data : o));
+    return data;
+  };
+
   return (
-    <ProductionContext.Provider value={{ orders, loading, createOrder, updateOrderStage, refresh: loadOrders }}>
+    <ProductionContext.Provider value={{ orders, loading, createOrder, updateOrderStage, updateOrder, refresh: loadOrders }}>
       {children}
     </ProductionContext.Provider>
   );

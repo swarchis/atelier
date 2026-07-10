@@ -1,5 +1,5 @@
 -- GRAINLINE INITIAL SCHEMA
--- Transcribed from Dashboard Visualizer
+-- Transcribed from Dashboard Visualizer + Recent Feature Updates
 
 -- 1. BRANDS
 CREATE TABLE IF NOT EXISTS public.brands (
@@ -12,7 +12,13 @@ CREATE TABLE IF NOT EXISTS public.brands (
     quality_tier TEXT,
     budget_philosophy TEXT,
     sustainability TEXT,
-    manufacturer_preferences TEXT
+    manufacturer_preferences TEXT,
+    notification_settings JSONB DEFAULT '{
+      "readiness": true,
+      "quotes": true,
+      "materials": true,
+      "timeline": true
+    }'::jsonb
 );
 
 -- 2. COLLECTIONS
@@ -121,4 +127,33 @@ CREATE TABLE IF NOT EXISTS public.materials (
     warning TEXT,
     handling_notes TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 10. NOTIFICATIONS
+CREATE TABLE IF NOT EXISTS public.notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    brand_id UUID NOT NULL REFERENCES public.brands(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT,
+    type TEXT DEFAULT 'info', -- 'success', 'warning', 'info'
+    read BOOLEAN DEFAULT false,
+    link TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own brand notifications" 
+ON public.notifications FOR SELECT USING (
+  brand_id IN (SELECT id FROM public.brands WHERE user_id = auth.uid())
+);
+
+CREATE POLICY "Users can update their own brand notifications" 
+ON public.notifications FOR UPDATE USING (
+  brand_id IN (SELECT id FROM public.brands WHERE user_id = auth.uid())
+);
+
+CREATE POLICY "Users can insert their own brand notifications" 
+ON public.notifications FOR INSERT WITH CHECK (
+  brand_id IN (SELECT id FROM public.brands WHERE user_id = auth.uid())
 );
