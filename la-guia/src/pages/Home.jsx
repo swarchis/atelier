@@ -16,6 +16,7 @@ import ProjectHealth from '../components/dashboard/ProjectHealth.jsx';
 import FavoriteProjects from '../components/dashboard/FavoriteProjects.jsx';
 import CalendarTimeline from '../components/dashboard/CalendarTimeline.jsx';
 import StickyNotes from '../components/dashboard/StickyNotes.jsx';
+import SuggestionInbox from '../components/dashboard/SuggestionInbox.jsx';
 
 const QUICK_ACTIONS = [
   { label: 'New Product', desc: 'Start from a sketch or upload', icon: 'ph-plus-circle', color: 'var(--c-design)', path: '/design' },
@@ -231,12 +232,8 @@ export default function Home() {
                 View Product <i className="ph ph-arrow-right" />
               </button>
             </div>
-            <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 18, alignItems: 'center' }}>
-              <PinnedPhoto variant="sketch" tone="ink" aspect="16 / 11" label="Working sketch" icon="ph-pencil-simple-line" tilt={1.5} pinColor="var(--c-design)" wrapperStyle={{ width: '92%' }} />
-              <div style={{ display: 'flex', gap: 14 }}>
-                <PinnedPhoto variant="weave" tone={SWATCH_TONES[(products.indexOf(featured) + 1) % SWATCH_TONES.length]} aspect="1 / 1" tilt={-3} pinColor="var(--c-vendors)" wrapperStyle={{ width: 82 }} />
-                <PinnedPhoto variant="fabric" tone={SWATCH_TONES[(products.indexOf(featured) + 2) % SWATCH_TONES.length]} aspect="1 / 1" tilt={2.5} pinColor="var(--sage)" wrapperStyle={{ width: 82 }} />
-              </div>
+            <div style={{ position: 'relative' }}>
+              <StickyNotes />
               <div style={{ position: 'absolute', bottom: -8, right: 4 }}>
                 <WaxSeal initials="AS" size={48} />
               </div>
@@ -308,7 +305,7 @@ export default function Home() {
             </div>
           </div>
 
-          <StickyNotes />
+          <SuggestionInbox />
         </div>
 
         <div className="enter enter-3" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 18, marginBottom: 30, alignItems: 'stretch' }}>

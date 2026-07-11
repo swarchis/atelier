@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase.js';
 import { useProducts } from '../../context/ProductsContext.jsx';
+import { Thumbtack } from '../decor.jsx';
 
-const PAPER = '#fdf8ee';
+const PAPER = 'var(--bg-1)';
 const DEFAULT_NOTE = (slot) => ({ slot, mode: 'text', text_content: '', drawing_data: null });
 
 // A minimal freehand pencil tool — draws directly on a canvas and reports
@@ -16,7 +17,7 @@ function DrawCanvas({ value, onChange }) {
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = PAPER;
+    ctx.fillStyle = '#fdf8ee';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     if (value) {
       const img = new Image();
@@ -55,27 +56,52 @@ function DrawCanvas({ value, onChange }) {
     drawing.current = false;
     onChange(canvasRef.current.toDataURL('image/png'));
   };
-  const clear = () => {
+  const clear = (e) => {
+    e.stopPropagation();
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = PAPER;
+    ctx.fillStyle = '#fdf8ee';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     onChange(canvas.toDataURL('image/png'));
   };
 
   return (
-    <div>
+    <div style={{ position: 'absolute', inset: 0 }}>
       <canvas
-        ref={canvasRef} width={300} height={110}
-        style={{ width: '100%', height: 110, touchAction: 'none', borderRadius: 6, cursor: 'crosshair', border: '1px solid var(--border-2)', display: 'block' }}
+        ref={canvasRef} width={300} height={200}
+        style={{ width: '100%', height: '100%', touchAction: 'none', cursor: 'crosshair', display: 'block' }}
         onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
         onTouchStart={start} onTouchMove={move} onTouchEnd={end}
       />
-      <button className="btn btn-sm" style={{ marginTop: 6, padding: '3px 9px', fontSize: 11 }} onClick={clear}>Clear</button>
+      <button
+        onClick={clear}
+        style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(20,17,12,0.6)', color: '#fff', border: 'none', borderRadius: 5, padding: '2px 8px', fontSize: 10, cursor: 'pointer' }}
+      >
+        Clear
+      </button>
     </div>
   );
 }
 
+function ModeToggle({ mode, onSetMode }) {
+  return (
+    <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 3, zIndex: 2 }}>
+      <button
+        title="Type" onClick={e => { e.stopPropagation(); onSetMode('text'); }}
+        style={{ width: 20, height: 20, borderRadius: 5, border: 'none', background: mode === 'text' ? 'rgba(20,17,12,0.75)' : 'rgba(20,17,12,0.35)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}
+      ><i className="ph ph-text-t" style={{ fontSize: 10 }} /></button>
+      <button
+        title="Draw" onClick={e => { e.stopPropagation(); onSetMode('draw'); }}
+        style={{ width: 20, height: 20, borderRadius: 5, border: 'none', background: mode === 'draw' ? 'rgba(20,17,12,0.75)' : 'rgba(20,17,12,0.35)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}
+      ><i className="ph ph-pencil-simple" style={{ fontSize: 10 }} /></button>
+    </div>
+  );
+}
+
+// Styled to match the hero's "pinned photo" motif (a Polaroid-like curled,
+// tilted, thumbtacked card) since this replaces what was a purely decorative
+// "Working sketch" placeholder in that exact spot — same physical shape,
+// now an actual working sketch/notes surface with three swappable slots.
 export default function StickyNotes() {
   const { activeBrand } = useProducts();
   const [notes, setNotes] = useState([DEFAULT_NOTE(0), DEFAULT_NOTE(1), DEFAULT_NOTE(2)]);
@@ -123,55 +149,52 @@ export default function StickyNotes() {
 
   const active = notes.find(n => n.slot === activeSlot) || DEFAULT_NOTE(activeSlot);
   const storage = notes.filter(n => n.slot !== activeSlot);
+  const smallTilt = [-3, 2.5];
+  const smallPin = ['var(--c-vendors)', 'var(--sage)'];
+
+  if (!loaded) return <div style={{ width: '92%' }} />;
 
   return (
-    <div className="card-raised" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span className="card-title" style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11 }}>Notes from the atelier</span>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button
-            title="Type" onClick={() => updateNote(active.slot, { mode: 'text' }, false)}
-            style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border-2)', background: active.mode === 'text' ? 'var(--bg-3)' : 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-2)' }}
-          ><i className="ph ph-text-t" style={{ fontSize: 12 }} /></button>
-          <button
-            title="Draw" onClick={() => updateNote(active.slot, { mode: 'draw' }, false)}
-            style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border-2)', background: active.mode === 'draw' ? 'var(--bg-3)' : 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-2)' }}
-          ><i className="ph ph-pencil-simple" style={{ fontSize: 12 }} /></button>
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 18, alignItems: 'center' }}>
+      <div className="photo-curl" style={{ '--curl-tilt': '1.5deg', width: '92%' }}>
+        <div className="photo-pin"><Thumbtack size={15} color="var(--c-design)" /></div>
+        <div className="photo-curl-inner" style={{ aspectRatio: '16 / 11', position: 'relative', background: PAPER }}>
+          <ModeToggle mode={active.mode} onSetMode={m => updateNote(active.slot, { mode: m }, false)} />
+          {active.mode === 'text' ? (
+            <textarea
+              value={active.text_content || ''}
+              onChange={e => updateNote(active.slot, { text_content: e.target.value }, true)}
+              placeholder="Working sketch — jot something down…"
+              style={{
+                position: 'absolute', inset: 0, resize: 'none', border: 'none', outline: 'none', background: 'transparent',
+                fontFamily: 'var(--hand)', fontSize: 16, color: 'var(--ink-2)', lineHeight: 1.4, padding: '12px 14px',
+              }}
+            />
+          ) : (
+            <DrawCanvas value={active.drawing_data} onChange={dataUrl => updateNote(active.slot, { drawing_data: dataUrl }, false)} />
+          )}
         </div>
       </div>
 
-      {!loaded ? (
-        <div style={{ flex: 1, minHeight: 90 }} />
-      ) : active.mode === 'text' ? (
-        <textarea
-          value={active.text_content || ''}
-          onChange={e => updateNote(active.slot, { text_content: e.target.value }, true)}
-          placeholder="Jot something down…"
-          style={{
-            flex: 1, minHeight: 90, resize: 'none', border: 'none', outline: 'none', background: 'transparent',
-            fontFamily: 'var(--hand)', fontSize: 17, color: 'var(--ink-2)', lineHeight: 1.4, width: '100%',
-          }}
-        />
-      ) : (
-        <DrawCanvas value={active.drawing_data} onChange={dataUrl => updateNote(active.slot, { drawing_data: dataUrl }, false)} />
-      )}
-
-      <div style={{ display: 'flex', gap: 8 }}>
-        {storage.map(n => (
+      <div style={{ display: 'flex', gap: 14 }}>
+        {storage.map((n, i) => (
           <div
             key={n.slot}
-            onClick={() => swapTo(n.slot)}
+            className="photo-curl"
             title="Swap to this note"
-            className="card-hover"
-            style={{ flex: 1, height: 50, borderRadius: 8, border: '1px solid var(--border-2)', cursor: 'pointer', padding: '5px 7px', overflow: 'hidden', background: 'var(--bg-2)' }}
+            onClick={() => swapTo(n.slot)}
+            style={{ '--curl-tilt': `${smallTilt[i]}deg`, width: 82, cursor: 'pointer' }}
           >
-            {n.mode === 'draw' && n.drawing_data ? (
-              <img src={n.drawing_data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 4 }} />
-            ) : (
-              <div style={{ fontFamily: 'var(--hand)', fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
-                {n.text_content?.trim() || 'Empty note'}
-              </div>
-            )}
+            <div className="photo-pin"><Thumbtack size={12} color={smallPin[i]} /></div>
+            <div className="photo-curl-inner" style={{ aspectRatio: '1 / 1', background: PAPER, position: 'relative', overflow: 'hidden' }}>
+              {n.mode === 'draw' && n.drawing_data ? (
+                <img src={n.drawing_data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <div style={{ position: 'absolute', inset: 0, padding: '6px 7px', fontFamily: 'var(--hand)', fontSize: 10.5, color: 'var(--ink-3)', lineHeight: 1.25, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
+                  {n.text_content?.trim() || 'Empty'}
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>
