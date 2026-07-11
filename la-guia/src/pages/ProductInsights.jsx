@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { currency, percent, riskTagClass } from '../lib/format.js';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useSales } from '../context/SalesContext.jsx';
+import { useProduction } from '../context/ProductionContext.jsx';
 import { supabase } from '../lib/supabase.js';
 import FlowStepper from '../components/FlowStepper.jsx';
 import TabBar from '../components/TabBar.jsx';
@@ -17,6 +18,7 @@ export default function ProductInsights() {
   const { id } = useParams();
   const { products, updateProduct } = useProducts();
   const { connection, productSales } = useSales();
+  const { orders } = useProduction();
   const [tab, setTab] = useState('financial');
   
   const product = products.find(p => p.id === id);
@@ -92,6 +94,37 @@ export default function ProductInsights() {
   const totalSold = thisProductSales.reduce((s, m) => s + m.orders_count, 0);
   const totalRev = thisProductSales.reduce((s, m) => s + m.revenue, 0);
   const breakEvenProgress = breakEvenUnits > 0 ? Math.min((totalSold / breakEvenUnits) * 100, 100) : 0;
+
+  // --- INVENTORY RISK ENGINE MATH ---
+  const productOrders = orders.filter(o => o.product_id === id && o.stage === 'Delivered');
+  const totalProduced = productOrders.reduce((sum, o) => sum + (o.units || 0), 0);
+  const currentStock = Math.max(0, totalProduced - totalSold);
+
+  const activeMonths = thisProductSales.length || 1;
+  const dailyVelocity = totalSold / (activeMonths * 30);
+
+  const latestOrder = productOrders[0];
+  const rawLeadTime = latestOrder?.vendors?.lead_time || '45'; 
+  const leadTimeDays = parseInt(rawLeadTime.replace(/\D/g, '')) || 45;
+
+  const reorderPoint = Math.ceil(dailyVelocity * leadTimeDays);
+  const daysRemaining = dailyVelocity > 0 ? Math.floor(currentStock / dailyVelocity) : 0;
+  
+  let riskLevel = 'Healthy';
+  let riskColor = 'var(--green)';
+  if (totalProduced === 0) {
+     riskLevel = 'No production logged';
+     riskColor = 'var(--ink-3)';
+  } else if (dailyVelocity > 0) {
+    if (currentStock <= reorderPoint) {
+      riskLevel = 'Critical: Reorder Now';
+      riskColor = 'var(--red)';
+    } else if (currentStock <= reorderPoint + (dailyVelocity * 14)) {
+      riskLevel = 'Warning: Plan Reorder';
+      riskColor = 'var(--amber)';
+    }
+  }
+  // ----------------------------------
 
   return (
     <>
@@ -264,6 +297,48 @@ export default function ProductInsights() {
                   </div>
                 </div>
               </div>
+              {/* INVENTORY RISK ENGINE CARD */}
+            <div className="card-raised" style={{ marginTop: 18 }}>
+              <div className="card-header">
+                <span className="card-title">Inventory & Reorder Intelligence</span>
+                <span className="tag" style={{ background: 'transparent', border: `1px solid ${riskColor}`, color: riskColor }}>{riskLevel}</span>
+              </div>
+              <div className="card-body">
+                <div className="stats-row" style={{ marginBottom: 16, boxShadow: 'none', border: 'none', background: 'transparent' }}>
+                   <div className="stat-card" style={{ padding: '0 22px 0 0' }}>
+                     <div className="stat-label">Est. Stock on Hand</div>
+                     <div className="stat-value">{currentStock}</div>
+                     <div className="stat-delta delta-muted">{totalProduced} produced - {totalSold} sold</div>
+                   </div>
+                   <div className="stat-card" style={{ padding: '0 22px' }}>
+                     <div className="stat-label">Sales Velocity</div>
+                     <div className="stat-value">{dailyVelocity.toFixed(1)} <span style={{ fontSize: 14 }}>/ day</span></div>
+                     <div className="stat-delta delta-muted">Based on Shopify sales</div>
+                   </div>
+                   <div className="stat-card" style={{ padding: '0 22px' }}>
+                     <div className="stat-label">Vendor Lead Time</div>
+                     <div className="stat-value">{leadTimeDays} <span style={{ fontSize: 14 }}>days</span></div>
+                     <div className="stat-delta delta-muted">From {latestOrder?.vendors?.name || 'default'}</div>
+                   </div>
+                   <div className="stat-card" style={{ padding: '0 0 0 22px', borderRight: 'none' }}>
+                     <div className="stat-label">Runway</div>
+                     <div className="stat-value" style={{ color: riskColor }}>{daysRemaining} <span style={{ fontSize: 14 }}>days</span></div>
+                     <div className="stat-delta delta-muted">Reorder at {reorderPoint} units</div>
+                   </div>
+                </div>
+                
+                <div className="readiness">
+                  <div className="readiness-track" style={{ height: 8, borderRadius: 4, background: 'var(--bg-3)' }}>
+                    <div className="readiness-fill" style={{ width: `${Math.min(100, (currentStock / (totalProduced || 1)) * 100)}%`, background: riskColor, borderRadius: 4 }} />
+                    <div className="readiness-gate" style={{ left: `${Math.min(100, (reorderPoint / (totalProduced || 1)) * 100)}%`, background: 'var(--ink)', width: 3 }} title="Reorder Point" />
+                  </div>
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 8 }}>
+                  <i className="ph ph-info" style={{ marginRight: 4 }} /> 
+                  The black line marks your reorder point ({reorderPoint} units). If your stock dips below this, you will run out before the factory can deliver the next batch.
+                </div>
+              </div>
+            </div>
             </div>
           )
         )}
