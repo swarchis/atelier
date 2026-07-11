@@ -117,11 +117,10 @@ async function callGeminiImage(prompt, imageInputsBase64 = []) {
 // with nothing to composite against, which is all its SD models can do
 // (no image-input parameter exists on SD 3.5/3.0/XL/XL-Lightning — only
 // their separate mask-based Inpainting endpoint takes an image, and that's
-// not what "generate a new isolated graphic" needs). Defaults to the free,
-// few-step SD XL Lightning model since these tools are meant to be
-// regenerated a few times before landing on the right result — no reason to
-// spend the paid SD 3.5 tier on something this iterative.
-const PIXAZO_SDXL_LIGHTNING_URL = 'https://gateway.pixazo.ai/sdxl_lightning/getImage/v1/getSDXLImage';
+// not what "generate a new isolated graphic" needs). Use base SDXL here:
+// Pixazo currently rejects the Lightning route for this account with an
+// insufficient-balance 403, while base SDXL succeeds with the same key.
+const PIXAZO_SDXL_URL = 'https://gateway.pixazo.ai/getImage/v1/getSDXLImage';
 
 async function callPixazoElement(prompt) {
   if (!process.env.PIXAZO_API_KEY) {
@@ -129,9 +128,9 @@ async function callPixazoElement(prompt) {
   }
   const fullPrompt = `${prompt}. Flat graphic/icon style, centered, isolated on a plain solid white background, no shadow, no scene, no mockup, no photo — just the graphic itself.`;
 
-  const response = await fetch(PIXAZO_SDXL_LIGHTNING_URL, {
+  const response = await fetch(PIXAZO_SDXL_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': process.env.PIXAZO_API_KEY },
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'Ocp-Apim-Subscription-Key': process.env.PIXAZO_API_KEY },
     body: JSON.stringify({
       prompt: fullPrompt,
       negativePrompt: 'photo, photorealistic, background scene, shadow, gradient background, texture background, watermark, text, frame, border',
