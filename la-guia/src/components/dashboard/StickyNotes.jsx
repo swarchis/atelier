@@ -13,6 +13,7 @@ function DrawCanvas({ value, onChange }) {
   const canvasRef = useRef(null);
   const drawing = useRef(false);
   const lastPos = useRef(null);
+  const [tool, setTool] = useState('pencil');
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -41,8 +42,8 @@ function DrawCanvas({ value, onChange }) {
     e.preventDefault();
     const ctx = canvasRef.current.getContext('2d');
     const pos = getPos(e);
-    ctx.strokeStyle = '#3a3226';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = tool === 'eraser' ? '#fdf8ee' : '#3a3226';
+    ctx.lineWidth = tool === 'eraser' ? 14 : 2.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -69,11 +70,28 @@ function DrawCanvas({ value, onChange }) {
     <div style={{ position: 'absolute', inset: 0 }}>
       <canvas
         ref={canvasRef} width={300} height={200}
-        style={{ width: '100%', height: '100%', touchAction: 'none', cursor: 'crosshair', display: 'block' }}
+        style={{ width: '100%', height: '100%', touchAction: 'none', cursor: tool === 'eraser' ? 'cell' : 'crosshair', display: 'block' }}
         onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
         onTouchStart={start} onTouchMove={move} onTouchEnd={end}
       />
+      <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', gap: 4 }}>
+        <button
+          title="Pencil"
+          onClick={e => { e.stopPropagation(); setTool('pencil'); }}
+          style={{ width: 24, height: 24, background: tool === 'pencil' ? 'rgba(20,17,12,0.75)' : 'rgba(20,17,12,0.35)', color: '#fff', border: 'none', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <i className="ph ph-pencil-simple" style={{ fontSize: 12 }} />
+        </button>
+        <button
+          title="Eraser"
+          onClick={e => { e.stopPropagation(); setTool('eraser'); }}
+          style={{ width: 24, height: 24, background: tool === 'eraser' ? 'rgba(20,17,12,0.75)' : 'rgba(20,17,12,0.35)', color: '#fff', border: 'none', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <i className="ph ph-eraser" style={{ fontSize: 12 }} />
+        </button>
+      </div>
       <button
+        title="Clear note"
         onClick={clear}
         style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(20,17,12,0.6)', color: '#fff', border: 'none', borderRadius: 5, padding: '2px 8px', fontSize: 10, cursor: 'pointer' }}
       >

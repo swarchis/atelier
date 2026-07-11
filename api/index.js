@@ -6,8 +6,10 @@ const dotenv = require('dotenv');
 const { Resend } = require('resend');
 const sharp = require('sharp');
 
-// Explicit path, not the bare `dotenv.config()` default
+// Load the API env first, then tolerate keys placed in the Vite app env.
+// Existing process env values win, so deploy/runtime secrets are left alone.
 dotenv.config({ path: path.join(__dirname, '.env') });
+dotenv.config({ path: path.join(__dirname, '..', 'la-guia', '.env.local') });
 
 const app = express();
 app.use(cors());
