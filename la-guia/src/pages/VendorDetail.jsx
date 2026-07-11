@@ -31,7 +31,7 @@ export default function VendorDetail() {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
 
-  const [notes, setNotes] = useState(null); // null = not yet edited this session
+  const [notes, setNotes] = useState(null); 
   const [savingNotes, setSavingNotes] = useState(false);
 
   const [showEmail, setShowEmail] = useState(false);
@@ -45,13 +45,17 @@ export default function VendorDetail() {
   const techPackProducts = products.filter(p => TECHPACK_STAGES.includes(p.stage));
   const pricePoints = vendorQuotes.filter(q => q.amount != null).map(q => ({ date: q.requested_at, amount: Number(q.amount) }));
 
+  // Check the Hard Gate readiness requirement for Quoting
+  const selectedProductObjForQuote = products.find(p => p.id === selectedProduct);
+  const isQuoteBlocked = selectedProductObjForQuote && selectedProductObjForQuote.readiness < 80;
+
   if (!vendor) {
     return <div className="content"><EmptyState icon="ph-magnifying-glass" title="Vendor not found" sub="This vendor profile doesn't exist yet." /></div>;
   }
 
   const handleSend = async e => {
     e.preventDefault();
-    if (!selectedProduct) return;
+    if (!selectedProduct || isQuoteBlocked) return;
     setSending(true);
     try {
       const preferences = {};
@@ -135,15 +139,10 @@ export default function VendorDetail() {
       const budgetValue = fitBudget ? Number(fitBudget) : 0;
       let productObj = products.find(p => p.id === fitProduct);
 
-      // Persist the budget back to the product if it changed — this is the only
-      // place in the app a founder can actually set it, so it shouldn't vanish
-      // after this one analysis.
       if (productObj && budgetValue !== productObj.budget) {
         productObj = await updateProduct(fitProduct, { budget: budgetValue });
       }
 
-      // Materials matter a lot for whether a vendor can actually make this —
-      // pull the tech pack's BOM in directly rather than just the product category.
       const { data: techPack } = await supabase
         .from('tech_packs')
         .select('bom')
@@ -325,7 +324,7 @@ export default function VendorDetail() {
                 <label className="form-label">Tech pack</label>
                 <select className="form-select" value={selectedProduct} onChange={e => setSelectedProduct(e.target.value)} required>
                   <option value="" disabled>Choose a tech pack</option>
-                  {techPackProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {techPackProducts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.readiness}%)</option>)}
                 </select>
                 {techPackProducts.length === 0 && <div className="form-hint">No products have a tech pack yet — convert a design first.</div>}
               </div>
@@ -347,9 +346,18 @@ export default function VendorDetail() {
                 <label className="form-label">Anything else the vendor should know</label>
                 <textarea className="form-textarea" placeholder="Optional notes" value={message} onChange={e => setMessage(e.target.value)} />
               </div>
-              <button className="btn btn-primary" type="submit" disabled={sending || !selectedProduct}>
-                <i className="ph ph-paper-plane-tilt" /> {sending ? 'Sending…' : 'Send request'}
-              </button>
+              
+              <div style={{ marginTop: 8 }}>
+                {isQuoteBlocked && (
+                  <div className="form-hint" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', marginBottom: 14 }}>
+                    <i className="ph ph-lock-key" style={{ marginRight: 4 }} /> 
+                    <strong>Hard Gate:</strong> {selectedProductObjForQuote.name} is only at {selectedProductObjForQuote.readiness}% factory readiness. A score of 80%+ is required to request a professional quote.
+                  </div>
+                )}
+                <button className="btn btn-primary" type="submit" disabled={sending || !selectedProduct || isQuoteBlocked}>
+                  <i className="ph ph-paper-plane-tilt" /> {sending ? 'Sending…' : 'Send request'}
+                </button>
+              </div>
             </div>
           </form>
         )}

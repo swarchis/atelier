@@ -22,8 +22,13 @@ export default function ProductionOrders() {
   const [form, setForm] = useState({ productId: '', vendorId: '', units: '', dueDate: '', poNumber: '' });
   const [saving, setSaving] = useState(false);
 
+  // Check the Hard Gate readiness requirement
+  const selectedProductObj = products.find(p => p.id === form.productId);
+  const isBlocked = selectedProductObj && selectedProductObj.readiness < 80;
+
   const handleCreate = async (e) => {
     e.preventDefault();
+    if (isBlocked) return;
     setSaving(true);
     try {
       await createOrder({
@@ -70,7 +75,7 @@ export default function ProductionOrders() {
                   <label className="form-label">Product</label>
                   <select className="form-select" value={form.productId} onChange={e => setForm({...form, productId: e.target.value})} required>
                     <option value="">Select a product</option>
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.readiness}%)</option>)}
                   </select>
                 </div>
                 <div className="form-group">
@@ -95,9 +100,18 @@ export default function ProductionOrders() {
                   <input className="form-input" placeholder="Auto-generated if blank" value={form.poNumber} onChange={e => setForm({...form, poNumber: e.target.value})} />
                 </div>
               </div>
-              <button className="btn btn-primary" type="submit" disabled={saving}>
-                {saving ? 'Creating...' : 'Create Order'}
-              </button>
+              
+              <div style={{ marginTop: 8 }}>
+                {isBlocked && (
+                  <div className="form-hint" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', marginBottom: 14 }}>
+                    <i className="ph ph-lock-key" style={{ marginRight: 4 }} /> 
+                    <strong>Hard Gate:</strong> {selectedProductObj.name} is only at {selectedProductObj.readiness}% factory readiness. A score of 80%+ is required to start production. Review its Tech Pack to clear the gate.
+                  </div>
+                )}
+                <button className="btn btn-primary" type="submit" disabled={saving || isBlocked || !form.productId}>
+                  {saving ? 'Creating...' : 'Create Order'}
+                </button>
+              </div>
             </form>
           </div>
         )}
