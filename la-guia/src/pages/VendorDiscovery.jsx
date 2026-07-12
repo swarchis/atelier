@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useVendors } from '../context/VendorsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
+import { useAIUsage } from '../context/AIUsageContext.jsx';
 import { trustTagClass } from '../lib/format.js';
 import TabBar from '../components/TabBar.jsx';
 import { getPlan } from '../data/plans.js';
@@ -16,15 +17,56 @@ export const TRUST_LABELS = [
   { label: 'Production completed', tone: 'green' },
 ];
 
+export const ONBOARDING_STAGES = ['prospect', 'contacted', 'sampling', 'onboarded'];
+
 const TABS = [
   { key: 'discover', label: 'Discover & Compare', icon: 'ph-magnifying-glass' },
   { key: 'saved', label: 'Favorites', icon: 'ph-star' },
+  { key: 'compare', label: 'Compare', icon: 'ph-scales' },
   { key: 'blocked', label: 'Blocked', icon: 'ph-prohibit' },
 ];
 
-const EMPTY_FORM = { name: '', category: '', location: '', specialties: '', sourceNote: '', moq: '', leadTime: '' };
+const EMPTY_FORM = { name: '', category: '', location: '', specialties: '', sourceNote: '', moq: '', leadTime: '', certifications: '', capabilities: '', priceRange: '' };
+const EMPTY_FILTERS = { keywords: '', category: '', location: '', quantity: '', moq: '', targetPrice: '', certifications: '' };
 
-function VendorRow({ v, onClick, onToggleFavorite }) {
+const COMPARE_ROWS = [
+  { key: 'rating', label: 'Rating', render: v => (v.rating ? `${v.rating}★` : '—') },
+  { key: 'moq', label: 'MOQ', render: v => v.moq ?? '—' },
+  { key: 'leadTime', label: 'Lead time', render: v => v.lead_time || '—' },
+  { key: 'category', label: 'Category', render: v => v.category || '—' },
+  { key: 'location', label: 'Location', render: v => v.location || '—' },
+  {
+    key: 'certifications', label: 'Certifications',
+    render: v => (v.certifications || []).length
+      ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{v.certifications.map(c => <span key={c} className="tag tag-green" style={{ fontSize: 10.5 }}>{c}</span>)}</div>
+      : '—',
+  },
+  {
+    key: 'capabilities', label: 'Capabilities',
+    render: v => (v.capabilities || []).length
+      ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{v.capabilities.map(c => <span key={c} className="tag tag-neutral" style={{ fontSize: 10.5 }}>{c}</span>)}</div>
+      : '—',
+  },
+  {
+    key: 'specialties', label: 'Specialties',
+    render: v => (v.specialties || []).length
+      ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{v.specialties.map(c => <span key={c} className="tag tag-neutral" style={{ fontSize: 10.5 }}>{c}</span>)}</div>
+      : '—',
+  },
+  { key: 'onboarding', label: 'Onboarding', render: v => <span style={{ textTransform: 'capitalize' }}>{v.onboarding_stage || 'prospect'}</span> },
+  { key: 'verified', label: 'Verified', render: v => v.verified ? <span className="tag tag-green"><i className="ph-fill ph-seal-check" /> Verified</span> : <span style={{ color: 'var(--ink-4)' }}>Not verified</span> },
+  { key: 'trust', label: 'Trust label', render: v => <span className={trustTagClass(TRUST_LABELS.find(t => t.label === v.label)?.tone)}>{v.label}</span> },
+];
+
+function PriceTag({ value, size = 13 }) {
+  if (!value) return null;
+  return (
+    <span style={{ fontFamily: 'var(--mono)', fontWeight: 800, fontSize: size, color: 'var(--c-vendors)' }}>{value}</span>
+  );
+}
+
+function VendorRow({ v, onClick, onToggleFavorite, compareIds, onToggleCompare }) {
+  const inCompare = compareIds.includes(v.id);
   return (
     <div className="list-row" style={{ cursor: 'pointer' }} onClick={onClick}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -35,15 +77,27 @@ function VendorRow({ v, onClick, onToggleFavorite }) {
         >
           <i className={v.favorited ? 'ph-fill ph-star' : 'ph ph-star'} />
         </button>
+        <button
+          onClick={e => { e.stopPropagation(); onToggleCompare(v.id); }}
+          title={inCompare ? 'Remove from comparison' : compareIds.length >= 5 ? 'Comparison is full (5 max)' : 'Add to comparison'}
+          disabled={!inCompare && compareIds.length >= 5}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 17, color: inCompare ? 'var(--c-vendors)' : 'var(--ink-4)', padding: 4, opacity: (!inCompare && compareIds.length >= 5) ? 0.35 : 1 }}
+        >
+          <i className={inCompare ? 'ph-fill ph-check-square' : 'ph ph-square'} />
+        </button>
         <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent-bg)', color: 'var(--c-vendors)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="ph ph-buildings" style={{ fontSize: 17 }} />
         </div>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{v.name}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {v.name}
+            {v.verified && <i className="ph-fill ph-seal-check" style={{ color: 'var(--green)', fontSize: 13 }} title="Verified by you" />}
+          </div>
           <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{v.category || 'Uncategorized'} · {v.location || 'Unknown location'}</div>
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <PriceTag value={v.price_range} />
         {v.rating && <span style={{ fontSize: 12.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}><i className="ph-fill ph-star" style={{ color: 'var(--c-vendors)', marginRight: 3 }} />{v.rating}</span>}
         <span className={trustTagClass(TRUST_LABELS.find(t => t.label === v.label)?.tone)}>{v.label}</span>
       </div>
@@ -55,18 +109,25 @@ function SearchResultCard({ result, onAdd, adding, added }) {
   const isReview = result.sourceType === 'review';
   return (
     <div className="card-raised" style={{ padding: '16px 18px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 6 }}>
         <div>
           <div style={{ fontSize: 14.5, fontWeight: 700 }}>{result.name}</div>
           <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{result.category || 'Uncategorized'} · {result.location || 'Location unknown'}</div>
         </div>
         <span className={trustTagClass(isReview ? 'amber' : 'neutral')}>{isReview ? 'Via review source' : 'External source'}</span>
       </div>
+      {result.priceRange && (
+        <div style={{ margin: '2px 0 10px' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontWeight: 800, fontSize: 24, color: 'var(--c-vendors)' }}>{result.priceRange}</span>
+        </div>
+      )}
       <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 8 }}>{result.description}</p>
-      {(result.moq || result.leadTime || (result.specialties || []).length > 0) && (
+      {(result.moq || result.leadTime || (result.certifications || []).length > 0 || (result.capabilities || []).length > 0 || (result.specialties || []).length > 0) && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
           {result.moq && <span className="tag tag-neutral">MOQ {result.moq}</span>}
           {result.leadTime && <span className="tag tag-neutral">{result.leadTime}</span>}
+          {(result.certifications || []).map(c => <span key={c} className="tag tag-green">{c}</span>)}
+          {(result.capabilities || []).map(c => <span key={c} className="tag tag-blue">{c}</span>)}
           {(result.specialties || []).map(s => <span key={s} className="tag tag-neutral">{s}</span>)}
         </div>
       )}
@@ -98,8 +159,10 @@ function SearchResultCard({ result, onAdd, adding, added }) {
 
 export default function VendorDiscovery() {
   const navigate = useNavigate();
-  const { vendors, loading, addVendor, toggleFavorite } = useVendors();
+  const location = useLocation();
+  const { vendors, quotes, loading, addVendor, toggleFavorite } = useVendors();
   const { activeBrand } = useProducts();
+  const { canUse: canUseAI, remaining: aiRemaining, logUsage } = useAIUsage();
   const plan = getPlan(activeBrand?.plan_tier || 'free');
   const searchLocked = plan.id === 'free';
   const [tab, setTab] = useState('discover');
@@ -111,16 +174,36 @@ export default function VendorDiscovery() {
   const [parseError, setParseError] = useState(null);
 
   // Live web search — no local database involved in finding these.
-  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [searchImage, setSearchImage] = useState(null); // { base64, productName }
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(null);
   const [results, setResults] = useState(null); // { recommended: [], broader: [] }
   const [addingKey, setAddingKey] = useState(null);
   const [addedUrls, setAddedUrls] = useState([]);
+  const [compareIds, setCompareIds] = useState([]);
 
   const visible = vendors.filter(v => !v.blocked);
   const favorites = vendors.filter(v => v.favorited && !v.blocked);
   const blocked = vendors.filter(v => v.blocked);
+  const compareVendors = compareIds.map(id => vendors.find(v => v.id === id)).filter(Boolean);
+
+  const toggleCompare = id => setCompareIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : (prev.length >= 5 ? prev : [...prev, id])));
+
+  // A design's "Find Vendors" action hands off here via navigation state —
+  // pre-fills the search with the design's category and, if a canvas
+  // snapshot was captured, attaches it so AI factors in the actual garment.
+  useEffect(() => {
+    if (!location.state?.fromDesign) return;
+    setTab('discover');
+    setMode('search');
+    setFilters(f => ({ ...f, keywords: location.state.keywords || f.keywords, category: location.state.category || f.category }));
+    if (location.state.imageBase64) {
+      setSearchImage({ base64: location.state.imageBase64, productName: location.state.productName || 'design' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleParse = async () => {
     if (!pasteText.trim()) return;
@@ -142,6 +225,9 @@ export default function VendorDiscovery() {
         specialties: (data.vendor.specialties || []).join(', '),
         moq: data.vendor.moq != null ? String(data.vendor.moq) : f.moq,
         leadTime: data.vendor.leadTime || f.leadTime,
+        certifications: (data.vendor.certifications || []).join(', '),
+        capabilities: (data.vendor.capabilities || []).join(', '),
+        priceRange: data.vendor.priceRange || f.priceRange,
         sourceNote: pasteText,
       }));
     } catch (err) {
@@ -164,6 +250,9 @@ export default function VendorDiscovery() {
         sourceNote: form.sourceNote.trim(),
         moq: form.moq ? Number(form.moq) : null,
         leadTime: form.leadTime.trim() || null,
+        certifications: form.certifications.split(',').map(s => s.trim()).filter(Boolean),
+        capabilities: form.capabilities.split(',').map(s => s.trim()).filter(Boolean),
+        priceRange: form.priceRange.trim() || null,
       });
       setForm(EMPTY_FORM);
       setPasteText('');
@@ -175,10 +264,13 @@ export default function VendorDiscovery() {
     }
   };
 
+  const hasAnyFilter = Object.values(filters).some(v => v.trim());
+
   const handleSearch = async e => {
     e.preventDefault();
-    if (!query.trim()) return;
+    if (!hasAnyFilter) return;
     if (searchLocked) { setSearchError('Vendor search needs the Basic plan or higher — upgrade in Settings > Billing.'); return; }
+    if (!canUseAI) { setSearchError("You've used all your AI generations for this month — upgrade for more in Settings > Billing."); return; }
     setSearching(true);
     setSearchError(null);
     setResults(null);
@@ -186,10 +278,11 @@ export default function VendorDiscovery() {
       const res = await fetch('http://localhost:3001/api/search-vendors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ ...filters, imageBase64: searchImage?.base64 || null }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
+      await logUsage('vendor-search');
       setResults({ recommended: data.recommended || [], broader: data.broader || [] });
     } catch (err) {
       setSearchError(err.message || 'Search failed.');
@@ -210,6 +303,9 @@ export default function VendorDiscovery() {
         leadTime: result.leadTime || null,
         sourceNote: result.reviewUrl || result.sourceUrl,
         label: result.sourceType === 'review' ? 'Unverified' : 'External source',
+        certifications: result.certifications || [],
+        capabilities: result.capabilities || [],
+        priceRange: result.priceRange || null,
       });
       setAddedUrls(prev => [...prev, result.sourceUrl]);
     } catch (err) {
@@ -233,7 +329,7 @@ export default function VendorDiscovery() {
 
       <TabBar tabs={TABS} active={tab} onChange={setTab} accent="var(--c-vendors)" dataTour="vendor-tabs" />
 
-      <div className="content">
+      <div className="content" style={{ paddingBottom: compareIds.length > 0 && tab !== 'compare' ? 70 : undefined }}>
         {tab === 'discover' && (
           <>
             <div className="pill-group" style={{ marginBottom: 20 }}>
@@ -300,6 +396,20 @@ export default function VendorDiscovery() {
                         <input className="form-input" placeholder="e.g. 45 days" value={form.leadTime} onChange={e => setForm(f => ({ ...f, leadTime: e.target.value }))} />
                       </div>
                     </div>
+                    <div className="grid-3">
+                      <div className="form-group">
+                        <label className="form-label">Certifications</label>
+                        <input className="form-input" placeholder="Comma-separated, e.g. GOTS, OEKO-TEX" value={form.certifications} onChange={e => setForm(f => ({ ...f, certifications: e.target.value }))} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Capabilities</label>
+                        <input className="form-input" placeholder="Comma-separated, e.g. in-house printing" value={form.capabilities} onChange={e => setForm(f => ({ ...f, capabilities: e.target.value }))} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Price range</label>
+                        <input className="form-input" placeholder="e.g. $8-$12/unit" value={form.priceRange} onChange={e => setForm(f => ({ ...f, priceRange: e.target.value }))} />
+                      </div>
+                    </div>
                     <button className="btn btn-primary" type="submit" disabled={saving || !form.name.trim()}>
                       <i className="ph ph-plus" /> {saving ? 'Adding…' : 'Add vendor'}
                     </button>
@@ -311,7 +421,7 @@ export default function VendorDiscovery() {
                   <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-3)' }}><i className="ph ph-circle-notch" /> Loading…</div>
                 ) : visible.length ? (
                   <div className="card" style={{ marginBottom: 24 }}>
-                    {visible.map(v => <VendorRow key={v.id} v={v} onClick={() => navigate(`/vendors/${v.id}`)} onToggleFavorite={toggleFavorite} />)}
+                    {visible.map(v => <VendorRow key={v.id} v={v} onClick={() => navigate(`/vendors/${v.id}`)} onToggleFavorite={toggleFavorite} compareIds={compareIds} onToggleCompare={toggleCompare} />)}
                   </div>
                 ) : (
                   <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5, marginBottom: 24 }}>
@@ -328,23 +438,64 @@ export default function VendorDiscovery() {
               </>
             ) : (
               <>
+                {searchImage && (
+                  <div className="card-raised" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', marginBottom: 16 }}>
+                    <img src={`data:image/png;base64,${searchImage.base64}`} alt="Design snapshot" style={{ width: 44, height: 44, objectFit: 'contain', background: '#fff', borderRadius: 6, border: '1px solid var(--border-2)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, fontSize: 12.5, color: 'var(--ink-2)' }}>
+                      Searching with your <strong>{searchImage.productName}</strong> design attached — AI will factor in its garment category, fabric weight, and construction complexity.
+                    </div>
+                    <button className="btn btn-sm" onClick={() => setSearchImage(null)}>Remove image</button>
+                  </div>
+                )}
+
                 <form className="card-raised" style={{ marginBottom: 24 }} onSubmit={handleSearch}>
                   <div className="card-body">
-                    <div className="form-group" style={{ marginBottom: 12 }}>
-                      <label className="form-label">Describe what you're looking for</label>
-                      <input
-                        className="form-input"
-                        placeholder="e.g. Sustainable organic cotton hoodie manufacturers in Portugal, MOQ under 300, target $18/unit"
-                        value={query} onChange={e => setQuery(e.target.value)}
-                        disabled={searchLocked}
-                      />
-                      <div className="form-hint">
-                        The more specific you are, the better the match — try to include <strong>material</strong>, <strong>quantity/MOQ</strong>, <strong>target price</strong>, and <strong>location</strong>. A vague search gets vague results.
-                        Runs a real web search, then AI extracts candidate vendors from actual results — nothing here is pre-loaded or made up.
+                    <div className="grid-3" style={{ marginBottom: 4 }}>
+                      <div className="form-group">
+                        <label className="form-label">Material / style keywords</label>
+                        <input className="form-input" placeholder="e.g. sustainable organic cotton hoodie" value={filters.keywords} onChange={e => setFilters(f => ({ ...f, keywords: e.target.value }))} disabled={searchLocked} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Category</label>
+                        <input className="form-input" placeholder="e.g. Hoodies, Denim" value={filters.category} onChange={e => setFilters(f => ({ ...f, category: e.target.value }))} disabled={searchLocked} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Location</label>
+                        <input className="form-input" placeholder="e.g. Portugal" value={filters.location} onChange={e => setFilters(f => ({ ...f, location: e.target.value }))} disabled={searchLocked} />
                       </div>
                     </div>
-                    <button className="btn btn-primary" type="submit" disabled={searching || !query.trim() || searchLocked}>
-                      <i className="ph ph-magnifying-glass" /> {searching ? 'Searching…' : 'Search the web'}
+
+                    <button type="button" className="btn btn-sm" style={{ margin: '12px 0' }} onClick={() => setShowAdvanced(s => !s)}>
+                      <i className={`ph ${showAdvanced ? 'ph-caret-up' : 'ph-caret-down'}`} /> Advanced filters
+                    </button>
+
+                    {showAdvanced && (
+                      <div className="grid-3" style={{ marginBottom: 12 }}>
+                        <div className="form-group">
+                          <label className="form-label">Quantity needed</label>
+                          <input className="form-input" type="number" placeholder="e.g. 300 units" value={filters.quantity} onChange={e => setFilters(f => ({ ...f, quantity: e.target.value }))} disabled={searchLocked} />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Max MOQ</label>
+                          <input className="form-input" type="number" placeholder="e.g. 300" value={filters.moq} onChange={e => setFilters(f => ({ ...f, moq: e.target.value }))} disabled={searchLocked} />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Target unit price ($)</label>
+                          <input className="form-input" type="number" step="0.01" placeholder="e.g. 18.00" value={filters.targetPrice} onChange={e => setFilters(f => ({ ...f, targetPrice: e.target.value }))} disabled={searchLocked} />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
+                          <label className="form-label">Certifications wanted</label>
+                          <input className="form-input" placeholder="e.g. GOTS, OEKO-TEX" value={filters.certifications} onChange={e => setFilters(f => ({ ...f, certifications: e.target.value }))} disabled={searchLocked} />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="form-hint" style={{ marginBottom: 12 }}>
+                      Fill in as many fields as you can — each one sharpens the search. Runs a real web search, then AI extracts candidate vendors from actual results — nothing here is pre-loaded or made up.
+                      {canUseAI && !searchLocked && <span style={{ color: 'var(--ink-4)' }}> ({aiRemaining} AI searches left this month)</span>}
+                    </div>
+                    <button className="btn btn-primary" type="submit" disabled={searching || !hasAnyFilter || searchLocked || !canUseAI}>
+                      {searching ? <><i className="ph ph-spinner ph-spin" /> Searching…</> : !canUseAI && !searchLocked ? <><i className="ph ph-lock-simple" /> Upgrade for more AI searches</> : <><i className="ph ph-magnifying-glass" /> Search the web</>}
                     </button>
                   </div>
                 </form>
@@ -363,7 +514,7 @@ export default function VendorDiscovery() {
                     </div>
                     {results.recommended.length === 0 && results.broader.length === 0 ? (
                       <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>
-                        No clear vendor matches — try a broader or differently-worded query.
+                        No clear vendor matches — try broadening a field or removing one of the constraints.
                       </div>
                     ) : (
                       <>
@@ -403,11 +554,66 @@ export default function VendorDiscovery() {
         {tab === 'saved' && (
           favorites.length ? (
             <div className="card">
-              {favorites.map(v => <VendorRow key={v.id} v={v} onClick={() => navigate(`/vendors/${v.id}`)} onToggleFavorite={toggleFavorite} />)}
+              {favorites.map(v => <VendorRow key={v.id} v={v} onClick={() => navigate(`/vendors/${v.id}`)} onToggleFavorite={toggleFavorite} compareIds={compareIds} onToggleCompare={toggleCompare} />)}
             </div>
           ) : (
             <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>
               No favorites yet — star a vendor to keep it here.
+            </div>
+          )
+        )}
+
+        {tab === 'compare' && (
+          compareVendors.length === 0 ? (
+            <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>
+              Nothing selected yet — check up to 5 vendors from Discover or Favorites to compare them side by side.
+            </div>
+          ) : (
+            <div className="card" style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)', width: 140 }}>Vendor</th>
+                    {compareVendors.map(v => (
+                      <th key={v.id} style={{ textAlign: 'left', padding: '12px 16px', minWidth: 200 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                          <div style={{ cursor: 'pointer' }} onClick={() => navigate(`/vendors/${v.id}`)}>
+                            <div style={{ fontSize: 14, fontWeight: 700 }}>{v.name}</div>
+                            <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 400, marginTop: 2 }}>{v.category || 'Uncategorized'}</div>
+                          </div>
+                          <button onClick={() => toggleCompare(v.id)} title="Remove from comparison" style={{ background: 'none', border: 'none', color: 'var(--ink-4)', cursor: 'pointer', fontSize: 15 }}>
+                            <i className="ph ph-x" />
+                          </button>
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--accent-bg)' }}>
+                    <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--ink-2)' }}>Price</td>
+                    {compareVendors.map(v => (
+                      <td key={v.id} style={{ padding: '14px 16px', fontSize: 22, fontWeight: 800, fontFamily: 'var(--mono)', color: v.price_range ? 'var(--c-vendors)' : 'var(--ink-4)' }}>
+                        {v.price_range || '—'}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '10px 16px', color: 'var(--ink-3)', fontSize: 12 }}>Quotes exchanged</td>
+                    {compareVendors.map(v => (
+                      <td key={v.id} style={{ padding: '10px 16px' }}>{quotes.filter(q => q.vendor_id === v.id).length}</td>
+                    ))}
+                  </tr>
+                  {COMPARE_ROWS.map(row => (
+                    <tr key={row.key} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '10px 16px', color: 'var(--ink-3)', fontSize: 12 }}>{row.label}</td>
+                      {compareVendors.map(v => (
+                        <td key={v.id} style={{ padding: '10px 16px' }}>{row.render(v)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )
         )}
@@ -432,6 +638,14 @@ export default function VendorDiscovery() {
           )
         )}
       </div>
+
+      {compareIds.length > 0 && tab !== 'compare' && (
+        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 50, background: 'var(--bg-1)', border: '1.5px solid var(--border-2)', borderRadius: 999, padding: '10px 10px 10px 18px', display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{compareIds.length}/5 selected</span>
+          <button className="btn btn-sm btn-primary" onClick={() => setTab('compare')}><i className="ph ph-scales" /> Compare</button>
+          <button className="btn btn-sm" onClick={() => setCompareIds([])}>Clear</button>
+        </div>
+      )}
     </>
   );
 }

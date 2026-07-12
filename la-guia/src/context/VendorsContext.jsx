@@ -45,22 +45,28 @@ export function VendorsProvider({ children }) {
     }
   }
 
-  const addVendor = async ({ name, category, location, specialties, sourceNote, moq, leadTime, label }) => {
-    const { data, error } = await supabase
+  const addVendor = async ({ name, category, location, specialties, sourceNote, moq, leadTime, label, certifications, capabilities, priceRange }) => {
+    const baseRow = {
+      brand_id: activeBrand.id,
+      name,
+      category: category || null,
+      location: location || null,
+      label: label || 'Imported by user',
+      specialties: specialties || [],
+      source_note: sourceNote || null,
+      moq: moq ?? null,
+      lead_time: leadTime || null,
+    };
+    let { data, error } = await supabase
       .from('vendors')
-      .insert([{
-        brand_id: activeBrand.id,
-        name,
-        category: category || null,
-        location: location || null,
-        label: label || 'Imported by user',
-        specialties: specialties || [],
-        source_note: sourceNote || null,
-        moq: moq ?? null,
-        lead_time: leadTime || null,
-      }])
+      .insert([{ ...baseRow, certifications: certifications || [], capabilities: capabilities || [], price_range: priceRange || null }])
       .select()
       .single();
+    if (error) {
+      // Falls back to the pre-015 columns if migration 015 hasn't been run
+      // yet, so adding a vendor never hard-fails over the newer optional fields.
+      ({ data, error } = await supabase.from('vendors').insert([baseRow]).select().single());
+    }
     if (error) throw error;
     setVendors(prev => [data, ...prev]);
     return data;

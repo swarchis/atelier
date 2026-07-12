@@ -319,7 +319,7 @@ They pasted the following link, forwarded email, or notes about a manufacturer/v
 """
 ${text}
 """
-Extract whatever you can reasonably infer. Do not invent specifics you can't support from the text (leave a field as an empty string or null instead of guessing).
+Extract whatever you can reasonably infer. Do not invent specifics you can't support from the text (leave a field as an empty string, null, or an empty array instead of guessing).
 Return a JSON object with exactly this structure:
 {
   "name": "string",
@@ -327,7 +327,10 @@ Return a JSON object with exactly this structure:
   "location": "string (city, country if known)",
   "specialties": ["short phrase", "short phrase"],
   "moq": <number or null>,
-  "leadTime": "string or null (e.g. '45 days')"
+  "leadTime": "string or null (e.g. '45 days')",
+  "certifications": ["string, e.g. GOTS, OEKO-TEX, WRAP, Fair Trade — only ones actually mentioned"],
+  "capabilities": ["short phrase, e.g. in-house printing, small-batch sampling, cut-and-sew, dyeing"],
+  "priceRange": "string or null (e.g. '$8-$12/unit FOB') — only if a price is actually mentioned, never estimated"
 }`;
 
     const parsed = await callGemini(prompt);
@@ -376,13 +379,27 @@ Write a concise, professional email (under 200 words), with a placeholder for th
 app.post('/api/search-vendors', async (req, res) => {
   console.log("📥 Received vendor search request...");
   try {
-    const { query } = req.body;
-    if (!query || !query.trim()) return res.status(400).json({ ok: false, error: 'No search query provided' });
+    const { keywords, category, location, quantity, moq, targetPrice, certifications, imageBase64 } = req.body;
+    const criteria = { keywords, category, location, quantity, moq, targetPrice, certifications };
+    if (!Object.values(criteria).some(v => v != null && String(v).trim())) {
+      return res.status(400).json({ ok: false, error: 'Give at least one search field — keywords, category, or location.' });
+    }
     if (!process.env.TAVILY_API_KEY || process.env.TAVILY_API_KEY.startsWith('get_a_free_key')) {
       return res.status(400).json({ ok: false, error: 'TAVILY_API_KEY is not set in api/.env — get a free key at tavily.com' });
     }
 
-    const broadQuery = query.split(/[,.]|(?:\bwith\b)|(?:\bthat\b)/)[0].trim();
+    // Build a sharper query from structured fields instead of trusting one
+    // free-text box to carry material + MOQ + price + location on its own —
+    // each constraint gets folded in explicitly so Tavily sees it clearly.
+    const coreParts = [keywords, category].filter(v => v && String(v).trim());
+    const tightParts = [...coreParts, 'manufacturer'];
+    if (location) tightParts.push(`in ${location}`);
+    if (moq) tightParts.push(`MOQ under ${moq} units`);
+    if (targetPrice) tightParts.push(`target price $${targetPrice}/unit`);
+    if (certifications) tightParts.push(`${certifications} certified`);
+    const tightQuery = tightParts.join(' ');
+    const broadQuery = [...coreParts, 'manufacturer', location].filter(Boolean).join(' ') || tightQuery;
+
     const MFG_BIAS = 'private label OR white label OR OEM ODM OR contract manufacturer OR wholesale factory -shop -"our collection"';
     const [tightRes, broadRes] = await Promise.all([
       fetch('https://api.tavily.com/search', {
@@ -390,7 +407,7 @@ app.post('/api/search-vendors', async (req, res) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           api_key: process.env.TAVILY_API_KEY,
-          query: `${query} ${MFG_BIAS}`,
+          query: `${tightQuery} ${MFG_BIAS}`,
           search_depth: 'advanced',
           max_results: 12,
         }),
@@ -419,7 +436,19 @@ app.post('/api/search-vendors', async (req, res) => {
       return res.json({ ok: true, recommended: [], broader: [] });
     }
 
-    const prompt = `A fashion brand founder searched for a MANUFACTURER with this request: "${query}"
+    const criteriaLines = [
+      keywords && `Material/style keywords: ${keywords}`,
+      category && `Category: ${category}`,
+      location && `Preferred location: ${location}`,
+      quantity && `Quantity needed: ${quantity} units`,
+      moq && `Max acceptable MOQ: ${moq} units`,
+      targetPrice && `Target unit price: $${targetPrice}`,
+      certifications && `Certifications wanted: ${certifications}`,
+    ].filter(Boolean).join('\n');
+
+    const prompt = `A fashion brand founder searched for a MANUFACTURER with this request:
+${criteriaLines}
+${imageBase64 ? '\nAn image of the founder\'s own product design is attached — use it only to judge what garment category, fabric weight, and construction complexity this vendor would need to handle (does their stated specialty plausibly cover it?). The image shows the FOUNDER\'S product, not anything belonging to the vendor — never attribute the image itself to a vendor.' : ''}
 
 Here are real web search results (some from a tightly-matched search, some from a broader category search, mixed together):
 ${results.map((r, i) => `[${i}] ${r.title}\nURL: ${r.url}\n${(r.content || '').slice(0, 900)}`).join('\n\n')}
@@ -432,26 +461,32 @@ Signals a result is a retail BRAND instead (exclude): online shop / storefront l
 If you are not reasonably confident a result is a manufacturer-for-hire rather than a retail brand, LEAVE IT OUT — do not guess, and do not include it "just in case." Precision matters more than volume here.
 
 After applying that filter, split what's left into two groups:
-- "recommended": manufacturers that match essentially everything specific in the founder's request (e.g. if they gave a material, price range, MOQ, or location, these hit all of it).
-- "broader": manufacturers that match the general category but miss one or more of the specific details — still include these, don't drop them, since "recommended" can be wrong and the founder should see other real options.
-If the founder's request was vague/generic, most results likely belong in "broader" since there's nothing specific to fully match yet.
+- "recommended": manufacturers that match essentially everything specific the founder gave above (location, MOQ, target price, certifications, category — whichever fields were actually filled in).
+- "broader": manufacturers that match the general category but miss one or more of the specific fields the founder filled in — still include these, don't drop them, since "recommended" can be wrong and the founder should see other real options.
+If the founder only gave vague/generic fields, most results likely belong in "broader" since there's nothing specific to fully match yet.
 It's completely fine for a group to be empty if nothing qualifies — an empty list beats a wrong one.
 
 For each manufacturer, figure out the source carefully:
 - If the result IS the manufacturer's own website/page (domain matches the company, or it's their official site/contact page), set "sourceType": "vendor" and "sourceUrl" to that link.
 - If the result is actually a THIRD PARTY talking about the manufacturer (an Instagram account that reviews manufacturers, a blog post, a directory listing, a marketplace aggregator page) rather than their own presence, set "sourceType": "review". If the snippet text itself mentions the manufacturer's own website, email, or handle, put THAT as "sourceUrl" and put the original review/mention link as "reviewUrl". If no direct link can be found anywhere, "sourceUrl" should be the review link itself (still set "sourceType": "review").
 
-Also extract, if the text supports it (leave null/empty rather than guessing): specialties (short phrases describing what they specialize in — materials, garment types, techniques), moq (minimum order quantity as a number), leadTime (e.g. "45 days").
+Also extract, if the text supports it (leave null/empty/empty-array rather than guessing):
+- specialties: short phrases describing what they specialize in (materials, garment types, techniques)
+- moq: minimum order quantity as a number
+- leadTime: e.g. "45 days"
+- certifications: e.g. GOTS, OEKO-TEX, WRAP, Fair Trade, ISO — only ones actually named in the text
+- capabilities: short phrases on factory capabilities, e.g. "in-house printing", "small-batch sampling", "cut-and-sew", "dyeing", "embroidery"
+- priceRange: a string like "$8-$12/unit" ONLY if the text actually states a price — never estimate one
 
 Do not invent details not supported by the text. Return a JSON object with exactly this structure:
 {
   "recommended": [
-    { "name": "string", "category": "string", "location": "string or empty", "description": "one sentence on why this matches", "sourceUrl": "string", "sourceType": "vendor" | "review", "reviewUrl": "string or null", "specialties": ["string"], "moq": <number or null>, "leadTime": "string or null" }
+    { "name": "string", "category": "string", "location": "string or empty", "description": "one sentence on why this matches", "sourceUrl": "string", "sourceType": "vendor" | "review", "reviewUrl": "string or null", "specialties": ["string"], "moq": <number or null>, "leadTime": "string or null", "certifications": ["string"], "capabilities": ["string"], "priceRange": "string or null" }
   ],
   "broader": [ same shape as above ]
 }`;
 
-    const parsed = await callGemini(prompt);
+    const parsed = await callGemini(prompt, imageBase64 || null);
 
     const PARKING_SIGNALS = ['buy this domain', 'domain is for sale', 'this domain may be for sale', 'domain for sale', 'sedo.com', 'hugedomains', 'afternic', 'dan.com', 'godaddy.com/domainsearch', 'the lease to own', 'inquire about this domain'];
     async function isLikelyAlive(url) {

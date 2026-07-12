@@ -49,6 +49,7 @@ export default function DesignDetail() {
   const [restoreFile, setRestoreFile] = useState(null);
   const [toggling, setToggling] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [findingVendors, setFindingVendors] = useState(false);
   const [tab, setTab] = useState('canvas');
   const [moodboard, setMoodboard] = useState([]);
   const [palette, setPalette] = useState([]);
@@ -261,6 +262,25 @@ export default function DesignDetail() {
     }
   };
 
+  const handleFindVendors = async () => {
+    setFindingVendors(true);
+    try {
+      let imageBase64 = null;
+      try { imageBase64 = await captureCanvasBase64(); } catch { /* search still works without the image */ }
+      navigate('/vendors', {
+        state: {
+          fromDesign: true,
+          keywords: design.garmentType,
+          category: product.category,
+          productName: product.name,
+          imageBase64,
+        },
+      });
+    } finally {
+      setFindingVendors(false);
+    }
+  };
+
   const handleStatusChange = async (status) => {
     try {
       await setProductStatus(id, status);
@@ -418,8 +438,11 @@ export default function DesignDetail() {
                   <label className="form-label">Design status</label>
                   <span className="tag tag-accent">{design.status}</span>
                 </div>
-                <button className="btn btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setTab('skus')}>
+                <button className="btn btn-sm" style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }} onClick={() => setTab('skus')}>
                   <i className="ph ph-barcode" /> Manage SKUs & Variants
+                </button>
+                <button className="btn btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={handleFindVendors} disabled={findingVendors}>
+                  <i className={`ph ${findingVendors ? 'ph-spinner ph-spin' : 'ph-handshake'}`} /> {findingVendors ? 'Capturing design…' : 'Find Vendors for this Design'}
                 </button>
               </div>
             </div>

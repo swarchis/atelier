@@ -2,20 +2,51 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useVendors } from '../context/VendorsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
+import { useProduction } from '../context/ProductionContext.jsx';
 import { supabase } from '../lib/supabase.js';
 import { trustTagClass } from '../lib/format.js';
-import { TRUST_LABELS } from './VendorDiscovery.jsx';
+import { TRUST_LABELS, ONBOARDING_STAGES } from './VendorDiscovery.jsx';
 import PriceHistoryChart from '../components/PriceHistoryChart.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 
 const TECHPACK_STAGES = ['techpack', 'sourcing', 'sampling', 'production', 'launched'];
 const SEVERITY_ICON = { amber: 'ph-warning', blue: 'ph-info', green: 'ph-check-circle', red: 'ph-x-circle' };
+const ORDER_STAGE_TAG = { Sampling: 'tag-blue', 'In production': 'tag-amber', Shipped: 'tag-accent', Delivered: 'tag-green' };
+
+function TagEditor({ values, onAdd, onRemove, placeholder, tagClass = 'tag tag-neutral' }) {
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    const v = draft.trim();
+    if (!v || values.includes(v)) return;
+    onAdd(v);
+    setDraft('');
+  };
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: values.length ? 10 : 0 }}>
+        {values.length
+          ? values.map(v => (
+              <span key={v} className={tagClass} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {v}
+                <button onClick={() => onRemove(v)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0, opacity: 0.7 }}>×</button>
+              </span>
+            ))
+          : <span style={{ fontSize: 13, color: 'var(--ink-4)', fontStyle: 'italic' }}>None added yet</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input className="form-input" style={{ fontSize: 12.5, padding: '6px 10px' }} placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+        <button className="btn btn-sm" onClick={add} disabled={!draft.trim()}><i className="ph ph-plus" /></button>
+      </div>
+    </div>
+  );
+}
 
 export default function VendorDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { vendors, quotes, requestQuote, updateVendor, toggleFavorite, toggleBlock } = useVendors();
   const { products, activeBrand, updateProduct } = useProducts();
+  const { orders } = useProduction();
 
   const [fitProduct, setFitProduct] = useState('');
   const [fitBudget, setFitBudget] = useState('');
@@ -30,6 +61,7 @@ export default function VendorDetail() {
   const [deadline, setDeadline] = useState('');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [overrideGate, setOverrideGate] = useState(false);
 
   const [notes, setNotes] = useState(null); 
   const [savingNotes, setSavingNotes] = useState(false);
@@ -40,14 +72,22 @@ export default function VendorDetail() {
   const [draft, setDraft] = useState(null);
   const [draftError, setDraftError] = useState(null);
 
+  const [priceDraft, setPriceDraft] = useState(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyNotes, setVerifyNotes] = useState('');
+
   const vendor = vendors.find(v => v.id === id);
   const vendorQuotes = quotes.filter(q => q.vendor_id === id);
+  const vendorOrders = orders.filter(o => o.vendor_id === id);
   const techPackProducts = products.filter(p => TECHPACK_STAGES.includes(p.stage));
   const pricePoints = vendorQuotes.filter(q => q.amount != null).map(q => ({ date: q.requested_at, amount: Number(q.amount) }));
+  const acceptedQuotes = vendorQuotes.filter(q => q.status === 'Accepted').length;
 
-  // Check the Hard Gate readiness requirement for Quoting
+  // Check the Hard Gate readiness requirement for Quoting — same opt-in
+  // override as ProductionOrders.jsx, so a founder who's sure can proceed.
   const selectedProductObjForQuote = products.find(p => p.id === selectedProduct);
-  const isQuoteBlocked = selectedProductObjForQuote && selectedProductObjForQuote.readiness < 80;
+  const belowThresholdForQuote = selectedProductObjForQuote && selectedProductObjForQuote.readiness < 80;
+  const isQuoteBlocked = belowThresholdForQuote && !overrideGate;
 
   if (!vendor) {
     return <div className="content"><EmptyState icon="ph-magnifying-glass" title="Vendor not found" sub="This vendor profile doesn't exist yet." /></div>;
@@ -64,7 +104,7 @@ export default function VendorDetail() {
       if (deadline) preferences.deadline = deadline;
       await requestQuote({ vendorId: vendor.id, productId: selectedProduct, message, preferences });
       setShowRequest(false);
-      setSelectedProduct(''); setQuantity(''); setTargetCost(''); setDeadline(''); setMessage('');
+      setSelectedProduct(''); setQuantity(''); setTargetCost(''); setDeadline(''); setMessage(''); setOverrideGate(false);
     } catch (err) {
       alert('Could not send request: ' + err.message);
     } finally {
@@ -80,6 +120,48 @@ export default function VendorDetail() {
       alert('Could not save notes: ' + err.message);
     } finally {
       setSavingNotes(false);
+    }
+  };
+
+  const savePriceRange = async () => {
+    try {
+      await updateVendor(vendor.id, { price_range: priceDraft.trim() || null });
+    } catch (err) {
+      alert('Could not save price range: ' + err.message);
+    }
+  };
+
+  const addTag = async (field, value) => {
+    try {
+      await updateVendor(vendor.id, { [field]: [...(vendor[field] || []), value] });
+    } catch (err) {
+      alert(`Could not update ${field}: ` + err.message);
+    }
+  };
+
+  const removeTag = async (field, value) => {
+    try {
+      await updateVendor(vendor.id, { [field]: (vendor[field] || []).filter(v => v !== value) });
+    } catch (err) {
+      alert(`Could not update ${field}: ` + err.message);
+    }
+  };
+
+  const confirmVerified = async () => {
+    try {
+      await updateVendor(vendor.id, { verified: true, verified_notes: verifyNotes.trim() || null });
+      setVerifying(false);
+      setVerifyNotes('');
+    } catch (err) {
+      alert('Could not update vendor: ' + err.message);
+    }
+  };
+
+  const unmarkVerified = async () => {
+    try {
+      await updateVendor(vendor.id, { verified: false });
+    } catch (err) {
+      alert('Could not update vendor: ' + err.message);
     }
   };
 
@@ -205,6 +287,60 @@ export default function VendorDetail() {
           </div>
         )}
 
+        <div className="card-raised" style={{ marginBottom: 20, padding: '20px 24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)', marginBottom: 6 }}>Price range</div>
+            <input
+              className="form-input"
+              style={{ fontSize: 30, fontWeight: 800, fontFamily: 'var(--mono)', color: 'var(--c-vendors)', border: 'none', background: 'transparent', padding: 0, minWidth: 260 }}
+              placeholder="Add a price range, e.g. $8-$12/unit"
+              value={priceDraft === null ? (vendor.price_range || '') : priceDraft}
+              onChange={e => setPriceDraft(e.target.value)}
+              onBlur={() => priceDraft !== null && priceDraft.trim() !== (vendor.price_range || '') && savePriceRange()}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <div>
+              <div className="form-label" style={{ marginBottom: 6 }}>Onboarding</div>
+              <select
+                className="form-select"
+                value={vendor.onboarding_stage || 'prospect'}
+                onChange={e => updateVendor(vendor.id, { onboarding_stage: e.target.value }).catch(err => alert('Could not update vendor: ' + err.message))}
+              >
+                {ONBOARDING_STAGES.map(s => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
+              </select>
+            </div>
+            <div style={{ minWidth: 180 }}>
+              <div className="form-label" style={{ marginBottom: 6 }}>Verification</div>
+              {vendor.verified ? (
+                <>
+                  <button className="btn btn-sm" onClick={unmarkVerified} style={{ color: 'var(--green)' }}>
+                    <i className="ph-fill ph-seal-check" /> Verified by you
+                  </button>
+                  {vendor.verified_notes && <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 6, maxWidth: 220 }}>{vendor.verified_notes}</div>}
+                </>
+              ) : verifying ? (
+                <div style={{ maxWidth: 240 }}>
+                  <textarea
+                    className="form-textarea" style={{ minHeight: 50, fontSize: 12.5, marginBottom: 6 }}
+                    placeholder="What did you verify? (business registration, factory visit, referral...)"
+                    value={verifyNotes} onChange={e => setVerifyNotes(e.target.value)}
+                  />
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-sm btn-primary" onClick={confirmVerified}>Confirm</button>
+                    <button className="btn btn-sm" onClick={() => setVerifying(false)}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button className="btn btn-sm" onClick={() => setVerifying(true)}><i className="ph ph-seal-check" /> Mark as verified</button>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: -12, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <i className="ph ph-info" /> Verification is a manual judgment you make yourself — Grainline never marks a vendor verified automatically.
+        </div>
+
         <div className="stats-row">
           <div className="stat-card" style={{ '--stat-accent': 'var(--c-vendors)' }}>
             <div className="stat-label">Rating</div>
@@ -322,7 +458,7 @@ export default function VendorDetail() {
             <div className="card-body">
               <div className="form-group">
                 <label className="form-label">Tech pack</label>
-                <select className="form-select" value={selectedProduct} onChange={e => setSelectedProduct(e.target.value)} required>
+                <select className="form-select" value={selectedProduct} onChange={e => { setSelectedProduct(e.target.value); setOverrideGate(false); }} required>
                   <option value="" disabled>Choose a tech pack</option>
                   {techPackProducts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.readiness}%)</option>)}
                 </select>
@@ -348,41 +484,48 @@ export default function VendorDetail() {
               </div>
               
               <div style={{ marginTop: 8 }}>
-                {isQuoteBlocked && (
+                {belowThresholdForQuote && (
                   <div className="form-hint" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', marginBottom: 14 }}>
-                    <i className="ph ph-lock-key" style={{ marginRight: 4 }} /> 
+                    <i className="ph ph-lock-key" style={{ marginRight: 4 }} />
                     <strong>Hard Gate:</strong> {selectedProductObjForQuote.name} is only at {selectedProductObjForQuote.readiness}% factory readiness. A score of 80%+ is required to request a professional quote.
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, cursor: 'pointer', fontWeight: 500 }}>
+                      <input type="checkbox" checked={overrideGate} onChange={e => setOverrideGate(e.target.checked)} />
+                      I understand the risks and want to request a quote anyway
+                    </label>
                   </div>
                 )}
                 <button className="btn btn-primary" type="submit" disabled={sending || !selectedProduct || isQuoteBlocked}>
-                  <i className="ph ph-paper-plane-tilt" /> {sending ? 'Sending…' : 'Send request'}
+                  <i className="ph ph-paper-plane-tilt" /> {sending ? 'Sending…' : overrideGate && belowThresholdForQuote ? 'Send Request Anyway' : 'Send request'}
                 </button>
               </div>
             </div>
           </form>
         )}
 
-        <div className="grid-2" style={{ marginBottom: 28 }}>
+        <div className="grid-3" style={{ marginBottom: 24 }}>
           <div>
             <div className="section-label">Specialties</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {(vendor.specialties || []).length
-                ? vendor.specialties.map(s => <span key={s} className="tag tag-neutral">{s}</span>)
-                : <span style={{ fontSize: 13, color: 'var(--ink-4)', fontStyle: 'italic' }}>None added yet</span>}
-            </div>
+            <TagEditor values={vendor.specialties || []} onAdd={v => addTag('specialties', v)} onRemove={v => removeTag('specialties', v)} placeholder="Add a specialty" />
           </div>
           <div>
-            <div className="section-label">Your notes</div>
-            <textarea
-              className="form-textarea" style={{ minHeight: 60 }}
-              placeholder="Private notes — quality preferences, past issues, anything worth remembering"
-              value={notes === null ? (vendor.notes || '') : notes}
-              onChange={e => setNotes(e.target.value)}
-              onBlur={() => notes !== null && notes !== (vendor.notes || '') && saveNotes()}
-            />
-            {savingNotes && <div className="form-hint">Saving…</div>}
+            <div className="section-label">Certifications</div>
+            <TagEditor values={vendor.certifications || []} onAdd={v => addTag('certifications', v)} onRemove={v => removeTag('certifications', v)} placeholder="e.g. GOTS" tagClass="tag tag-green" />
+          </div>
+          <div>
+            <div className="section-label">Capabilities</div>
+            <TagEditor values={vendor.capabilities || []} onAdd={v => addTag('capabilities', v)} onRemove={v => removeTag('capabilities', v)} placeholder="e.g. in-house printing" tagClass="tag tag-blue" />
           </div>
         </div>
+
+        <div className="section-label">Your notes</div>
+        <textarea
+          className="form-textarea" style={{ minHeight: 60, marginBottom: 28 }}
+          placeholder="Private notes — quality preferences, past issues, anything worth remembering"
+          value={notes === null ? (vendor.notes || '') : notes}
+          onChange={e => setNotes(e.target.value)}
+          onBlur={() => notes !== null && notes !== (vendor.notes || '') && saveNotes()}
+        />
+        {savingNotes && <div className="form-hint" style={{ marginTop: -22, marginBottom: 28 }}>Saving…</div>}
 
         {pricePoints.length >= 2 && (
           <>
@@ -391,6 +534,39 @@ export default function VendorDetail() {
               <PriceHistoryChart points={pricePoints} />
             </div>
           </>
+        )}
+
+        <div className="section-label">Performance history</div>
+        <div className="stats-row" style={{ marginBottom: vendorOrders.length ? 16 : 28 }}>
+          <div className="stat-card" style={{ '--stat-accent': 'var(--c-vendors)' }}>
+            <div className="stat-label">Quotes requested</div>
+            <div className="stat-value">{vendorQuotes.length}</div>
+          </div>
+          <div className="stat-card" style={{ '--stat-accent': 'var(--c-vendors)' }}>
+            <div className="stat-label">Quotes accepted</div>
+            <div className="stat-value">{acceptedQuotes}</div>
+          </div>
+          <div className="stat-card" style={{ '--stat-accent': 'var(--c-vendors)' }}>
+            <div className="stat-label">Acceptance rate</div>
+            <div className="stat-value">{vendorQuotes.length ? `${Math.round((acceptedQuotes / vendorQuotes.length) * 100)}%` : '—'}</div>
+          </div>
+          <div className="stat-card" style={{ '--stat-accent': 'var(--c-vendors)' }}>
+            <div className="stat-label">Production orders</div>
+            <div className="stat-value">{vendorOrders.length}</div>
+          </div>
+        </div>
+        {vendorOrders.length > 0 && (
+          <div className="card" style={{ marginBottom: 28 }}>
+            {vendorOrders.map(o => (
+              <div className="list-row" key={o.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/production/${o.id}`)}>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 500 }}>{o.products?.name || 'Deleted product'}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{o.po_number} · {o.units || '—'} units</div>
+                </div>
+                <span className={`tag ${ORDER_STAGE_TAG[o.stage] || 'tag-neutral'}`}>{o.stage}</span>
+              </div>
+            ))}
+          </div>
         )}
 
         <div className="section-label">Quote history</div>

@@ -21,10 +21,14 @@ export default function ProductionOrders() {
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ productId: '', vendorId: '', units: '', dueDate: '', poNumber: '' });
   const [saving, setSaving] = useState(false);
+  const [overrideGate, setOverrideGate] = useState(false);
 
-  // Check the Hard Gate readiness requirement
+  // Check the Hard Gate readiness requirement — an explicit, opt-in override
+  // lets a founder proceed anyway ("I'm sure"), so this isn't a true hard
+  // block, just a deliberate extra step before shipping something under-ready.
   const selectedProductObj = products.find(p => p.id === form.productId);
-  const isBlocked = selectedProductObj && selectedProductObj.readiness < 80;
+  const belowThreshold = selectedProductObj && selectedProductObj.readiness < 80;
+  const isBlocked = belowThreshold && !overrideGate;
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -40,6 +44,7 @@ export default function ProductionOrders() {
       });
       setShowNew(false);
       setForm({ productId: '', vendorId: '', units: '', dueDate: '', poNumber: '' });
+      setOverrideGate(false);
     } catch (err) {
       alert("Failed to create order: " + err.message);
     } finally {
@@ -73,7 +78,7 @@ export default function ProductionOrders() {
               <div className="grid-2">
                 <div className="form-group">
                   <label className="form-label">Product</label>
-                  <select className="form-select" value={form.productId} onChange={e => setForm({...form, productId: e.target.value})} required>
+                  <select className="form-select" value={form.productId} onChange={e => { setForm({...form, productId: e.target.value}); setOverrideGate(false); }} required>
                     <option value="">Select a product</option>
                     {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.readiness}%)</option>)}
                   </select>
@@ -102,14 +107,18 @@ export default function ProductionOrders() {
               </div>
               
               <div style={{ marginTop: 8 }}>
-                {isBlocked && (
+                {belowThreshold && (
                   <div className="form-hint" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', marginBottom: 14 }}>
-                    <i className="ph ph-lock-key" style={{ marginRight: 4 }} /> 
+                    <i className="ph ph-lock-key" style={{ marginRight: 4 }} />
                     <strong>Hard Gate:</strong> {selectedProductObj.name} is only at {selectedProductObj.readiness}% factory readiness. A score of 80%+ is required to start production. Review its Tech Pack to clear the gate.
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, cursor: 'pointer', fontWeight: 500 }}>
+                      <input type="checkbox" checked={overrideGate} onChange={e => setOverrideGate(e.target.checked)} />
+                      I understand the risks and want to start production anyway
+                    </label>
                   </div>
                 )}
                 <button className="btn btn-primary" type="submit" disabled={saving || isBlocked || !form.productId}>
-                  {saving ? 'Creating...' : 'Create Order'}
+                  {saving ? 'Creating...' : overrideGate && belowThreshold ? 'Create Order Anyway' : 'Create Order'}
                 </button>
               </div>
             </form>
