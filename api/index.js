@@ -221,6 +221,49 @@ Return a JSON object with this exact structure:
   }
 });
 
+// Full tech pack generation — takes whatever the founder filled in on the
+// intake questionnaire (any field can be blank) plus an optional canvas
+// image, and asks Gemini to produce a complete, industry-standard tech pack:
+// fills gaps sensibly from the garment category/image, but never overwrites
+// anything the founder actually typed. The frontend always shows an
+// accuracy warning on AI-filled fields regardless of how confident this
+// prompt sounds — there's no way to verify factory-specific details (exact
+// supplier names, real cost data) without a human who actually knows them.
+app.post('/api/generate-tech-pack-full', async (req, res) => {
+  console.log("📥 Received full tech pack generation request...");
+  try {
+    const { imageBase64, category, answers } = req.body;
+    const a = answers || {};
+
+    const prompt = `You are an expert fashion technical designer producing a complete tech pack for a garment: "${category || 'garment'}".
+
+The founder answered an intake questionnaire — anything they left blank, fill in with a sensible industry-standard default for this garment type; anything they filled in, use exactly as given (don't contradict it). Their answers:
+${JSON.stringify(a, null, 2)}
+${a.other ? `\nThe founder specifically asked for this to be included/handled: "${a.other}" — make sure it's reflected somewhere in the output (as a BOM line, a construction note, a print placement, etc., whichever section fits).` : ''}
+
+Return a JSON object with exactly this structure (every array can be empty if genuinely not applicable, but prefer a reasonable default over leaving something empty):
+{
+  "bom": [ { "id": "bom-1", "material": "string", "supplier": "string", "qtyPerUnit": "string", "unitCost": "string" } ],
+  "measurements": [ { "id": "meas-1", "size": "S", "chest": "string", "length": "string", "sleeve": "string" } ],
+  "construction": [ { "id": "con-1", "section": "e.g. Side seam", "stitchType": "e.g. 5-thread overlock", "notes": "string" } ],
+  "printPlacements": [ { "id": "pp-1", "name": "e.g. Chest logo", "placement": "e.g. 3in below collar, centered", "size": "e.g. 4in x 4in", "technique": "e.g. screen print", "notes": "string" } ],
+  "trims": [ { "id": "trim-1", "name": "e.g. YKK zipper", "supplier": "string", "quantity": "string", "unitCost": "string", "notes": "string" } ],
+  "labels": [ { "id": "label-1", "type": "e.g. Main label, Care label, Size label", "placement": "string", "content": "string" } ],
+  "packaging": [ { "id": "pack-1", "item": "e.g. Poly bag", "spec": "string", "notes": "string" } ],
+  "materialUsage": [ { "id": "mu-1", "material": "string", "consumptionPerUnit": "string", "unit": "e.g. yards", "wastagePercent": "string" } ],
+  "manufacturingNotes": "string — general instructions to the factory",
+  "complianceNotes": "string — certifications, safety, labeling regulations relevant to this garment/market"
+}`;
+
+    const techPackData = await callGemini(prompt, imageBase64 || null);
+    console.log("✅ Full tech pack generation successful");
+    res.json({ ok: true, techPackData });
+  } catch (error) {
+    console.error('❌ Endpoint Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 app.post('/api/generate-silhouette', async (req, res) => {
   console.log("📥 Received silhouette generation request...");
   try {

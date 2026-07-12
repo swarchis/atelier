@@ -48,6 +48,10 @@ Every delete (design, tech pack, material, collection) goes through `ConfirmDele
 
 Also real: a moodboard (uploaded reference images), an AI color palette generator, AI trend inspiration (Tavily-grounded, cached once per category per day), AI-generated design variants, version history (every saved AI result), and a comment thread — all Supabase-backed per design. AI design critique (`/api/analyze-design`, scores a canvas snapshot) predates this and lives on the Canvas tab.
 
+**Tech Pack Builder** (`la-guia/src/pages/TechPackDetail.jsx`): opening a tech pack for the first time shows an intake questionnaire (`TechPackQuestionnaire.jsx`) — free-text answers per section (materials, sizing, construction, print placements, trims, labels, packaging, material usage, manufacturing/compliance notes, plus a catch-all "other" field), with two paths out of it: **"Generate with AI"** (`/api/generate-tech-pack-full`, Gemini fills every section from the answers + garment category, always shown next to an explicit "won't always be accurate" warning) or **"Start blank / from my answers"** (each non-empty answer seeds one real row in the corresponding table, no AI involved). Every section is a real editable table after that — construction, print placements, trims, labels, packaging, material usage, manufacturing notes, compliance notes, on top of the pre-existing BOM/measurements/sampling checklist — via a shared `EditableSectionTable` component. Also real: a missing-information banner on Overview (checks every section, not just the ones that feed the readiness score), an approval workflow (draft → pending → approved/rejected, gated on team role for the approve/reject step), version history (manual "Save version" snapshots the whole tech pack, restorable), PDF export (existing print-CSS layout, extended to cover every new section), and CSV export ("Export Excel" in the UI — deliberately CSV under the hood, not the `xlsx` npm package, which has open high-severity prototype-pollution/ReDoS advisories on its last published version; CSV opens natively in both Excel and Sheets with zero added dependency risk).
+
+I did not build the "AI edits a template image sourced from online" version of this — sourcing and rights-clearing a real tech pack template isn't something I can do reliably, and a structured, per-section editable document (what's built) is more useful for actually editing/exporting than an image with parts erased by AI. This matches the fallback you offered ("can also be done in Google Sheets or Excel if it's easier").
+
 **Real, needs your own keys to actually process/send:**
 Billing & subscription plans (Free / Basic / Premium) — real Stripe Checkout, Customer Portal, and plan-limit enforcement (active products, team seats, AI generations/month). Sales data — real Shopify Custom App OAuth. Team invite emails — real Resend delivery (see Gotchas below for its free-tier limits). AI Design Studio's transform tools need `GEMINI_API_KEY` to have access to the `gemini-2.5-flash-image` model specifically (a paid/billed model, distinct from the free-tier-friendly `gemini-flash-lite-latest` used everywhere else in this repo); its addition tools need a `PIXAZO_API_KEY` — see Gotchas for both. A handful of Premium feature lines are marked "Coming soon" in the UI — real marketing copy for where the tier is headed, not built into the app yet.
 
@@ -72,8 +76,9 @@ You need access to your Supabase project. Run these in the SQL Editor **in order
 10. `supabase/migrations/010_favorites.sql` (`is_favorite` on `products`, powers the Favorite projects dashboard widget)
 11. `supabase/migrations/011_design_studio.sql` — **required** for AI Design Studio and the Home dashboard's sticky notes: adds `moodboard`/`palette`/`variants` columns to `designs`, new `design_versions` and `design_comments` tables (with RLS), and a new `brand_notes` table (with RLS) for the 3-slot sticky notes.
 12. `supabase/migrations/012_feedback.sql` — **required** for the Home dashboard's Suggestion Inbox: new `feedback_submissions` table (with RLS).
+13. `supabase/migrations/013_tech_pack_builder.sql` — **required** for the Tech Pack Builder: adds `construction`/`print_placements`/`trims`/`labels`/`packaging`/`material_usage`/`manufacturing_notes`/`compliance_notes`/`questionnaire`/approval columns to `tech_packs`, and a new `tech_pack_versions` table (with RLS).
 
-Migrations 002–012 use `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`, so they're safe no-ops on a DB that already has those columns — run them anyway on a fresh project, in order.
+Migrations 002–013 use `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`, so they're safe no-ops on a DB that already has those columns — run them anyway on a fresh project, in order.
 
 - **Storage bucket**: A public bucket named `mockups` must exist for Design Studio snapshots.
 - **Auth**: "Confirm email" should be disabled in Auth settings for local testing.
@@ -132,7 +137,8 @@ Add `RESEND_API_KEY` to `api/.env`. Without it, invites still create a real `bra
 | Endpoint | Purpose |
 |---|---|
 | `/api/analyze-design` | Scores a captured canvas snapshot |
-| `/api/generate-tech-pack` | Generates BOM + graded measurements from canvas |
+| `/api/generate-tech-pack` | Generates BOM + graded measurements from canvas (used by DesignDetail's quick "Auto-Generate Tech Pack") |
+| `/api/generate-tech-pack-full` | Tech Pack Builder's questionnaire-driven generator — `{ imageBase64?, category, answers }`, returns every section (BOM, measurements, construction, print placements, trims, labels, packaging, material usage, notes) |
 | `/api/generate-silhouette` | Generates a stroke-only starting outline for a custom garment type not in the preset library |
 | `/api/parse-vendor` | Extracts structured profile from pasted text |
 | `/api/search-vendors` | Real-time web search via Tavily + Gemini extraction |
