@@ -146,6 +146,65 @@ function TeamTab() {
   );
 }
 
+function CategoriesSection() {
+  const { categories, createCategory, deleteCategory } = useProducts();
+  const [name, setName] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setAdding(true);
+    setError(null);
+    try {
+      await createCategory(trimmed);
+      setName('');
+    } catch (err) {
+      setError(err.message.includes('duplicate') ? 'That category already exists.' : err.message);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 640, marginTop: 24 }}>
+      <div className="card-raised" style={{ marginBottom: 20 }}>
+        <div className="card-header"><span className="card-title">Add a category</span></div>
+        <div className="card-body">
+          <form onSubmit={handleAdd} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
+              <label className="form-label">Category name</label>
+              <input className="form-input" placeholder="e.g. Outerwear" value={name} onChange={e => setName(e.target.value)} />
+            </div>
+            <button className="btn btn-primary" type="submit" disabled={adding || !name.trim()}>
+              {adding ? 'Adding…' : 'Add'}
+            </button>
+          </form>
+          {error && <div className="form-hint" style={{ color: 'var(--red)', marginTop: 8 }}>{error}</div>}
+          <div className="form-hint" style={{ marginTop: 10 }}>
+            Categories show up wherever a product's category is picked, including on each design's Details panel.
+          </div>
+        </div>
+      </div>
+
+      <div className="section-label">Categories</div>
+      <div className="card">
+        {categories.map(c => (
+          <div className="list-row" key={c.id}>
+            <span style={{ fontSize: 13.5 }}>{c.name}</span>
+            <button className="btn btn-sm" onClick={() => deleteCategory(c.id)} title="Remove">
+              <i className="ph ph-x" />
+            </button>
+          </div>
+        ))}
+        {categories.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--ink-4)', fontStyle: 'italic', fontSize: 13 }}>No categories yet — products fall back to their garment type.</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const [tab, setTab] = useState('profile');
   const { activeBrand, updateBrand } = useProducts();
@@ -268,46 +327,49 @@ export default function Settings() {
         )}
 
         {tab === 'brand' && (
-          <div className="grid-2">
-            <div className="card-raised">
-              <div className="card-header"><span className="card-title">Identity</span></div>
-              <div className="card-body">
-                <div className="form-group">
-                  <label className="form-label">Brand name</label>
-                  <input className="form-input" value={form.name} onChange={e => f('name', e.target.value)} />
+          <>
+            <div className="grid-2">
+              <div className="card-raised">
+                <div className="card-header"><span className="card-title">Identity</span></div>
+                <div className="card-body">
+                  <div className="form-group">
+                    <label className="form-label">Brand name</label>
+                    <input className="form-input" value={form.name} onChange={e => f('name', e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Target customer</label>
+                    <textarea className="form-textarea" value={form.target_customer} onChange={e => f('target_customer', e.target.value)} placeholder="e.g. Gen Z streetwear enthusiasts looking for heavyweight basics." />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Quality tier</label>
+                    <select className="form-select" value={form.quality_tier} onChange={e => f('quality_tier', e.target.value)}>
+                      <option value="Value / accessible">Value / accessible</option>
+                      <option value="Premium contemporary">Premium contemporary</option>
+                      <option value="Luxury / made-to-order">Luxury / made-to-order</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Target customer</label>
-                  <textarea className="form-textarea" value={form.target_customer} onChange={e => f('target_customer', e.target.value)} placeholder="e.g. Gen Z streetwear enthusiasts looking for heavyweight basics." />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Quality tier</label>
-                  <select className="form-select" value={form.quality_tier} onChange={e => f('quality_tier', e.target.value)}>
-                    <option value="Value / accessible">Value / accessible</option>
-                    <option value="Premium contemporary">Premium contemporary</option>
-                    <option value="Luxury / made-to-order">Luxury / made-to-order</option>
-                  </select>
+              </div>
+              <div className="card-raised">
+                <div className="card-header"><span className="card-title">Production philosophy</span></div>
+                <div className="card-body">
+                  <div className="form-group">
+                    <label className="form-label">Budget philosophy</label>
+                    <textarea className="form-textarea" value={form.budget_philosophy} onChange={e => f('budget_philosophy', e.target.value)} placeholder="e.g. Willing to pay more for higher MOQ if quality is unmatched." />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Sustainability preferences</label>
+                    <input className="form-input" value={form.sustainability} onChange={e => f('sustainability', e.target.value)} placeholder="e.g. Requires GOTS certified cotton." />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Manufacturer preferences</label>
+                    <input className="form-input" value={form.manufacturer_preferences} onChange={e => f('manufacturer_preferences', e.target.value)} placeholder="e.g. Strong preference for Portugal or Italy." />
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="card-raised">
-              <div className="card-header"><span className="card-title">Production philosophy</span></div>
-              <div className="card-body">
-                <div className="form-group">
-                  <label className="form-label">Budget philosophy</label>
-                  <textarea className="form-textarea" value={form.budget_philosophy} onChange={e => f('budget_philosophy', e.target.value)} placeholder="e.g. Willing to pay more for higher MOQ if quality is unmatched." />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Sustainability preferences</label>
-                  <input className="form-input" value={form.sustainability} onChange={e => f('sustainability', e.target.value)} placeholder="e.g. Requires GOTS certified cotton." />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Manufacturer preferences</label>
-                  <input className="form-input" value={form.manufacturer_preferences} onChange={e => f('manufacturer_preferences', e.target.value)} placeholder="e.g. Strong preference for Portugal or Italy." />
-                </div>
-              </div>
-            </div>
-          </div>
+            <CategoriesSection />
+          </>
         )}
 
         {tab === 'team' && <TeamTab />}

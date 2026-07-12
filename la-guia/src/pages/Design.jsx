@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useAIUsage } from '../context/AIUsageContext.jsx';
@@ -10,7 +10,7 @@ const STATUS_COLOR = { Sketching: 'var(--ink-3)', Refining: 'var(--c-design)', R
 
 export default function Design() {
   const navigate = useNavigate();
-  const { products, designs, createDesign, deleteProduct, activeBrand } = useProducts();
+  const { products, designs, createDesign, deleteProduct, activeBrand, duplicateProduct, setProductStatus, archivedProducts, loadArchivedProducts } = useProducts();
   const { canUse: canUseAI, remaining: aiRemaining, logUsage } = useAIUsage();
   const [showNew, setShowNew] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -18,8 +18,40 @@ export default function Design() {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState(null);
+  const [actionError, setActionError] = useState(null);
   const fileRef = useRef(null);
   const designProducts = products.filter(p => p.stage === 'concept' || p.stage === 'design');
+
+  useEffect(() => {
+    if (showArchived) loadArchivedProducts();
+  }, [showArchived, activeBrand?.id]);
+
+  const handleDuplicate = async (e, product) => {
+    e.stopPropagation();
+    setActionError(null);
+    setDuplicatingId(product.id);
+    try {
+      const newId = await duplicateProduct(product.id);
+      navigate(`/design/${newId}`);
+    } catch (err) {
+      setActionError(`Couldn't duplicate "${product.name}": ${err.message}`);
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
+  const handleArchiveToggle = async (e, product, archive) => {
+    e.stopPropagation();
+    setActionError(null);
+    try {
+      await setProductStatus(product.id, archive ? 'archived' : 'active');
+      if (showArchived) loadArchivedProducts();
+    } catch (err) {
+      setActionError(`Couldn't update "${product.name}": ${err.message}`);
+    }
+  };
 
   const plan = getPlan(activeBrand?.plan_tier || 'free');
   const atProductLimit = products.length >= plan.limits.products;
@@ -89,6 +121,9 @@ export default function Design() {
           <div className="page-sub">{designProducts.length} in concept or design</div>
         </div>
         <div className="topbar-right">
+          <button className="btn btn-sm" onClick={() => setShowArchived(s => !s)}>
+            <i className={`ph ${showArchived ? 'ph-eye-slash' : 'ph-archive'}`} /> {showArchived ? 'Hide archived' : 'Show archived'}
+          </button>
           <button data-tour="design-new" className="btn btn-primary" onClick={() => setShowNew(s => !s)} disabled={loading}>
             <i className="ph ph-plus" /> {loading ? 'Creating...' : 'New design'}
           </button>
@@ -96,6 +131,12 @@ export default function Design() {
       </div>
 
       <div className="content">
+        {actionError && (
+          <div className="alert" style={{ display: 'flex', gap: 10, padding: '11px 13px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', fontSize: 13, marginBottom: 16 }}>
+            <i className="ph ph-warning" style={{ marginTop: 1 }} />
+            <div>{actionError}</div>
+          </div>
+        )}
         {showNew && (
           <div className="card-raised enter" style={{ marginBottom: 28 }}>
             <div className="corner-fold" style={{ '--fold-color': 'var(--c-design)' }} />
@@ -187,6 +228,23 @@ export default function Design() {
                 >
                   <i className="ph ph-trash" />
                 </button>
+                <button
+                  className="piece-move-btn"
+                  title="Duplicate design"
+                  onClick={e => handleDuplicate(e, p)}
+                  disabled={duplicatingId === p.id}
+                  style={{ right: 40 }}
+                >
+                  <i className={`ph ${duplicatingId === p.id ? 'ph-spinner ph-spin' : 'ph-copy'}`} />
+                </button>
+                <button
+                  className="piece-move-btn"
+                  title="Archive design"
+                  onClick={e => handleArchiveToggle(e, p, true)}
+                  style={{ right: 70 }}
+                >
+                  <i className="ph ph-archive" />
+                </button>
                 <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center' }}>
                   <div style={{ width: 44, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-3)', borderRadius: 8, color: 'var(--ink-3)', flexShrink: 0 }}>
                     {d?.baseType === 'ai-silhouette' && d?.aiPaths?.paths?.length
@@ -205,6 +263,34 @@ export default function Design() {
             );
           })}
         </div>
+
+        {showArchived && (
+          <>
+            <div className="section-label" style={{ marginTop: 28 }}>Archived</div>
+            {archivedProducts.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>No archived products.</div>
+            ) : (
+              <div className="grid-cards">
+                {archivedProducts.map(p => (
+                  <div key={p.id} className="card-raised card-hover" style={{ padding: '16px 18px', cursor: 'pointer', opacity: 0.7 }} onClick={() => navigate(`/design/${p.id}`)}>
+                    <button
+                      className="piece-move-btn"
+                      title="Restore from archive"
+                      onClick={e => handleArchiveToggle(e, p, false)}
+                    >
+                      <i className="ph ph-tray-arrow-up" />
+                    </button>
+                    <div style={{ minWidth: 0, marginBottom: 12 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{p.category}</div>
+                    </div>
+                    <span className="tag" style={{ background: 'transparent', borderColor: 'var(--border-2)', color: 'var(--ink-3)' }}>Archived</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <ConfirmDeleteModal

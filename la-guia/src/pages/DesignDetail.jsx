@@ -14,6 +14,7 @@ import AIStudioTab from '../components/design-studio/AIStudioTab.jsx';
 import InspirationTab from '../components/design-studio/InspirationTab.jsx';
 import VariantsTab from '../components/design-studio/VariantsTab.jsx';
 import HistoryTab from '../components/design-studio/HistoryTab.jsx';
+import SkuVariantsTab from '../components/design-studio/SkuVariantsTab.jsx';
 import { blobToBase64 } from '../lib/designImages.js';
 
 const SEVERITY_ICON = { amber: 'ph-warning', blue: 'ph-info', green: 'ph-check-circle', red: 'ph-x-circle' };
@@ -26,14 +27,15 @@ const TABS = [
   { key: 'canvas', label: 'Canvas', icon: 'ph-pencil-simple' },
   { key: 'ai-studio', label: 'AI Studio', icon: 'ph-sparkle' },
   { key: 'inspiration', label: 'Inspiration', icon: 'ph-images' },
-  { key: 'variants', label: 'Variants', icon: 'ph-shuffle' },
+  { key: 'image-variants', label: 'Image Variants', icon: 'ph-shuffle' },
+  { key: 'skus', label: 'SKUs & Variants', icon: 'ph-barcode' },
   { key: 'history', label: 'History & Comments', icon: 'ph-clock-counter-clockwise' },
 ];
 
 export default function DesignDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { products, designs, getUploadedFile, deleteProduct } = useProducts();
+  const { products, designs, getUploadedFile, deleteProduct, updateProduct, activeBrand, categories, duplicateProduct, setProductStatus } = useProducts();
   const { canUse: canUseAI, remaining: aiRemaining, logUsage } = useAIUsage();
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -46,6 +48,7 @@ export default function DesignDetail() {
   const [captureError, setCaptureError] = useState(null);
   const [restoreFile, setRestoreFile] = useState(null);
   const [toggling, setToggling] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [tab, setTab] = useState('canvas');
   const [moodboard, setMoodboard] = useState([]);
   const [palette, setPalette] = useState([]);
@@ -247,6 +250,29 @@ export default function DesignDetail() {
     setExpanded(e => !e);
   };
 
+  const handleDuplicate = async () => {
+    setDuplicating(true);
+    try {
+      const newId = await duplicateProduct(id);
+      navigate(`/design/${newId}`);
+    } catch (err) {
+      setCaptureError('Duplicate failed: ' + err.message);
+      setDuplicating(false);
+    }
+  };
+
+  const handleStatusChange = async (status) => {
+    try {
+      await setProductStatus(id, status);
+      // Archived products drop out of the main `products` list, so staying
+      // on this page would immediately hit the "not found" empty state —
+      // head back to the list instead, same as after a delete.
+      if (status === 'archived') navigate('/design');
+    } catch (err) {
+      setCaptureError('Failed to update status: ' + err.message);
+    }
+  };
+
   return (
     <>
       <div className="topbar">
@@ -260,6 +286,9 @@ export default function DesignDetail() {
         <div className="topbar-right">
           <button className="canvas-icon-btn" onClick={() => setConfirmingDelete(true)} title="Delete design" style={{ color: 'var(--red)' }}>
             <i className="ph ph-trash" />
+          </button>
+          <button className="canvas-icon-btn" onClick={handleDuplicate} disabled={duplicating} title="Duplicate design">
+            <i className={`ph ${duplicating ? 'ph-spinner ph-spin' : 'ph-copy'}`} />
           </button>
           <button className="btn btn-primary" onClick={handleConvertToTechPack} disabled={generatingTP || analyzing || !canUseAI} title={!canUseAI ? 'Upgrade your plan to use AI tech pack generation' : undefined}>
             {generatingTP ? <><i className="ph ph-spinner ph-spin" /> Saving & Generating...</> : !canUseAI ? <><i className="ph ph-lock-simple" /> Upgrade for AI Tech Pack</> : <><i className="ph ph-magic-wand" /> Auto-Generate Tech Pack</>}
@@ -365,13 +394,33 @@ export default function DesignDetail() {
                   <div style={{ fontSize: 13.5 }}>{design.garmentType}</div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Colorway</label>
-                  <input className="form-input" defaultValue={design.colorway} />
+                  <label className="form-label">Category</label>
+                  <select className="form-input" value={product.category || ''} onChange={e => updateProduct(id, { category: e.target.value })}>
+                    {product.category && !categories.some(c => c.name === product.category) && (
+                      <option value={product.category}>{product.category}</option>
+                    )}
+                    {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select>
                 </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Status</label>
+                <div className="form-group">
+                  <label className="form-label">Colorway (sketch)</label>
+                  <div style={{ fontSize: 13.5, color: 'var(--ink-3)' }}>{design.colorway || '—'}</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Product status</label>
+                  <select className="form-input" value={product.status || 'active'} onChange={e => handleStatusChange(e.target.value)}>
+                    <option value="active">Active</option>
+                    <option value="discontinued">Discontinued</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 12 }}>
+                  <label className="form-label">Design status</label>
                   <span className="tag tag-accent">{design.status}</span>
                 </div>
+                <button className="btn btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setTab('skus')}>
+                  <i className="ph ph-barcode" /> Manage SKUs & Variants
+                </button>
               </div>
             </div>
           </div>
@@ -406,7 +455,7 @@ export default function DesignDetail() {
           />
         )}
 
-        {tab === 'variants' && (
+        {tab === 'image-variants' && (
           <VariantsTab
             productId={id}
             variants={variants}
@@ -416,6 +465,15 @@ export default function DesignDetail() {
             canUseAI={canUseAI}
             aiRemaining={aiRemaining}
             logUsage={logUsage}
+          />
+        )}
+
+        {tab === 'skus' && (
+          <SkuVariantsTab
+            productId={id}
+            product={product}
+            brandName={activeBrand?.name}
+            onUpdateProduct={updates => updateProduct(id, updates)}
           />
         )}
 

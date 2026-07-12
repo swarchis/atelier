@@ -14,6 +14,8 @@ export function ProductsProvider({ children }) {
   const [products, setProducts] = useState([]);
   const [collections, setCollections] = useState([]);
   const [designs, setDesigns] = useState({});
+  const [categories, setCategories] = useState([]);
+  const [archivedProducts, setArchivedProducts] = useState([]);
   const [activeBrand, setActiveBrandState] = useState(null);
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -78,6 +80,8 @@ export function ProductsProvider({ children }) {
       setProducts([]);
       setCollections([]);
       setDesigns({});
+      setCategories([]);
+      setArchivedProducts([]);
       setLoading(false);
       return;
     }
@@ -92,11 +96,23 @@ export function ProductsProvider({ children }) {
           .order('created_at', { ascending: false });
         setCollections(collData || []);
 
-        const { data: prodData } = await supabase
-          .from('products')
-          .select('*')
-          .eq('brand_id', activeBrand.id)
-          .order('created_at', { ascending: false });
+        const catRes = await supabase.from('categories').select('*').eq('brand_id', activeBrand.id).order('name', { ascending: true });
+        setCategories(catRes.error ? [] : (catRes.data || []));
+
+        // Archived products are excluded from the main list by default so
+        // they stop cluttering the Kanban/dashboard — Design.jsx's "Show
+        // archived" toggle loads them separately via loadArchivedProducts().
+        // Falls back to an unfiltered query if `status` doesn't exist yet
+        // (migration 014 not run) so the whole product list doesn't go
+        // blank over one missing column on an otherwise-working brand.
+        let prodData;
+        const filtered = await supabase.from('products').select('*').eq('brand_id', activeBrand.id).neq('status', 'archived').order('created_at', { ascending: false });
+        if (filtered.error) {
+          const unfiltered = await supabase.from('products').select('*').eq('brand_id', activeBrand.id).order('created_at', { ascending: false });
+          prodData = unfiltered.data;
+        } else {
+          prodData = filtered.data;
+        }
         setProducts(prodData || []);
 
         const productIds = (prodData || []).map(p => p.id);
@@ -156,6 +172,11 @@ export function ProductsProvider({ children }) {
     setProducts(prev => prev.map(p => (p.id === id ? { ...p, stage } : p)));
     const { error } = await supabase.from('products').update({ stage }).eq('id', id);
     if (error) console.error('Failed to move product', error);
+    // Best-effort lifecycle log — a missing product_stage_history table
+    // (migration 014 not run yet) shouldn't block the actual stage move.
+    supabase.from('product_stage_history').insert([{ product_id: id, stage }]).then(({ error: histErr }) => {
+      if (histErr) console.error('Failed to log stage history', histErr);
+    });
   };
 
   const updateProduct = async (id, updates) => {
@@ -184,6 +205,107 @@ export function ProductsProvider({ children }) {
       delete next[id];
       return next;
     });
+  };
+
+  const createCategory = async (name) => {
+    if (!activeBrand) throw new Error('No active brand');
+    const { data, error } = await supabase
+      .from('categories')
+      .insert([{ brand_id: activeBrand.id, name }])
+      .select()
+      .single();
+    if (error) throw error;
+    setCategories(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+    return data;
+  };
+
+  const deleteCategory = async (id) => {
+    const { error } = await supabase.from('categories').delete().eq('id', id);
+    if (error) throw error;
+    setCategories(prev => prev.filter(c => c.id !== id));
+  };
+
+  // Clones the product row and its design (if any) into a new product.
+  // Doesn't touch tech packs or variants — those are meant to be generated
+  // fresh for the new piece rather than inherited stale from the original.
+  const duplicateProduct = async (id) => {
+    const source = products.find(p => p.id === id) || archivedProducts.find(p => p.id === id);
+    if (!source) throw new Error('Product not found');
+
+    const { id: _sourceId, created_at: _createdAt, ...rest } = source;
+    const { data: newProduct, error: prodError } = await supabase
+      .from('products')
+      .insert([{ ...rest, name: `${source.name} (Copy)`, status: 'active', is_favorite: false }])
+      .select()
+      .single();
+    if (prodError) throw prodError;
+
+    const sourceDesign = designs[id];
+    if (sourceDesign) {
+      const { error: designError } = await supabase
+        .from('designs')
+        .insert([{
+          product_id: newProduct.id,
+          garment_type: sourceDesign.garmentType,
+          base_type: sourceDesign.baseType,
+          silhouette: sourceDesign.silhouette,
+          colorway: sourceDesign.colorway,
+          status: 'Sketching',
+          ai_paths: sourceDesign.aiPaths || null,
+        }]);
+      if (designError) {
+        console.error('Failed to duplicate design', designError);
+      } else {
+        setDesigns(prev => ({ ...prev, [newProduct.id]: { ...sourceDesign, status: 'Sketching' } }));
+      }
+    }
+
+    supabase.from('product_stage_history').insert([{ product_id: newProduct.id, stage: newProduct.stage }]).then(({ error: histErr }) => {
+      if (histErr) console.error('Failed to log stage history', histErr);
+    });
+
+    setProducts(prev => [newProduct, ...prev]);
+    return newProduct.id;
+  };
+
+  // Archiving removes a product from the default `products` list and moves
+  // it into `archivedProducts`; any other status change (back to active, or
+  // discontinued) does the reverse. Discontinued products stay in the main
+  // list on purpose — unlike archived, they're still relevant to Kanban/history.
+  const setProductStatus = async (id, status) => {
+    const { data, error } = await supabase.from('products').update({ status }).eq('id', id).select().single();
+    if (error) throw error;
+
+    if (status === 'archived') {
+      setProducts(prev => prev.filter(p => p.id !== id));
+      setArchivedProducts(prev => [data, ...prev.filter(p => p.id !== id)]);
+    } else {
+      setArchivedProducts(prev => prev.filter(p => p.id !== id));
+      setProducts(prev => (prev.some(p => p.id === id) ? prev.map(p => (p.id === id ? data : p)) : [data, ...prev]));
+    }
+    return data;
+  };
+
+  const archiveProduct = (id) => setProductStatus(id, 'archived');
+
+  // Lazily loads this brand's archived products — only called when
+  // Design.jsx's "Show archived" toggle is switched on, so browsing the
+  // normal list never pays for it.
+  const loadArchivedProducts = async () => {
+    if (!activeBrand) return [];
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('brand_id', activeBrand.id)
+      .eq('status', 'archived')
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error('Failed to load archived products', error);
+      setArchivedProducts([]);
+      return [];
+    }
+    setArchivedProducts(data || []);
+    return data || [];
   };
 
   const deleteCollection = async (id) => {
@@ -256,6 +378,10 @@ export function ProductsProvider({ children }) {
 
     if (designError) throw designError;
 
+    supabase.from('product_stage_history').insert([{ product_id: productData.id, stage: 'concept' }]).then(({ error: histErr }) => {
+      if (histErr) console.error('Failed to log stage history', histErr);
+    });
+
     if (file) uploadedFiles.current.set(productData.id, file);
 
     setProducts(prev => [productData, ...prev]);
@@ -279,6 +405,8 @@ export function ProductsProvider({ children }) {
     <ProductsContext.Provider value={{
       products, collections, moveProduct, updateProduct, deleteProduct, toggleFavorite, designs, createDesign, createCollection,
       deleteCollection, updateBrand, getUploadedFile, activeBrand, brands, switchBrand, createBrand,
+      categories, createCategory, deleteCategory,
+      archivedProducts, loadArchivedProducts, duplicateProduct, setProductStatus, archiveProduct,
       loading: loading || loadingBrands,
     }}>
       {children}
