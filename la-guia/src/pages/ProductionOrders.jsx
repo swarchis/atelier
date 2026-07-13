@@ -5,12 +5,13 @@ import { useProducts } from '../context/ProductsContext.jsx';
 import { useVendors } from '../context/VendorsContext.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 
-const STAGE_TAG = { 
-  Sampling: 'tag-blue', 
-  'In production': 'tag-amber', 
-  Shipped: 'tag-accent', 
-  Delivered: 'tag-green' 
+const STAGE_TAG = {
+  Sampling: 'tag-blue',
+  'In production': 'tag-amber',
+  Shipped: 'tag-accent',
+  Delivered: 'tag-green'
 };
+const STAGES_LIST = ['Sampling', 'In production', 'Shipped', 'Delivered'];
 
 export default function ProductionOrders() {
   const navigate = useNavigate();
@@ -22,6 +23,7 @@ export default function ProductionOrders() {
   const [form, setForm] = useState({ productId: '', vendorId: '', units: '', dueDate: '', poNumber: '' });
   const [saving, setSaving] = useState(false);
   const [overrideGate, setOverrideGate] = useState(false);
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'analytics'
 
   // Check the Hard Gate readiness requirement — an explicit, opt-in override
   // lets a founder proceed anyway ("I'm sure"), so this isn't a true hard
@@ -51,6 +53,14 @@ export default function ProductionOrders() {
       setSaving(false);
     }
   };
+
+  const delivered = orders.filter(o => o.stage === 'Delivered');
+  const onTimeCount = delivered.filter(o => o.delivered_at && o.due_date && new Date(o.delivered_at) <= new Date(o.due_date)).length;
+  const onTimeRate = delivered.length ? Math.round((onTimeCount / delivered.length) * 100) : null;
+  const avgDays = delivered.length
+    ? Math.round(delivered.reduce((sum, o) => sum + (new Date(o.delivered_at) - new Date(o.created_at)) / 86400000, 0) / delivered.length)
+    : null;
+  const unitsInProgress = orders.filter(o => o.stage !== 'Delivered').reduce((sum, o) => sum + (o.units || 0), 0);
 
   return (
     <>
@@ -125,16 +135,57 @@ export default function ProductionOrders() {
           </div>
         )}
 
+        {orders.length > 0 && (
+          <div className="pill-group" style={{ marginBottom: 18 }}>
+            <button className={`pill ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')}>
+              <i className="ph ph-list-dashes" style={{ marginRight: 6 }} /> List
+            </button>
+            <button className={`pill ${viewMode === 'analytics' ? 'active' : ''}`} onClick={() => setViewMode('analytics')}>
+              <i className="ph ph-chart-bar" style={{ marginRight: 6 }} /> Analytics
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center' }}><i className="ph ph-spinner ph-spin" /> Loading orders...</div>
         ) : orders.length === 0 ? (
-          <EmptyState 
-            icon="ph-package" 
-            title="No production orders" 
+          <EmptyState
+            icon="ph-package"
+            title="No production orders"
             sub="Start your first production run by connecting a product to a vendor."
             cta="New Order"
             onCta={() => setShowNew(true)}
           />
+        ) : viewMode === 'analytics' ? (
+          <>
+            <div className="stats-row" style={{ marginBottom: 18 }}>
+              <div className="stat-card" style={{ '--stat-accent': 'var(--c-materials)' }}>
+                <div className="stat-label">Units in progress</div>
+                <div className="stat-value">{unitsInProgress}</div>
+              </div>
+              <div className="stat-card" style={{ '--stat-accent': 'var(--c-materials)' }}>
+                <div className="stat-label">Avg. days to delivery</div>
+                <div className="stat-value">{avgDays != null ? avgDays : '—'}</div>
+              </div>
+              <div className="stat-card" style={{ '--stat-accent': 'var(--c-materials)' }}>
+                <div className="stat-label">On-time delivery rate</div>
+                <div className="stat-value" style={{ color: onTimeRate != null && onTimeRate < 70 ? 'var(--amber)' : undefined }}>{onTimeRate != null ? `${onTimeRate}%` : '—'}</div>
+              </div>
+              <div className="stat-card" style={{ '--stat-accent': 'var(--c-materials)' }}>
+                <div className="stat-label">Delivered orders</div>
+                <div className="stat-value">{delivered.length}</div>
+              </div>
+            </div>
+            <div className="section-label">Orders by stage</div>
+            <div className="card">
+              {STAGES_LIST.map(stage => (
+                <div className="list-row" key={stage}>
+                  <span className={`tag ${STAGE_TAG[stage]}`}>{stage}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 13.5 }}>{orders.filter(o => o.stage === stage).length}</span>
+                </div>
+              ))}
+            </div>
+          </>
         ) : (
           <div className="card">
             {orders.map(o => (

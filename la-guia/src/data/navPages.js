@@ -9,13 +9,13 @@ export const NAV_GROUPS = [
     { path: '/collections', icon: 'ph-stack', label: 'Collections', color: 'var(--c-organization)', keywords: ['capsule', 'season', 'drop', 'launch window'] },
     { path: '/design', icon: 'ph-pencil-simple', label: 'Designs', color: 'var(--c-design)', keywords: ['sketch', 'silhouette', 'canvas', 'photopea', 'design studio'] },
     { path: '/tech-packs', icon: 'ph-ruler', label: 'Tech Packs', color: 'var(--c-techpack)', keywords: ['bom', 'bill of materials', 'measurements', 'grading'] },
-    { path: '/materials', icon: 'ph-flask', label: 'Material Library', color: 'var(--c-materials)', keywords: ['fabric', 'trims', 'shrinkage', 'handling'] },
+    { path: '/materials', icon: 'ph-flask', label: 'Material Library', color: 'var(--c-materials)', keywords: ['fabric', 'trims', 'shrinkage', 'handling', 'sustainability', 'cost history', 'suppliers', 'availability'] },
     { path: '/vendors', icon: 'ph-handshake', label: 'Vendors', color: 'var(--c-vendors)', keywords: ['manufacturer', 'factory', 'sourcing', 'supplier'] },
     { path: '/quotes', icon: 'ph-file-text', label: 'Quotes & Pricing', color: 'var(--c-vendors)', keywords: ['rfq', 'costing', 'bid'] },
   ] },
   { label: 'Production', tourId: 'nav-production', items: [
     { path: '/sampling', icon: 'ph-t-shirt', label: 'Sampling', color: 'var(--c-finalcheck)', keywords: ['sample', 'rounds', 'fit feedback', 'revision', 'approval'] },
-    { path: '/production', icon: 'ph-package', label: 'Production Orders', color: 'var(--c-materials)', keywords: ['po', 'units', 'due date', 'delivery'] },
+    { path: '/production', icon: 'ph-package', label: 'Production Orders', color: 'var(--c-materials)', keywords: ['po', 'units', 'due date', 'delivery', 'shipment', 'inventory', 'quality control', 'qc', 'issues', 'analytics', 'milestones', 'timeline'] },
     { path: '/readiness', icon: 'ph-check-circle', label: 'Readiness Review', color: 'var(--c-finalcheck)', keywords: ['gate', 'checklist', 'factory ready'] },
   ] },
   { label: 'Analytics', items: [
