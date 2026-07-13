@@ -46,6 +46,8 @@ import ProductInsights from './pages/ProductInsights.jsx';
 import ContentHub from './pages/ContentHub.jsx';
 import Settings from './pages/Settings.jsx';
 import NotificationsInbox from './pages/NotificationsInbox.jsx';
+import PrivacyPolicy from './pages/PrivacyPolicy.jsx';
+import TermsOfService from './pages/TermsOfService.jsx';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -124,6 +126,8 @@ export default function App() {
                   <Route path="/signup" element={<SignUp />} />
                   <Route path="/login" element={<LogIn />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route path="/privacy" element={<PrivacyPolicy />} />
+                  <Route path="/terms" element={<TermsOfService />} />
                   <Route path="/*" element={
                     <ProtectedRoute>
                       <AppShell />
