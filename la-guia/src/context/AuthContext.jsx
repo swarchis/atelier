@@ -50,13 +50,22 @@ export function AuthProvider({ children }) {
 
   const resetPassword = async (email) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      // When they click the link in their email, route them here
+      redirectTo: `${window.location.origin}/update-password`,
     });
     if (error) throw error;
   };
 
+  const updatePassword = async (newPassword) => {
+    // Supabase auth client automatically picks up the secure token from the URL 
+    // when redirected from the email, allowing us to safely call updateUser.
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    return data;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, signUp, logIn, logOut, loading, resetPassword }}>
+    <AuthContext.Provider value={{ user, signUp, logIn, logOut, resetPassword, updatePassword, loading }}>
       {!loading && children}
     </AuthContext.Provider>
   );

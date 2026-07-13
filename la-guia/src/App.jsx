@@ -14,7 +14,7 @@ import { AIUsageProvider } from './context/AIUsageContext.jsx';
 import { OnboardingProvider } from './context/OnboardingContext.jsx';
 import { AppUIProvider, useAppUI } from './context/AppUIContext.jsx';
 import { SalesProvider } from './context/SalesContext.jsx';
-import { ContentProvider } from './context/ContentContext.jsx'; // NEW
+import { ContentProvider } from './context/ContentContext.jsx';
 import { ChatProvider } from './context/ChatContext.jsx';
 import OnboardingOverlay from './components/OnboardingOverlay.jsx';
 import ShortcutsHelpModal from './components/ShortcutsHelpModal.jsx';
@@ -25,6 +25,7 @@ import Welcome from './pages/auth/Welcome.jsx';
 import SignUp from './pages/auth/SignUp.jsx';
 import LogIn from './pages/auth/LogIn.jsx';
 import ResetPassword from './pages/auth/ResetPassword.jsx';
+import UpdatePassword from './pages/auth/UpdatePassword.jsx';
 
 import Home from './pages/Home.jsx';
 import Design from './pages/Design.jsx';
@@ -93,6 +94,9 @@ function AppShellInner() {
             <Route path="/content" element={<ContentHub />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/notifications" element={<NotificationsInbox />} />
+            
+            {/* CATCH-ALL: Prevents the "Blank White Screen" if a user typos a URL */}
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
         <OnboardingOverlay />
@@ -125,13 +129,14 @@ export default function App() {
             <AIUsageProvider>
             <ChatProvider>
             <SalesProvider>
-            <ContentProvider> {/* NEW */}
+            <ContentProvider>
               <BrowserRouter>
                 <Routes>
                   <Route path="/welcome" element={<Welcome />} />
                   <Route path="/signup" element={<SignUp />} />
                   <Route path="/login" element={<LogIn />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route path="/update-password" element={<UpdatePassword />} />
                   <Route path="/privacy" element={<PrivacyPolicy />} />
                   <Route path="/terms" element={<TermsOfService />} />
                   <Route path="/*" element={
