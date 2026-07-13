@@ -1094,6 +1094,109 @@ Return a JSON object with exactly this structure:
 });
 
 // ---------------------------------------------------------
+// 10. RFQ & QUOTE ECONOMICS
+// ---------------------------------------------------------
+// Fixed set of common apparel cost levers for the AI Cost Simulator — a
+// curated list rather than something AI invents per-call, so the UI can show
+// a stable set of toggles ("like configuring a car") instead of a different
+// random list every time.
+const COST_LEVERS = [
+  { id: 'gsm-up', label: 'Increase fabric weight (GSM)', hint: 'e.g. 380 -> 450 GSM' },
+  { id: 'add-embroidery', label: 'Add embroidery or a printed detail', hint: 'one placement, standard size' },
+  { id: 'organic-cotton', label: 'Switch to organic/premium cotton', hint: 'vs. standard cotton blend' },
+  { id: 'move-region', label: 'Move production to a higher-cost region', hint: 'e.g. Portugal/EU instead of current sourcing' },
+  { id: 'smaller-moq', label: 'Cut order quantity to a smaller MOQ tier', hint: 'per-unit cost typically rises' },
+  { id: 'premium-trim', label: 'Add a premium trim (woven label, metal hardware)', hint: '' },
+];
+
+app.post('/api/quote-economics', async (req, res) => {
+  console.log("📥 Received quote economics request...");
+  try {
+    const { vendor, product, quote, bom } = req.body;
+    if (!quote || quote.amount == null) return res.status(400).json({ ok: false, error: 'This quote needs an amount before economics can be estimated.' });
+
+    const totalAmount = Number(quote.amount);
+    const fabricCost = (bom || []).reduce((sum, b) => sum + ((parseFloat(b.qtyPerUnit) || 0) * (parseFloat(b.unitCost) || 0)), 0);
+    const fabricPercent = totalAmount > 0 ? Math.min(100, (fabricCost / totalAmount) * 100) : 0;
+    const remainingPercent = Math.max(0, 100 - fabricPercent);
+
+    const prompt = `You are a costing analyst helping an independent clothing brand founder understand where their per-unit quoted price actually goes.
+
+Product: ${product?.name || 'unknown'} (${product?.category || 'unspecified category'})
+Vendor: ${vendor?.name || 'unknown'}, location: ${vendor?.location || 'unknown'}
+Quoted unit price: $${totalAmount.toFixed(2)}
+Real bill-of-materials fabric/trim cost (already computed, do not change it): $${fabricCost.toFixed(2)} (${fabricPercent.toFixed(1)}% of the quoted price)
+Order quantity: ${quote?.preferences?.quantity || 'unspecified'}
+
+The fabric percentage above is fixed and real — your job is only to split the REMAINING ${remainingPercent.toFixed(1)}% of the quoted price across Labor, Shipping, Packaging, and Profit (margin the vendor is likely keeping), based on typical cut-and-sew economics for this kind of garment, vendor location, and order size. These four numbers must sum to exactly ${remainingPercent.toFixed(1)}.
+
+Also give a rough shipping cost estimate per unit (freight from ${vendor?.location || 'the vendor'} to the brand, for this order size) and a rough import duty rate estimate (as a percent, based on general HS-code ballparks for this garment category) — both clearly framed as rough planning estimates, not customs or tax advice.
+
+Return a JSON object with exactly this structure:
+{
+  "laborPercent": <number>,
+  "shippingPercent": <number>,
+  "packagingPercent": <number>,
+  "profitPercent": <number>,
+  "shippingEstimatePerUnit": <number>,
+  "shippingNote": "one short sentence",
+  "dutyRatePercent": <number>,
+  "dutyNote": "one short sentence, including a reminder this isn't customs/tax advice"
+}`;
+
+    const result = await callGemini(prompt);
+    console.log("✅ Quote economics successful");
+    res.json({
+      ok: true,
+      breakdown: {
+        fabricCost, fabricPercent,
+        laborPercent: result.laborPercent, shippingPercent: result.shippingPercent,
+        packagingPercent: result.packagingPercent, profitPercent: result.profitPercent,
+      },
+      shippingEstimatePerUnit: result.shippingEstimatePerUnit,
+      shippingNote: result.shippingNote,
+      dutyRatePercent: result.dutyRatePercent,
+      dutyNote: result.dutyNote,
+    });
+  } catch (error) {
+    console.error('❌ Endpoint Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/api/cost-simulator', async (req, res) => {
+  console.log("📥 Received cost simulator request...");
+  try {
+    const { vendor, product, quote, bom } = req.body;
+
+    const prompt = `You are a costing analyst helping an independent clothing brand founder understand how specific changes would move their per-unit production cost — like a car configurator showing the price impact of each option.
+
+Product: ${product?.name || 'unknown'} (${product?.category || 'unspecified category'})
+Vendor: ${vendor?.name || 'unknown'}, location: ${vendor?.location || 'unknown'}
+Current quoted unit price: ${quote?.amount != null ? `$${Number(quote.amount).toFixed(2)}` : 'not yet quoted — estimate from typical costs for this category'}
+Current bill of materials: ${bom && bom.length ? bom.map(b => `${b.material} (${b.qtyPerUnit || '?'}/unit, ~$${b.unitCost || '?'})`).join(', ') : 'none on file'}
+
+For EACH of the following possible changes, estimate the per-unit cost delta in dollars (positive = more expensive, can be negative if plausible) if this single change were made on its own, holding everything else constant:
+${COST_LEVERS.map(l => `- id "${l.id}": ${l.label}${l.hint ? ` (${l.hint})` : ''}`).join('\n')}
+
+Return a JSON object with exactly this structure:
+{
+  "levers": [
+    { "id": "one of the ids above", "deltaPerUnit": <number, dollars>, "note": "under 12 words explaining why" }
+  ]
+}
+Include exactly one entry per id listed above, in the same order.`;
+
+    const result = await callGemini(prompt);
+    console.log("✅ Cost simulator successful");
+    res.json({ ok: true, levers: result.levers || [] });
+  } catch (error) {
+    console.error('❌ Endpoint Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// ---------------------------------------------------------
 // 9. HEALTH CHECK (For Railway)
 // ---------------------------------------------------------
 app.get('/', (req, res) => {

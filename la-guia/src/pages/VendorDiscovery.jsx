@@ -160,8 +160,9 @@ function SearchResultCard({ result, onAdd, adding, added }) {
 export default function VendorDiscovery() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { vendors, quotes, loading, addVendor, toggleFavorite } = useVendors();
-  const { activeBrand } = useProducts();
+  const { vendors, quotes, loading, addVendor, toggleFavorite, createRFQ } = useVendors();
+  const { activeBrand, products } = useProducts();
+  const techPackProducts = products.filter(p => ['techpack', 'sourcing', 'sampling', 'production', 'launched'].includes(p.stage));
   const { canUse: canUseAI, remaining: aiRemaining, logUsage } = useAIUsage();
   const plan = getPlan(activeBrand?.plan_tier || 'free');
   const searchLocked = plan.id === 'free';
@@ -183,13 +184,39 @@ export default function VendorDiscovery() {
   const [addingKey, setAddingKey] = useState(null);
   const [addedUrls, setAddedUrls] = useState([]);
   const [compareIds, setCompareIds] = useState([]);
+  const [showCompareRFQ, setShowCompareRFQ] = useState(false);
+  const [compareRfqForm, setCompareRfqForm] = useState({ productId: '', quantity: '', targetUnitCost: '', deadline: '', message: '' });
+  const [compareRfqSending, setCompareRfqSending] = useState(false);
+  const [compareRfqError, setCompareRfqError] = useState(null);
+  const [compareRfqOverrideGate, setCompareRfqOverrideGate] = useState(false);
 
   const visible = vendors.filter(v => !v.blocked);
   const favorites = vendors.filter(v => v.favorited && !v.blocked);
   const blocked = vendors.filter(v => v.blocked);
   const compareVendors = compareIds.map(id => vendors.find(v => v.id === id)).filter(Boolean);
+  const compareRfqProduct = techPackProducts.find(p => p.id === compareRfqForm.productId);
+  const compareRfqBelowThreshold = compareRfqProduct && compareRfqProduct.readiness < 80;
+  const compareRfqBlocked = compareRfqBelowThreshold && !compareRfqOverrideGate;
 
   const toggleCompare = id => setCompareIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : (prev.length >= 5 ? prev : [...prev, id])));
+
+  const submitCompareRFQ = async e => {
+    e.preventDefault();
+    if (!compareRfqForm.productId || compareIds.length === 0 || compareRfqBlocked) return;
+    setCompareRfqSending(true);
+    setCompareRfqError(null);
+    try {
+      await createRFQ({ ...compareRfqForm, vendorIds: compareIds });
+      setShowCompareRFQ(false);
+      setCompareRfqForm({ productId: '', quantity: '', targetUnitCost: '', deadline: '', message: '' });
+      setCompareRfqOverrideGate(false);
+      navigate('/quotes');
+    } catch (err) {
+      setCompareRfqError(err.message || 'Could not send that RFQ.');
+    } finally {
+      setCompareRfqSending(false);
+    }
+  };
 
   // A design's "Find Vendors" action hands off here via navigation state —
   // pre-fills the search with the design's category and, if a canvas
@@ -569,6 +596,61 @@ export default function VendorDiscovery() {
               Nothing selected yet — check up to 5 vendors from Discover or Favorites to compare them side by side.
             </div>
           ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+                <button className="btn btn-primary" onClick={() => setShowCompareRFQ(s => !s)}>
+                  <i className="ph ph-paper-plane-tilt" /> Request quotes from these {compareVendors.length}
+                </button>
+              </div>
+
+              {showCompareRFQ && (
+                <form className="card-raised enter" style={{ marginBottom: 18 }} onSubmit={submitCompareRFQ}>
+                  <div className="card-header"><span className="card-title">Send an RFQ to {compareVendors.map(v => v.name).join(', ')}</span></div>
+                  <div className="card-body">
+                    <div className="form-group">
+                      <label className="form-label">Tech pack</label>
+                      <select className="form-select" value={compareRfqForm.productId} onChange={e => { setCompareRfqForm(f => ({ ...f, productId: e.target.value })); setCompareRfqOverrideGate(false); }} required>
+                        <option value="" disabled>Choose a tech pack</option>
+                        {techPackProducts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.readiness}%)</option>)}
+                      </select>
+                      {techPackProducts.length === 0 && <div className="form-hint">No products have a tech pack yet — convert a design first.</div>}
+                    </div>
+                    <div className="grid-3">
+                      <div className="form-group">
+                        <label className="form-label">Quantity</label>
+                        <input className="form-input" placeholder="e.g. 300 units" value={compareRfqForm.quantity} onChange={e => setCompareRfqForm(f => ({ ...f, quantity: e.target.value }))} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Target unit cost</label>
+                        <input className="form-input" placeholder="e.g. $18.00" value={compareRfqForm.targetUnitCost} onChange={e => setCompareRfqForm(f => ({ ...f, targetUnitCost: e.target.value }))} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Deadline</label>
+                        <input className="form-input" placeholder="e.g. Sept 15" value={compareRfqForm.deadline} onChange={e => setCompareRfqForm(f => ({ ...f, deadline: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 16 }}>
+                      <label className="form-label">Anything else every vendor should know</label>
+                      <textarea className="form-textarea" placeholder="Optional notes" value={compareRfqForm.message} onChange={e => setCompareRfqForm(f => ({ ...f, message: e.target.value }))} />
+                    </div>
+                    {compareRfqBelowThreshold && (
+                      <div className="form-hint" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', marginBottom: 14 }}>
+                        <i className="ph ph-lock-key" style={{ marginRight: 4 }} />
+                        <strong>Hard Gate:</strong> {compareRfqProduct.name} is only at {compareRfqProduct.readiness}% factory readiness. A score of 80%+ is required to send an RFQ.
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, cursor: 'pointer', fontWeight: 500 }}>
+                          <input type="checkbox" checked={compareRfqOverrideGate} onChange={e => setCompareRfqOverrideGate(e.target.checked)} />
+                          I understand the risks and want to send it anyway
+                        </label>
+                      </div>
+                    )}
+                    {compareRfqError && <div className="form-hint" style={{ color: 'var(--red)', marginBottom: 12 }}>{compareRfqError}</div>}
+                    <button className="btn btn-primary" type="submit" disabled={compareRfqSending || !compareRfqForm.productId || compareRfqBlocked}>
+                      <i className="ph ph-paper-plane-tilt" /> {compareRfqSending ? 'Sending…' : `Send to ${compareVendors.length} vendor${compareVendors.length === 1 ? '' : 's'}`}
+                    </button>
+                  </div>
+                </form>
+              )}
+
             <div className="card" style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
                 <thead>
@@ -615,6 +697,7 @@ export default function VendorDiscovery() {
                 </tbody>
               </table>
             </div>
+            </>
           )
         )}
 

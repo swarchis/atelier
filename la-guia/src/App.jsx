@@ -35,6 +35,7 @@ import CollectionDetail from './pages/CollectionDetail.jsx';
 import VendorDiscovery from './pages/VendorDiscovery.jsx';
 import VendorDetail from './pages/VendorDetail.jsx';
 import QuoteTracker from './pages/QuoteTracker.jsx';
+import QuoteDetail from './pages/QuoteDetail.jsx';
 import MaterialLibrary from './pages/MaterialLibrary.jsx';
 import MaterialDetail from './pages/MaterialDetail.jsx';
 import ProductionOrders from './pages/ProductionOrders.jsx';
@@ -74,6 +75,7 @@ function AppShellInner() {
             <Route path="/vendors" element={<VendorDiscovery />} />
             <Route path="/vendors/:id" element={<VendorDetail />} />
             <Route path="/quotes" element={<QuoteTracker />} />
+            <Route path="/quotes/:id" element={<QuoteDetail />} />
             <Route path="/materials" element={<MaterialLibrary />} />
             <Route path="/materials/:id" element={<MaterialDetail />} />
             <Route path="/production" element={<ProductionOrders />} />
