@@ -28,10 +28,12 @@ export function ChatProvider({ children }) {
   const [messagesByChat, setMessagesByChat] = useState({});
   const [loading, setLoading] = useState(true);
   const [sendingAI, setSendingAI] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   const loadChats = async () => {
     if (!activeBrand || !user) { setAiChat(null); setGroupChats([]); setLoading(false); return; }
     setLoading(true);
+    setLoadError(null);
     try {
       const { data, error } = await supabase
         .from('chats')
@@ -47,7 +49,14 @@ export function ChatProvider({ children }) {
           .insert([{ brand_id: activeBrand.id, type: 'ai', name: 'AI Assistant', created_by: user.id }])
           .select()
           .single();
-        if (!createError) mine = created;
+        // Surfaced (not just console.error'd) since this was previously the
+        // most common silent failure — migration 016 not run, or its RLS
+        // policies not applied — and swallowing it just made the AI
+        // Assistant entry mysteriously vanish with no way to tell why.
+        // Kept non-fatal to the rest of loadChats so a broken AI-chat
+        // insert never takes working group chats down with it.
+        if (createError) setLoadError(createError.message);
+        else mine = created;
       }
       setAiChat(mine || null);
 
@@ -70,6 +79,9 @@ export function ChatProvider({ children }) {
       }));
     } catch (err) {
       console.error('Error loading chats:', err);
+      setLoadError(err.message || String(err));
+      setAiChat(null);
+      setGroupChats([]);
     } finally {
       setLoading(false);
     }
@@ -197,7 +209,7 @@ export function ChatProvider({ children }) {
 
   return (
     <ChatContext.Provider value={{
-      aiChat, groupChats, messagesByChat, loading, sendingAI, hasUnread,
+      aiChat, groupChats, messagesByChat, loading, sendingAI, hasUnread, loadError,
       addableMembers, loadMessages, sendMessage, createGroupChat, addParticipant, markRead,
       refresh: loadChats, pollMs: POLL_MS,
     }}>

@@ -21,8 +21,8 @@ export default function FloatingChat() {
   const { members } = useTeam();
   const { canUse: canUseAI, remaining: aiRemaining, logUsage } = useAIUsage();
   const {
-    aiChat, groupChats, messagesByChat, sendingAI, hasUnread,
-    addableMembers, loadMessages, sendMessage, createGroupChat, markRead, pollMs,
+    aiChat, groupChats, messagesByChat, sendingAI, hasUnread, loadError,
+    addableMembers, loadMessages, sendMessage, createGroupChat, markRead, pollMs, refresh,
   } = useChat();
 
   const [open, setOpen] = useState(false);
@@ -129,6 +129,16 @@ export default function FloatingChat() {
                 <button className="btn btn-sm" onClick={() => setView('new')}><i className="ph ph-plus" /> New chat</button>
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
+                {loadError && (
+                  <div style={{ margin: '12px', padding: '10px 12px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', fontSize: 11.5, lineHeight: 1.5 }}>
+                    <i className="ph ph-warning" style={{ marginRight: 4 }} />
+                    {!aiChat
+                      ? "Couldn't load the AI Assistant — this usually means migration 016_chat.sql hasn't been run on the database yet, or the backend needs restarting."
+                      : "Couldn't fully load chats."}
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, marginTop: 4, opacity: 0.8, wordBreak: 'break-word' }}>{loadError}</div>
+                    <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={refresh}>Retry</button>
+                  </div>
+                )}
                 {aiChat && (
                   <div className="list-row" style={{ cursor: 'pointer' }} onClick={() => openThread(aiChat)}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

@@ -1101,12 +1101,21 @@ Return a JSON object with exactly this structure:
 // a stable set of toggles ("like configuring a car") instead of a different
 // random list every time.
 const COST_LEVERS = [
-  { id: 'gsm-up', label: 'Increase fabric weight (GSM)', hint: 'e.g. 380 -> 450 GSM' },
-  { id: 'add-embroidery', label: 'Add embroidery or a printed detail', hint: 'one placement, standard size' },
-  { id: 'organic-cotton', label: 'Switch to organic/premium cotton', hint: 'vs. standard cotton blend' },
-  { id: 'move-region', label: 'Move production to a higher-cost region', hint: 'e.g. Portugal/EU instead of current sourcing' },
-  { id: 'smaller-moq', label: 'Cut order quantity to a smaller MOQ tier', hint: 'per-unit cost typically rises' },
-  { id: 'premium-trim', label: 'Add a premium trim (woven label, metal hardware)', hint: '' },
+  {
+    id: 'gsm', label: 'Fabric weight (GSM)', type: 'choice',
+    options: [
+      { id: 'gsm-220', label: '~220 GSM (lightweight)' },
+      { id: 'gsm-320', label: '~320 GSM (midweight)' },
+      { id: 'gsm-380', label: '~380 GSM (standard heavyweight)' },
+      { id: 'gsm-450', label: '~450 GSM (heavy)' },
+      { id: 'gsm-550', label: '~550 GSM (heaviest)' },
+    ],
+  },
+  { id: 'add-embroidery', label: 'Add embroidery or a printed detail', type: 'toggle', hint: 'one placement, standard size' },
+  { id: 'organic-cotton', label: 'Switch to organic/premium cotton', type: 'toggle', hint: 'vs. standard cotton blend' },
+  { id: 'move-region', label: 'Move production to a higher-cost region', type: 'toggle', hint: 'e.g. Portugal/EU instead of current sourcing' },
+  { id: 'smaller-moq', label: 'Cut order quantity to a smaller MOQ tier', type: 'toggle', hint: 'per-unit cost typically rises' },
+  { id: 'premium-trim', label: 'Add a premium trim (woven label, metal hardware)', type: 'toggle', hint: '' },
 ];
 
 app.post('/api/quote-economics', async (req, res) => {
@@ -1176,20 +1185,26 @@ Vendor: ${vendor?.name || 'unknown'}, location: ${vendor?.location || 'unknown'}
 Current quoted unit price: ${quote?.amount != null ? `$${Number(quote.amount).toFixed(2)}` : 'not yet quoted — estimate from typical costs for this category'}
 Current bill of materials: ${bom && bom.length ? bom.map(b => `${b.material} (${b.qtyPerUnit || '?'}/unit, ~$${b.unitCost || '?'})`).join(', ') : 'none on file'}
 
-For EACH of the following possible changes, estimate the per-unit cost delta in dollars (positive = more expensive, can be negative if plausible) if this single change were made on its own, holding everything else constant:
-${COST_LEVERS.map(l => `- id "${l.id}": ${l.label}${l.hint ? ` (${l.hint})` : ''}`).join('\n')}
+For EACH of the following possible changes, estimate the per-unit cost delta in dollars (positive = more expensive, can be negative if plausible) versus the current quoted price, if this single change were made on its own, holding everything else constant:
+${COST_LEVERS.map(l => l.type === 'choice'
+    ? `- id "${l.id}" (${l.label}) has MULTIPLE mutually-exclusive options — estimate a separate delta for EACH: ${l.options.map(o => `"${o.id}" (${o.label})`).join(', ')}`
+    : `- id "${l.id}": ${l.label}${l.hint ? ` (${l.hint})` : ''}`
+  ).join('\n')}
 
 Return a JSON object with exactly this structure:
 {
   "levers": [
-    { "id": "one of the ids above", "deltaPerUnit": <number, dollars>, "note": "under 12 words explaining why" }
+    { "id": "a toggle lever id from above", "deltaPerUnit": <number, dollars>, "note": "under 12 words explaining why" }
+  ],
+  "choiceLevers": [
+    { "id": "a choice lever id from above (e.g. gsm)", "options": [ { "id": "the option id, e.g. gsm-450", "deltaPerUnit": <number, dollars>, "note": "under 10 words" } ] }
   ]
 }
-Include exactly one entry per id listed above, in the same order.`;
+Include one "levers" entry for every non-choice id, and one "choiceLevers" entry (with every one of its listed option ids) for every choice id.`;
 
     const result = await callGemini(prompt);
     console.log("✅ Cost simulator successful");
-    res.json({ ok: true, levers: result.levers || [] });
+    res.json({ ok: true, levers: result.levers || [], choiceLevers: result.choiceLevers || [] });
   } catch (error) {
     console.error('❌ Endpoint Error:', error.message);
     res.status(500).json({ ok: false, error: error.message });

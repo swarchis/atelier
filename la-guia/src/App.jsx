@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { ProductsProvider } from './context/ProductsContext.jsx';
 import { VendorsProvider } from './context/VendorsContext.jsx';
 import { ProductionProvider } from './context/ProductionContext.jsx';
+import { SamplingProvider } from './context/SamplingContext.jsx';
 import { NotificationsProvider } from './context/NotificationsContext.jsx';
 import { UserPreferencesProvider } from './context/UserPreferencesContext.jsx';
 import { MaterialsProvider } from './context/MaterialsContext.jsx';
@@ -40,6 +41,8 @@ import MaterialLibrary from './pages/MaterialLibrary.jsx';
 import MaterialDetail from './pages/MaterialDetail.jsx';
 import ProductionOrders from './pages/ProductionOrders.jsx';
 import ProductionOrderDetail from './pages/ProductionOrderDetail.jsx';
+import Sampling from './pages/Sampling.jsx';
+import SampleDetail from './pages/SampleDetail.jsx';
 import ReadinessReview from './pages/ReadinessReview.jsx';
 import SalesDashboard from './pages/SalesDashboard.jsx';
 import ProductInsights from './pages/ProductInsights.jsx';
@@ -78,6 +81,8 @@ function AppShellInner() {
             <Route path="/quotes/:id" element={<QuoteDetail />} />
             <Route path="/materials" element={<MaterialLibrary />} />
             <Route path="/materials/:id" element={<MaterialDetail />} />
+            <Route path="/sampling" element={<Sampling />} />
+            <Route path="/sampling/:productId" element={<SampleDetail />} />
             <Route path="/production" element={<ProductionOrders />} />
             <Route path="/production/:id" element={<ProductionOrderDetail />} />
             <Route path="/readiness" element={<ReadinessReview />} />
@@ -111,6 +116,7 @@ export default function App() {
       <ProductsProvider>
         <VendorsProvider>
           <ProductionProvider>
+          <SamplingProvider>
             <NotificationsProvider>
             <MaterialsProvider>
             <TeamProvider>
@@ -138,6 +144,7 @@ export default function App() {
             </TeamProvider>
             </MaterialsProvider>
             </NotificationsProvider>
+          </SamplingProvider>
           </ProductionProvider>
         </VendorsProvider>
       </ProductsProvider>

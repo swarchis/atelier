@@ -43,7 +43,8 @@ export function stageLink(stage, id) {
   if (stage === 'concept' || stage === 'design') return `/design/${id}`;
   if (stage === 'techpack') return `/tech-packs/${id}`;
   if (stage === 'sourcing') return `/quotes`;
-  if (stage === 'sampling' || stage === 'production') return `/production/${id}`;
+  if (stage === 'sampling') return `/sampling/${id}`;
+  if (stage === 'production') return `/production/${id}`;
   if (stage === 'launched') return `/products/${id}/performance`;
   return `/design/${id}`;
 }

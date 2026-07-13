@@ -12,15 +12,27 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const STATUS_TAG = q => (q === 'Accepted' ? 'tag tag-green' : q === 'Declined' ? 'tag tag-red' : q === 'Received' ? 'tag tag-blue' : 'tag tag-neutral');
 
 // Fixed lever list mirrored from api/index.js's COST_LEVERS — kept in sync
-// manually since it's just display metadata (id/label/hint); the $ deltas
-// themselves only ever come from the AI response, never invented here.
+// manually since it's just display metadata (id/label/hint/options); the $
+// deltas themselves only ever come from the AI response, never invented here.
+// GSM is a "choice" lever (several mutually-exclusive fabric weights, each
+// with its own estimated delta) rather than a single on/off toggle, since
+// "increase the GSM" isn't one change — which weight you land on matters.
 const LEVERS = [
-  { id: 'gsm-up', label: 'Increase fabric weight (GSM)', hint: 'e.g. 380 → 450 GSM' },
-  { id: 'add-embroidery', label: 'Add embroidery or a printed detail', hint: 'one placement, standard size' },
-  { id: 'organic-cotton', label: 'Switch to organic/premium cotton', hint: 'vs. standard cotton blend' },
-  { id: 'move-region', label: 'Move production to a higher-cost region', hint: 'e.g. Portugal/EU instead of current sourcing' },
-  { id: 'smaller-moq', label: 'Cut order quantity to a smaller MOQ tier', hint: 'per-unit cost typically rises' },
-  { id: 'premium-trim', label: 'Add a premium trim (woven label, metal hardware)', hint: '' },
+  {
+    id: 'gsm', label: 'Fabric weight (GSM)', type: 'choice',
+    options: [
+      { id: 'gsm-220', label: '~220 GSM (lightweight)' },
+      { id: 'gsm-320', label: '~320 GSM (midweight)' },
+      { id: 'gsm-380', label: '~380 GSM (standard heavyweight)' },
+      { id: 'gsm-450', label: '~450 GSM (heavy)' },
+      { id: 'gsm-550', label: '~550 GSM (heaviest)' },
+    ],
+  },
+  { id: 'add-embroidery', label: 'Add embroidery or a printed detail', type: 'toggle', hint: 'one placement, standard size' },
+  { id: 'organic-cotton', label: 'Switch to organic/premium cotton', type: 'toggle', hint: 'vs. standard cotton blend' },
+  { id: 'move-region', label: 'Move production to a higher-cost region', type: 'toggle', hint: 'e.g. Portugal/EU instead of current sourcing' },
+  { id: 'smaller-moq', label: 'Cut order quantity to a smaller MOQ tier', type: 'toggle', hint: 'per-unit cost typically rises' },
+  { id: 'premium-trim', label: 'Add a premium trim (woven label, metal hardware)', type: 'toggle', hint: '' },
 ];
 
 const WHEEL_COLORS = { fabric: 'var(--c-materials)', labor: 'var(--c-techpack)', shipping: 'var(--c-analytics)', packaging: 'var(--c-organization)', profit: 'var(--accent)' };
@@ -68,8 +80,9 @@ export default function QuoteDetail() {
 
   const [simLoading, setSimLoading] = useState(false);
   const [simError, setSimError] = useState(null);
-  const [levers, setLevers] = useState(null); // [{id, deltaPerUnit, note}]
+  const [levers, setLevers] = useState(null); // { toggles: [{id, deltaPerUnit, note}], choices: [{id, options: [{id, deltaPerUnit, note}]}] }
   const [activeLevers, setActiveLevers] = useState([]);
+  const [selectedChoices, setSelectedChoices] = useState({}); // { [choiceLeverId]: selectedOptionId }
 
   useEffect(() => {
     if (!id) return;
@@ -90,7 +103,7 @@ export default function QuoteDetail() {
     if (quote?.cost_breakdown && Object.keys(quote.cost_breakdown).length) {
       setEconomics({ breakdown: quote.cost_breakdown, shippingEstimatePerUnit: quote.cost_breakdown.shippingEstimatePerUnit, shippingNote: quote.cost_breakdown.shippingNote, dutyRatePercent: quote.cost_breakdown.dutyRatePercent, dutyNote: quote.cost_breakdown.dutyNote });
     }
-    if (quote?.cost_simulator && quote.cost_simulator.length) setLevers(quote.cost_simulator);
+    if (quote?.cost_simulator && (quote.cost_simulator.toggles?.length || quote.cost_simulator.choices?.length)) setLevers(quote.cost_simulator);
   }, [quote?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const inputs = landedInputs || quote?.landed_cost_inputs || {};
@@ -103,11 +116,17 @@ export default function QuoteDetail() {
 
   const simulatedDelta = useMemo(() => {
     if (!levers) return 0;
-    return activeLevers.reduce((sum, leverId) => {
-      const l = levers.find(x => x.id === leverId);
+    const toggleSum = activeLevers.reduce((sum, leverId) => {
+      const l = (levers.toggles || []).find(x => x.id === leverId);
       return sum + (l ? Number(l.deltaPerUnit) || 0 : 0);
     }, 0);
-  }, [levers, activeLevers]);
+    const choiceSum = Object.entries(selectedChoices).reduce((sum, [leverId, optionId]) => {
+      const choiceLever = (levers.choices || []).find(c => c.id === leverId);
+      const opt = choiceLever?.options?.find(o => o.id === optionId);
+      return sum + (opt ? Number(opt.deltaPerUnit) || 0 : 0);
+    }, 0);
+    return toggleSum + choiceSum;
+  }, [levers, activeLevers, selectedChoices]);
 
   if (!quote) {
     return <div className="content"><EmptyState icon="ph-file-text" title="Quote not found" sub="This quote doesn't exist yet." /></div>;
@@ -183,8 +202,9 @@ export default function QuoteDetail() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
       await logUsage('quote-cost-simulator');
-      setLevers(data.levers);
-      await updateQuote(quote.id, { cost_simulator: data.levers });
+      const cached = { toggles: data.levers, choices: data.choiceLevers };
+      setLevers(cached);
+      await updateQuote(quote.id, { cost_simulator: cached });
     } catch (err) {
       setSimError(err.message || 'Could not run the cost simulator.');
     } finally {
@@ -193,6 +213,8 @@ export default function QuoteDetail() {
   };
 
   const toggleLever = leverId => setActiveLevers(prev => (prev.includes(leverId) ? prev.filter(x => x !== leverId) : [...prev, leverId]));
+  const selectChoice = (leverId, optionId) => setSelectedChoices(prev => ({ ...prev, [leverId]: optionId }));
+  const clearChoice = leverId => setSelectedChoices(prev => { const next = { ...prev }; delete next[leverId]; return next; });
 
   const wheelSegments = economics ? [
     { label: 'Fabric', percent: economics.breakdown.fabricPercent, color: WHEEL_COLORS.fabric },
@@ -372,9 +394,35 @@ export default function QuoteDetail() {
                 <div style={{ fontSize: 13, color: 'var(--ink-3)', fontStyle: 'italic' }}>Move switches like configuring a car — see the estimated cost of common changes before you ask the vendor.</div>
               ) : (
                 <>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 16 }}>
                     {LEVERS.map(lever => {
-                      const est = levers.find(l => l.id === lever.id);
+                      if (lever.type === 'choice') {
+                        const choiceData = (levers.choices || []).find(c => c.id === lever.id);
+                        const selected = selectedChoices[lever.id];
+                        return (
+                          <div key={lever.id}>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8 }}>{lever.label}</div>
+                            <div className="pill-group" style={{ flexWrap: 'wrap', rowGap: 6 }}>
+                              <button type="button" className={`pill ${!selected ? 'active' : ''}`} onClick={() => clearChoice(lever.id)}>Current</button>
+                              {lever.options.map(opt => {
+                                const est = choiceData?.options?.find(o => o.id === opt.id);
+                                return (
+                                  <button
+                                    type="button" key={opt.id}
+                                    className={`pill ${selected === opt.id ? 'active' : ''}`}
+                                    onClick={() => selectChoice(lever.id, opt.id)}
+                                    title={est?.note || ''}
+                                  >
+                                    {opt.label}{est ? ` (${est.deltaPerUnit > 0 ? '+' : ''}$${Number(est.deltaPerUnit).toFixed(2)})` : ''}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      const est = (levers.toggles || []).find(l => l.id === lever.id);
                       const on = activeLevers.includes(lever.id);
                       return (
                         <div key={lever.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>

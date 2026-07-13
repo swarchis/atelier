@@ -14,6 +14,7 @@ export const NAV_GROUPS = [
     { path: '/quotes', icon: 'ph-file-text', label: 'Quotes & Pricing', color: 'var(--c-vendors)', keywords: ['rfq', 'costing', 'bid'] },
   ] },
   { label: 'Production', tourId: 'nav-production', items: [
+    { path: '/sampling', icon: 'ph-t-shirt', label: 'Sampling', color: 'var(--c-finalcheck)', keywords: ['sample', 'rounds', 'fit feedback', 'revision', 'approval'] },
     { path: '/production', icon: 'ph-package', label: 'Production Orders', color: 'var(--c-materials)', keywords: ['po', 'units', 'due date', 'delivery'] },
     { path: '/readiness', icon: 'ph-check-circle', label: 'Readiness Review', color: 'var(--c-finalcheck)', keywords: ['gate', 'checklist', 'factory ready'] },
   ] },
