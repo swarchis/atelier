@@ -83,6 +83,7 @@ export default function SalesDashboard() {
   };
 
   // 2. Fetch from Shopify via Backend Proxy and Save to Supabase
+  // 2. Fetch from Shopify via Backend Proxy and Save to Supabase
   const syncSales = async () => {
     if (!connection) return;
     setSyncing(true);
@@ -96,30 +97,84 @@ export default function SalesDashboard() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
 
+      // Fetch all SKUs for this brand to map Shopify items to Grainline product IDs
+      const productIds = products.map(p => p.id);
+      let skuMap = {};
+      if (productIds.length > 0) {
+         const { data: variants } = await supabase
+           .from('product_variants')
+           .select('sku, product_id')
+           .in('product_id', productIds);
+         (variants || []).forEach(v => {
+           if (v.sku) skuMap[v.sku] = v.product_id;
+         });
+      }
+
       // Aggregate raw Shopify orders by Month (YYYY-MM)
       const aggregates = {};
       data.orders.forEach(order => {
-        const month = order.created_at.substring(0, 7); // "2024-10"
-        if (!aggregates[month]) aggregates[month] = { revenue: 0, count: 0 };
-        aggregates[month].revenue += parseFloat(order.total_price);
-        aggregates[month].count += 1;
+        const month = order.created_at.substring(0, 7); // "YYYY-MM"
+        if (!aggregates[month]) {
+          aggregates[month] = { brandLevel: { revenue: 0, count: 0 }, products: {} };
+        }
+
+        // Add to brand-level totals
+        aggregates[month].brandLevel.revenue += parseFloat(order.total_price || 0);
+        aggregates[month].brandLevel.count += 1;
+
+        // Track which products were in this order so we don't double-count the order
+        const productsInThisOrder = new Set();
+        
+        // Loop through line items to assign product-level revenue
+        (order.line_items || []).forEach(item => {
+           const sku = item.sku;
+           const prodId = skuMap[sku];
+           
+           if (prodId) {
+              if (!aggregates[month].products[prodId]) {
+                 aggregates[month].products[prodId] = { revenue: 0, count: 0 };
+              }
+              // Add gross item revenue
+              aggregates[month].products[prodId].revenue += parseFloat(item.price || 0) * parseInt(item.quantity || 1);
+              
+              // Increment the order count for this product if we haven't already for this specific order
+              if (!productsInThisOrder.has(prodId)) {
+                 aggregates[month].products[prodId].count += 1;
+                 productsInThisOrder.add(prodId);
+              }
+           }
+        });
       });
 
-      // Format for Supabase Insertion (Null product = brand-wide aggregate)
-      const toInsert = Object.keys(aggregates).map(month => ({
-        brand_id: activeBrand.id,
-        product_id: null, 
-        month: month,
-        revenue: aggregates[month].revenue,
-        orders_count: aggregates[month].count
-      }));
+      // Format for Supabase Insertion
+      const toInsert = [];
+      Object.keys(aggregates).forEach(month => {
+         // 1. Insert Brand-level row (product_id is null)
+         toInsert.push({
+           brand_id: activeBrand.id,
+           product_id: null,
+           month: month,
+           revenue: aggregates[month].brandLevel.revenue,
+           orders_count: aggregates[month].brandLevel.count
+         });
+         
+         // 2. Insert Product-level rows
+         Object.keys(aggregates[month].products).forEach(prodId => {
+           toInsert.push({
+             brand_id: activeBrand.id,
+             product_id: prodId,
+             month: month,
+             revenue: aggregates[month].products[prodId].revenue,
+             orders_count: aggregates[month].products[prodId].count
+           });
+         });
+      });
 
-      // In a full implementation, you would also loop through order.line_items,
-      // match them to `products` in Supabase by SKU, and insert specific rows 
-      // for product_id to populate the ProductInsights page correctly!
-
-      for (const row of toInsert) {
-        await supabase.from('sales_data').upsert(row, { onConflict: 'brand_id, product_id, month' });
+      // Insert in chunks of 50 to respect Supabase limits
+      for (let i = 0; i < toInsert.length; i += 50) {
+        const chunk = toInsert.slice(i, i + 50);
+        const { error } = await supabase.from('sales_data').upsert(chunk, { onConflict: 'brand_id, product_id, month' });
+        if (error) console.error("Upsert chunk error:", error);
       }
 
       await refreshSales();

@@ -211,6 +211,7 @@ export default function Settings() {
   const [fullName, setFullName] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [showDeleteBrand, setShowDeleteBrand] = useState(false);
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
 
   const [form, setForm] = useState({
     name: '',
@@ -282,6 +283,14 @@ export default function Settings() {
     window.location.href = '/'; // Reload to pick up new active brand
   };
 
+  const handleDeleteAccount = async () => {
+    const { supabase } = await import('../lib/supabase.js');
+    const { error } = await supabase.rpc('delete_user');
+    if (error) throw error;
+    await supabase.auth.signOut();
+    window.location.href = '/welcome';
+  };
+
   if (!activeBrand) return (
     <div className="content" style={{ textAlign: 'center', padding: 40 }}>
       <i className="ph ph-spinner ph-spin" style={{ fontSize: 24 }} />
@@ -324,12 +333,30 @@ export default function Settings() {
                 <div className="list-row" style={{ padding: '10px 0' }}><span>Email</span><strong>{user?.email}</strong></div>
                 <div className="list-row" style={{ padding: '10px 0' }}><span>Role</span><strong style={{ textTransform: 'capitalize' }}>{activeBrand.memberRole || 'Owner'}</strong></div>
                 <div className="list-row" style={{ padding: '10px 0' }}><span>Member since</span><strong>{new Date(user?.created_at || Date.now()).toLocaleDateString()}</strong></div>
-              </div>
             </div>
           </div>
-        )}
+          
+          {/* ACCOUNT DANGER ZONE */}
+          <div className="section-label" style={{ marginTop: 40, color: 'var(--red)' }}>Danger Zone</div>
+          <div className="card-raised" style={{ border: '1px solid var(--red-border)', background: 'var(--red-bg)' }}>
+            <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--red)' }}>Delete your account</div>
+                <div style={{ fontSize: 12, color: 'var(--red)', opacity: 0.8 }}>Permanently remove your account and all associated data.</div>
+              </div>
+              <button 
+                className="btn btn-sm" 
+                style={{ background: 'var(--red)', color: '#fff', border: 'none' }}
+                onClick={() => setShowDeleteAccount(true)}
+              >
+                Delete Account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-        {tab === 'brand' && (
+      {tab === 'brand' && (
           <>
             <div className="grid-2">
               <div className="card-raised">
@@ -470,6 +497,14 @@ export default function Settings() {
         itemLabel="brand"
         itemName={activeBrand.name}
         onConfirm={handleDeleteBrand}
+      />
+      <ConfirmDeleteModal 
+        open={showDeleteAccount}
+        onClose={() => setShowDeleteAccount(false)}
+        itemLabel="account"
+        itemName={user?.email || 'my account'}
+        warning="This will permanently delete your account, all your brands, and all associated data. You will lose access immediately."
+        onConfirm={handleDeleteAccount}
       />
     </>
   );
