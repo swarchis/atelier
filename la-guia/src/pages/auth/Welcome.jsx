@@ -1,475 +1,534 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { WaxSeal, Thumbtack, DriedFlower } from '../../components/decor.jsx';
+import { motion, useReducedMotion } from 'framer-motion';
 import { STAGES } from '../../data/mockData.js';
 import { PLANS } from '../../data/plans.js';
 
-// Each feature now carries a short spec-tag (how you'd label a swatch card
-// or a line on a tech pack) instead of a generic icon-in-a-box.
+/* ───────────────────────────────────────────────────────────────────────────
+   "Draft Sheet" — the Atelier landing page built as a technical tech-pack drawing.
+
+   A deliberate break from the previous warm-cream / serif / terracotta hero.
+   The subject here is a *production* tool — its native artifact is the tech
+   pack: a precise flat sketch covered in dimension callouts, grade rules, and a
+   title block. So the page is built like one. Cool drafting-bone paper,
+   near-black ink, and the petrol blue already living in the app's favicon
+   (#2F5D7C) as the single accent. The recurring mark is the grainline symbol —
+   the arrow a pattern-maker draws to align a piece with the fabric's grain,
+   a real fixture of any atelier's cutting table — used as the structural
+   device, plus a garment flat that draws itself with animated dimension callouts.
+
+   Palette + type are hardcoded here (not the app's theme vars) so the page
+   renders identically regardless of light/dark app state on the auth route.
+─────────────────────────────────────────────────────────────────────────── */
+
+const C = {
+  sheet: '#E7E8E2',
+  sheet2: '#EFF0EB',
+  panel: '#F4F4EF',
+  ink: '#15171B',
+  ink2: '#565B63',
+  ink3: '#8A8F96',
+  line: '#CDCFC8',
+  line2: '#B7BAB1',
+  blue: '#2F5D7C',
+  blueDeep: '#20455E',
+  chalk: '#BF3F2E',
+  cream: '#E9EAE4',
+};
+const DISPLAY = "'Archivo', system-ui, sans-serif";
+const MONO = "'Space Mono', ui-monospace, monospace";
+const BODY = "'Inter', system-ui, sans-serif";
+
 const FEATURES = [
-  { tag: 'DESIGN', color: 'var(--c-design)', title: 'AI Design Studio', text: 'Sketch, upload a reference photo, or generate a starting silhouette — then edit it right on the canvas with sketch-to-design, recoloring, fabric swaps, and mockup generation.' },
-  { tag: 'SPEC SHEET', color: 'var(--c-techpack)', title: 'Tech Pack Builder', text: 'AI drafts a full tech pack from your design and a short questionnaire — BOM, measurements, construction, print placement, trims, labels, packaging — with a live factory-readiness score.' },
-  { tag: 'CATALOG', color: 'var(--c-organization)', title: 'Product Management', text: 'Real categories, colorway × size SKU matrices with generated SKUs, duplicate and archive flows, and an audit trail of every stage a product has moved through.' },
-  { tag: 'SOURCING', color: 'var(--c-vendors)', title: 'Vendor Platform', text: 'Search real manufacturers by material, MOQ, target price, location, and certifications. Compare up to five side by side and track every quote from request to accepted.' },
-  { tag: 'PRODUCTION', color: 'var(--c-materials)', title: 'Production Tracking', text: 'A Kanban flow from concept to launch, production orders with real checkpoints, and a factory-readiness gate that keeps under-ready products from shipping by accident.' },
-  { tag: 'STUDIO CHAT', color: 'var(--c-home)', title: 'Team Chat & AI Assistant', text: 'A personal assistant grounded in your own brand data, plus real group chats with your team — one button, available on every page.' },
-  { tag: 'ANALYTICS', color: 'var(--c-analytics)', title: 'Sales & Analytics', text: 'Connect Shopify to see real orders next to real production costs — break-even math and product performance, not a mocked-up dashboard.' },
-  { tag: 'ACCESS', color: 'var(--c-finalcheck)', title: 'Team & Permissions', text: "Invite your team by email, assign roles, and keep every brand workspace scoped so nobody sees data they shouldn't." },
+  { n: '01', title: 'AI Design Studio', text: 'Sketch, upload a reference, or generate a starting silhouette — then edit it on the canvas: recolor, swap fabric, build a mockup.' },
+  { n: '02', title: 'Tech-Pack Builder', text: 'AI drafts the BOM, measurements, construction, trims, and labels from a short questionnaire — with a live factory-readiness score.' },
+  { n: '03', title: 'Product Management', text: 'Real categories, colorway × size SKU matrices, duplicate and archive flows, and an audit trail of every stage a product has moved through.' },
+  { n: '04', title: 'Vendor Platform', text: 'Search real manufacturers by material, MOQ, target price, location, and certifications. Compare up to five side by side.' },
+  { n: '05', title: 'RFQ & Quote Economics', text: 'One request to many vendors. A cost breakdown, a landed-cost calculator, and a cost simulator that prices each change like a car configurator.' },
+  { n: '06', title: 'Sampling', text: 'Rounds that keep their own history, photos you can pin notes onto at the exact spot, structured fit feedback, and an approval workflow.' },
+  { n: '07', title: 'Production Tracking', text: 'A manufacturing timeline, an editable QC checklist, an issue log, shipment tracking, and an honest delivery estimate.' },
+  { n: '08', title: 'Team & AI Assistant', text: 'Group chats with your team plus a personal assistant grounded in your own brand data — one button, on every page.' },
 ];
 
-const fadeUp = { hidden: { opacity: 0, y: 26 }, visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.16, 0.9, 0.35, 1] } } };
-const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.08 } } };
+const CALLOUTS = [
+  { at: [200, 118], to: [372, 120], n: '01', label: 'AI drafts the tech pack' },
+  { at: [206, 200], to: [372, 196], n: '02', label: 'Readiness scored 0–100' },
+  { at: [262, 250], to: [372, 272], n: '03', label: 'Sourced & quoted' },
+  { at: [200, 372], to: [372, 348], n: '04', label: 'Sampled → shipped' },
+];
 
-function Logomark({ size = 26 }) {
+/* The grainline symbol: a directional line capped with an arrowhead at each
+   end — exactly the mark a pattern-maker draws to align a piece with the grain
+   of the fabric. It is the brand's namesake, so it earns its place as the
+   recurring structural device rather than a decorative icon. */
+function Grainline({ h = 34, color = C.blue, stroke = 2 }) {
+  const w = h * 0.36;
   return (
-    <svg width={size} height={size * (18 / 26)} viewBox="0 0 24 16" fill="none">
-      <path d="M1 8h9m4 0h9M14 8l-4-4m0 8 4-4M10 8l4-4m-4 4 4 4" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={w} height={h} viewBox="0 0 18 50" fill="none" style={{ display: 'block' }} aria-hidden>
+      <path d="M9 6 V44 M3 12 L9 4 L15 12 M3 38 L9 46 L15 38" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-function Section({ children, dark, style, ...props }) {
+function CornerMarks({ color = C.line2 }) {
+  const L = ({ style }) => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ position: 'absolute', ...style }} aria-hidden>
+      <path d="M1 1 H16 M1 1 V16" stroke={color} strokeWidth="1.25" />
+    </svg>
+  );
   return (
-    <section
-      style={{
-        padding: '90px 24px',
-        background: dark ? 'var(--charcoal)' : 'transparent',
-        color: dark ? 'var(--cream)' : 'inherit',
-        position: 'relative',
-        ...style,
-      }}
-      {...props}
-    >
-      <div style={{ maxWidth: 1080, margin: '0 auto' }}>{children}</div>
-    </section>
+    <>
+      <L style={{ top: 10, left: 10 }} />
+      <L style={{ top: 10, right: 10, transform: 'scaleX(-1)' }} />
+      <L style={{ bottom: 10, left: 10, transform: 'scaleY(-1)' }} />
+      <L style={{ bottom: 10, right: 10, transform: 'scale(-1)' }} />
+    </>
   );
 }
 
-// A single row in the feature list — a swatch chip (with a punched ring hole,
-// the way an actual fabric-swatch card is bound) sitting on a running thread.
-function SwatchRow({ f, isLast }) {
+/* The hero: one self-contained SVG "drawing sheet" — frame, registration
+   marks, a faint grid, an adapted scanner beam, a crewneck flat that draws
+   itself, the grainline mark placed on the body, dimension callouts, and a
+   title block. Everything lives in one viewBox so it scales cleanly. */
+function DraftPanel() {
+  const reduce = useReducedMotion();
+  const draw = reduce
+    ? { initial: { pathLength: 1 }, animate: { pathLength: 1 } }
+    : { initial: { pathLength: 0 }, animate: { pathLength: 1 } };
+  const drawT = (d = 0) => ({ duration: 1.5, ease: 'easeInOut', delay: d });
+  const calloutBase = reduce ? 0 : 1.5;
+
   return (
-    <motion.div
-      variants={fadeUp}
-      className="gl-swatch-row"
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '64px 1fr',
-        gap: 20,
-        borderBottom: isLast ? 'none' : '1px solid var(--border)',
-        position: 'relative',
-      }}
-    >
-      <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
-        {!isLast && (
-          <div
-            aria-hidden
-            style={{
-              position: 'absolute', top: 44, bottom: -26, left: '50%', width: 0,
-              borderLeft: '1.5px dashed var(--border-2)', transform: 'translateX(-50%)',
-            }}
-          />
-        )}
-        <div
-          className="gl-swatch"
-          style={{
-            width: 40, height: 40, borderRadius: 7,
-            background: f.color,
-            position: 'relative',
-            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.08)',
-            transition: 'transform 0.25s ease',
-          }}
+    <svg viewBox="0 0 600 560" width="100%" style={{ display: 'block' }} role="img" aria-label="Technical flat sketch of a crewneck with dimension callouts">
+      <defs>
+        <pattern id="grid20" width="20" height="20" patternUnits="userSpaceOnUse">
+          <path d="M20 0 H0 V20" fill="none" stroke={C.line} strokeWidth="0.75" opacity="0.7" />
+        </pattern>
+        {/* Scanner beam — adapted from 21st.dev "Background Grid Beam", recolored
+            from its cyan/violet default to the petrol blueprint accent and
+            slowed to read as a drafting scanner rather than a neon sweep. */}
+        <motion.linearGradient
+          id="beam"
+          variants={{ initial: { x1: '0%', x2: '8%', y1: '-30%', y2: '-14%' }, animate: { x1: '30%', x2: '42%', y1: '120%', y2: '138%' } }}
+          initial="initial"
+          animate={reduce ? 'initial' : 'animate'}
+          transition={{ duration: 3.2, repeat: reduce ? 0 : Infinity, repeatType: 'loop', ease: 'linear', repeatDelay: 1.6 }}
         >
-          <div style={{
-            position: 'absolute', top: 5, left: 5, width: 6, height: 6, borderRadius: '50%',
-            background: 'var(--bg)', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.12)',
-          }} />
-        </div>
-      </div>
-      <div>
-        <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', fontWeight: 700,
-          color: f.color, marginBottom: 6, textTransform: 'uppercase',
-        }}>
-          {f.tag}
-        </div>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 7 }}>{f.title}</div>
-        <div style={{ fontSize: 13.5, color: 'var(--ink-3)', lineHeight: 1.65, maxWidth: 560 }}>{f.text}</div>
-      </div>
-    </motion.div>
-  );
-}
+          <stop stopColor={C.blue} stopOpacity="0" />
+          <stop offset="0.5" stopColor={C.blue} stopOpacity="0.9" />
+          <stop offset="1" stopColor={C.blue} stopOpacity="0" />
+        </motion.linearGradient>
+        <clipPath id="panelClip"><rect x="24" y="24" width="552" height="512" /></clipPath>
+      </defs>
 
-// Loose pencil-flat sketches of garments — the kind of quick front-view
-// drawing that kicks off a real tech pack. Each outline is drawn twice,
-// offset by a pixel, so it reads as hand-sketched rather than vector-clean.
-function JacketSketch() {
-  return (
-    <svg viewBox="0 0 100 108" width="106" height="114" fill="none">
-      <path d="M50 7 L38 17 L30 13 L14 24 L20 43 L28 39 L28 99 L72 99 L72 39 L80 43 L86 24 L70 13 L62 17 Z" stroke="var(--ink-3)" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" opacity="0.4" transform="translate(1,1)" />
-      <path d="M50 7 L38 17 L30 13 L14 24 L20 43 L28 39 L28 99 L72 99 L72 39 L80 43 L86 24 L70 13 L62 17 Z" stroke="var(--ink-2)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-      <path d="M50 7 L50 21" stroke="var(--ink-2)" strokeWidth="1.1" strokeLinecap="round" />
-      <path d="M42 29 L42 96 M58 29 L58 96" stroke="var(--ink-3)" strokeWidth="0.8" strokeDasharray="2 3" />
-      <path d="M27 58 L36 58 M64 58 L73 58" stroke="var(--ink-3)" strokeWidth="1" strokeLinecap="round" />
+      {/* sheet + frame */}
+      <rect x="0" y="0" width="600" height="560" fill={C.panel} />
+      <rect x="24" y="24" width="552" height="512" fill="url(#grid20)" />
+      <rect x="24" y="24" width="552" height="512" fill="none" stroke={C.line2} strokeWidth="1.25" />
+
+      {/* beam traces along a few grid lines */}
+      <g clipPath="url(#panelClip)" opacity="0.9">
+        <path d="M24 84 H576 M24 464 H576 M120 24 V536 M480 24 V536" stroke="url(#beam)" strokeWidth="2" fill="none" />
+      </g>
+
+      {/* registration crosshairs */}
+      {[[60, 60], [540, 60], [60, 500], [540, 500]].map(([x, y], i) => (
+        <path key={i} d={`M${x - 7} ${y} H${x + 7} M${x} ${y - 7} V${y + 7}`} stroke={C.line2} strokeWidth="1" />
+      ))}
+
+      {/* ── the garment flat (crewneck), drawn left-of-center ─────────────── */}
+      <g transform="translate(40,64)" fill="none" stroke={C.ink} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round">
+        <motion.path {...draw} transition={drawT(0.2)}
+          d="M130 46 L98 54 L44 150 L60 166 L112 92 L118 300 L202 300 L208 92 L260 166 L276 150 L222 54 L190 46 Q160 62 130 46 Z" />
+        {/* neck rib, hem rib, cuffs */}
+        <motion.path {...draw} transition={drawT(1.0)} stroke={C.ink2} strokeWidth="1.6"
+          d="M133 51 Q160 65 187 51 M118 291 L202 291 M46 152 L60 165 M51 147 L64 160 M274 152 L260 165 M269 147 L256 160" />
+        {/* center-front seam, dashed */}
+        <motion.path {...draw} transition={drawT(1.1)} stroke={C.ink3} strokeWidth="1.2" strokeDasharray="2 5"
+          d="M160 66 L160 300" />
+        {/* grainline mark, on-body, in accent */}
+        <motion.path initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: calloutBase - 0.2, duration: 0.4 }}
+          stroke={C.blue} strokeWidth="2"
+          d="M160 150 V236 M154 158 L160 148 L166 158 M154 228 L160 238 L166 228" />
+      </g>
+
+      {/* ── dimension callouts ────────────────────────────────────────────── */}
+      {CALLOUTS.map((c, i) => (
+        <motion.g key={c.n} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: calloutBase + i * 0.18, duration: 0.5 }}>
+          <circle cx={c.at[0]} cy={c.at[1]} r="3" fill={C.blue} />
+          <path d={`M${c.at[0]} ${c.at[1]} L${c.to[0] - 26} ${c.at[1]} L${c.to[0]} ${c.to[1]}`} stroke={C.blue} strokeWidth="1" fill="none" />
+          <text x={c.to[0] + 6} y={c.to[1] - 5} fontFamily={MONO} fontSize="12" fontWeight="700" fill={C.blue}>{c.n}</text>
+          <text x={c.to[0] + 6} y={c.to[1] + 12} fontFamily={MONO} fontSize="12.5" fill={C.ink}>{c.label}</text>
+        </motion.g>
+      ))}
+
+      {/* ── title block ───────────────────────────────────────────────────── */}
+      <g fontFamily={MONO} fill={C.ink2}>
+        <path d={`M24 494 H576 M180 494 V536 M372 494 V536 M474 494 V536`} stroke={C.line2} strokeWidth="1.25" />
+        <text x="36" y="514" fontSize="11" letterSpacing="1.5" fill={C.ink} fontWeight="700">ATELIER</text>
+        <text x="36" y="528" fontSize="9.5" fill={C.ink3}>PRODUCTION OS</text>
+        <text x="192" y="514" fontSize="10.5">FLAT 001 · CREWNECK</text>
+        <text x="192" y="528" fontSize="9.5" fill={C.ink3}>FRONT · GRADE M</text>
+        <text x="384" y="514" fontSize="10.5">SCALE 1:4</text>
+        <text x="384" y="528" fontSize="9.5" fill={C.ink3}>UNIT CM</text>
+        <text x="486" y="514" fontSize="10.5">REV 2.1</text>
+        <text x="486" y="528" fontSize="9.5" fill={C.ink3}>SHEET 1/1</text>
+      </g>
     </svg>
   );
 }
-function ShirtSketch() {
+
+function Eyebrow({ children, color = C.blue }) {
   return (
-    <svg viewBox="0 0 100 108" width="106" height="114" fill="none">
-      <path d="M50 9 L36 3 L14 19 L22 33 L30 27 L30 99 L70 99 L70 27 L78 33 L86 19 L64 3 Z" stroke="var(--ink-3)" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" opacity="0.4" transform="translate(1,1)" />
-      <path d="M50 9 L36 3 L14 19 L22 33 L30 27 L30 99 L70 99 L70 27 L78 33 L86 19 L64 3 Z" stroke="var(--ink-2)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-      <path d="M41 9 L50 21 L59 9" stroke="var(--ink-2)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M50 23 L50 97" stroke="var(--ink-3)" strokeWidth="0.8" strokeDasharray="1.5 4" />
-      <circle cx="50" cy="40" r="1.1" fill="var(--ink-3)" /><circle cx="50" cy="56" r="1.1" fill="var(--ink-3)" /><circle cx="50" cy="72" r="1.1" fill="var(--ink-3)" />
-    </svg>
-  );
-}
-function PantsSketch() {
-  return (
-    <svg viewBox="0 0 100 108" width="106" height="114" fill="none">
-      <path d="M27 5 L73 5 L77 39 L92 99 L74 99 L58 49 L54 99 L36 99 L32 49 L26 99 L8 99 L23 39 Z" stroke="var(--ink-3)" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" opacity="0.4" transform="translate(1,1)" />
-      <path d="M27 5 L73 5 L77 39 L92 99 L74 99 L58 49 L54 99 L36 99 L32 49 L26 99 L8 99 L23 39 Z" stroke="var(--ink-2)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-      <path d="M27 5 L27 16 M73 5 L73 16" stroke="var(--ink-3)" strokeWidth="1" strokeLinecap="round" />
-      <path d="M19 45 L29 45" stroke="var(--ink-3)" strokeWidth="1" strokeLinecap="round" />
-    </svg>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontFamily: MONO, fontSize: 11.5, letterSpacing: '0.18em', textTransform: 'uppercase', color }}>
+      <Grainline h={16} color={color} stroke={2.4} />
+      <span>{children}</span>
+    </div>
   );
 }
 
-// A single pinned sketch card for the hero board. Lifts, straightens, and
-// throws a deeper shadow on hover — like picking the card up off the board.
-function SketchNote({ sketch, label, style }) {
-  return (
-    <motion.div
-      variants={{
-        hidden: { top: 76, left: 108, rotate: 0, scale: 0.88, opacity: 0 },
-        visible: { ...style, scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 110, damping: 15 } },
-      }}
-      whileHover={{
-        y: -16, scale: 1.05, rotate: style.rotate * 0.35, zIndex: 30,
-        boxShadow: '0 26px 46px -18px rgba(0,0,0,0.45)',
-        transition: { type: 'spring', stiffness: 260, damping: 16 },
-      }}
-      style={{
-        position: 'absolute', width: 190, cursor: 'default', background: 'var(--bg-1)',
-        border: '1px solid var(--border-2)', borderRadius: 4,
-        padding: '26px 18px 18px', boxShadow: '0 14px 30px -16px rgba(0,0,0,0.35)',
-      }}
-    >
-      <motion.div
-        whileHover={{ rotate: [0, -8, 8, 0] }}
-        transition={{ duration: 0.5 }}
-        style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)' }}
-      >
-        <Thumbtack size={19} color="var(--c-materials)" />
-      </motion.div>
-      <div style={{ display: 'flex', justifyContent: 'center' }}>{sketch}</div>
-      <div style={{ marginTop: 10, fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.06em', color: 'var(--ink-4)', textAlign: 'center', textTransform: 'uppercase' }}>
-        {label}
-      </div>
-    </motion.div>
-  );
-}
+const reveal = {
+  hidden: { opacity: 0, y: 22 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.16, 0.9, 0.35, 1] } },
+};
+const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
 
-// The hero board: three flats start stacked as one deck, then peel apart
-// and settle at a slight fan on load — a moodboard coming together.
-function HeroBoard() {
+function Reveal({ children, style, as = 'div' }) {
+  const M = motion[as];
   return (
-    <motion.div
-      initial="hidden" animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.15, delayChildren: 0.45 } } }}
-      style={{ position: 'relative', width: 400, height: 360 }}
-    >
-      <SketchNote sketch={<ShirtSketch />} label="flat — oxford, front" style={{ top: 0, left: -12, rotate: -10 }} />
-      <SketchNote sketch={<PantsSketch />} label="flat — wide leg, cropped" style={{ top: 2, left: 214, rotate: 9 }} />
-      <SketchNote sketch={<JacketSketch />} label="flat — bomber, rev. 3" style={{ top: 58, left: 106, rotate: 3 }} />
-    </motion.div>
+    <M variants={reveal} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-70px' }} style={style}>
+      {children}
+    </M>
   );
 }
 
 export default function Welcome() {
   const navigate = useNavigate();
-  const left = FEATURES.slice(0, 4);
-  const right = FEATURES.slice(4);
 
   return (
-    <div style={{ background: 'var(--bg)', minHeight: '100vh', overflowX: 'hidden' }}>
-      <style>{`
-        .gl-swatch-row {
-          padding: 26px 14px;
-          margin: 0 -14px;
-          border-radius: 10px;
-          transition: background 0.22s ease;
-        }
-        .gl-swatch-row:hover { background: var(--bg-1); }
-        .gl-swatch-row:hover .gl-swatch { transform: rotate(-4deg) scale(1.08); }
-        .gl-flow-step { transition: transform 0.2s ease; cursor: default; }
-        .gl-flow-step:hover { transform: translateY(-4px); }
-        .gl-flow-step:hover .gl-flow-dot {
-          background: var(--accent); color: var(--bg-1);
-          transform: scale(1.1);
-        }
-        .gl-flow-dot { transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease; }
-        .gl-footer-link { transition: color 0.15s ease; }
-        .gl-footer-link:hover { color: var(--ink-1, var(--ink-2)); }
-        .gl-nav-a { transition: color 0.15s ease; }
-        .gl-nav-a:hover { color: var(--ink-1, var(--ink-2)); }
-        @media (max-width: 640px) {
-          .gl-nav-link { display: none; }
-        }
-      `}</style>
+    <div className="ds-root">
+      <style>{CSS}</style>
 
-      {/* ─── Nav ─────────────────────────────────────────────────────────── */}
-      <div style={{
-        position: 'sticky', top: 0, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '16px 28px', background: 'color-mix(in srgb, var(--bg) 82%, transparent)', backdropFilter: 'blur(10px)',
-        borderBottom: '1px solid var(--border)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <Logomark />
-          <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 19, fontWeight: 500 }}>Atelier</span>
+      {/* ── title bar ─────────────────────────────────────────────────────── */}
+      <header className="ds-bar">
+        <div className="ds-bar-in">
+          <div className="ds-brand">
+            <Grainline h={22} color={C.blue} stroke={2.6} />
+            <span className="ds-brand-name">Atelier</span>
+            <span className="ds-brand-sub">PRODUCTION&nbsp;OS</span>
+          </div>
+          <nav className="ds-nav">
+            <a href="#index" className="ds-nav-link">Index</a>
+            <a href="#pricing" className="ds-nav-link">Pricing</a>
+            <button className="ds-btn ds-btn-ghost" onClick={() => navigate('/login')}>Log in</button>
+            <button className="ds-btn ds-btn-solid" onClick={() => navigate('/signup')}>Start free</button>
+          </nav>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-          <a href="#features" className="gl-nav-link gl-nav-a" style={{ fontSize: 13, color: 'var(--ink-3)' }}>Features</a>
-          <a href="#pricing" className="gl-nav-link gl-nav-a" style={{ fontSize: 13, color: 'var(--ink-3)' }}>Pricing</a>
-          <a href="#" onClick={e => { e.preventDefault(); navigate('/login'); }} className="gl-nav-a" style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 600 }}>Log in</a>
-          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} className="btn btn-primary" onClick={() => navigate('/signup')}>Get started</motion.button>
-        </div>
-      </div>
+      </header>
 
-      {/* ─── Hero ────────────────────────────────────────────────────────── */}
-      <Section style={{ paddingTop: 76, paddingBottom: 60 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.05fr) minmax(0, 0.8fr)', gap: 40, alignItems: 'center' }}>
-          <motion.div initial="hidden" animate="visible" variants={stagger}>
-            <motion.h1 variants={fadeUp} style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 'clamp(38px, 5.6vw, 64px)', fontWeight: 500, lineHeight: 1.1, letterSpacing: '-0.01em', marginBottom: 22 }}>
-              From design to drop,<br />
-              <span style={{ position: 'relative', display: 'inline-block' }}>
-                without losing your mind.
-                <svg
-                  viewBox="0 0 300 20" preserveAspectRatio="none" aria-hidden
-                  style={{ position: 'absolute', left: -4, right: -4, bottom: -6, width: 'calc(100% + 8px)', height: 16 }}
-                >
-                  <path d="M2 12 C 40 4, 80 16, 120 8 C 160 1, 200 15, 240 7 C 265 3, 285 9, 298 6"
-                    stroke="var(--c-vendors)" strokeWidth="3" fill="none" strokeLinecap="round" />
-                </svg>
-              </span>
+      {/* ── hero ──────────────────────────────────────────────────────────── */}
+      <section className="ds-hero">
+        <CornerMarks />
+        <div className="ds-hero-grid">
+          <motion.div className="ds-hero-copy" variants={stagger} initial="hidden" animate="show">
+            <motion.div variants={reveal}><Eyebrow>Rev 2.1 · For independent labels</Eyebrow></motion.div>
+            <motion.h1 variants={reveal} className="ds-h1">
+              From flat<br />sketch to<br /><span className="ds-h1-blue">finished run.</span>
             </motion.h1>
-            <motion.p variants={fadeUp} style={{ fontSize: 17, color: 'var(--ink-2)', lineHeight: 1.65, maxWidth: 480, marginBottom: 30 }}>
-              Atelier is the production operating system for founders building their own clothing line — one workspace to design, spec, source, and ship, instead of a scattered stack of spreadsheets, DMs, and freelance tech-pack files.
+            <motion.p variants={reveal} className="ds-lede">
+              Atelier is the production workspace for independent clothing brands — design, tech-pack, source, sample, and manufacture a product in one place, instead of a stack of spreadsheets, DMs, and freelance tech-pack files.
             </motion.p>
-            <motion.div variants={fadeUp} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-              <motion.button
-                whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                className="btn btn-primary" style={{ padding: '13px 22px', fontSize: 14.5 }} onClick={() => navigate('/signup')}
-              >
-                Get started free <i className="ph ph-arrow-right" />
-              </motion.button>
-              <a href="#features" className="gl-nav-a" style={{ fontSize: 13.5, color: 'var(--ink-2)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                See what it does <i className="ph ph-arrow-down" />
-              </a>
+            <motion.div variants={reveal} className="ds-cta-row">
+              <button className="ds-btn ds-btn-solid ds-btn-lg" onClick={() => navigate('/signup')}>
+                Start free <span className="ds-btn-arrow">→</span>
+              </button>
+              <a href="#index" className="ds-btn ds-btn-line ds-btn-lg">See the spec</a>
             </motion.div>
-            <motion.div variants={fadeUp} style={{ marginTop: 22, fontSize: 12, color: 'var(--ink-4)' }}>
-              No credit card required — the Free plan runs one product forever.
+            <motion.div variants={reveal} className="ds-note">
+              <span className="ds-tick" /> No card. The free plan runs one product, forever.
             </motion.div>
           </motion.div>
 
-          <div style={{ position: 'relative', justifySelf: 'center' }}>
-            <HeroBoard />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.6 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 1.1, duration: 0.5, ease: [0.16, 0.9, 0.35, 1] }}
-              style={{ position: 'absolute', bottom: -6, right: -14 }}
-            >
-              <motion.div
-                animate={{ y: [0, -8, 0] }} transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut', delay: 1.6 }}
-                whileHover={{ scale: 1.12, rotate: -8, transition: { type: 'spring', stiffness: 300 } }}
-              >
-                <WaxSeal initials="GL" size={64} color="var(--c-vendors)" />
-              </motion.div>
-            </motion.div>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.6 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 1.2, duration: 0.5, ease: [0.16, 0.9, 0.35, 1] }}
-              style={{ position: 'absolute', top: -26, left: -22 }}
-            >
-              <motion.div animate={{ rotate: [0, 6, 0] }} transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut', delay: 1.7 }}>
-                <DriedFlower size={46} color="var(--sage)" />
-              </motion.div>
-            </motion.div>
+          <div className="ds-hero-panel">
+            <DraftPanel />
           </div>
         </div>
-      </Section>
 
-      {/* ─── Mission ─────────────────────────────────────────────────────── */}
-      <Section dark>
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-100px' }} variants={stagger} style={{ textAlign: 'center', maxWidth: 720, margin: '0 auto' }}>
-          <motion.div variants={fadeUp} style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
-            <WaxSeal initials="GL" size={52} color="var(--accent)" />
-          </motion.div>
-          <motion.div variants={fadeUp} style={{ fontSize: 11.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 18 }}>Our mission</motion.div>
-          <motion.p variants={fadeUp} style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 'clamp(22px, 3vw, 32px)', lineHeight: 1.5, color: 'var(--cream)' }}>
-            Starting a clothing brand shouldn't require a rolodex, a manufacturing degree, and a miracle. We're building the tools an independent founder actually needs to take a sketch seriously — turn it into a real, sourceable, sellable product — without pretending AI can make the creative or business calls for you.
-          </motion.p>
-          <motion.p variants={fadeUp} style={{ fontSize: 13.5, color: 'var(--ink-3)', marginTop: 22 }}>
-            AI drafts, extracts, scores, and suggests. You always review and decide.
-          </motion.p>
-        </motion.div>
-      </Section>
-
-      {/* ─── Feature spec sheet ──────────────────────────────────────────── */}
-      <Section id="features">
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-80px' }} variants={fadeUp} style={{ marginBottom: 50 }}>
-          <div style={{ fontSize: 11.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 12 }}>The workbench</div>
-          <h2 style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 'clamp(26px, 4vw, 38px)', fontWeight: 500, maxWidth: 620 }}>
-            Every stage of building a product, covered.
-          </h2>
-        </motion.div>
-        <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-60px' }} variants={stagger}
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', columnGap: 56 }}
-        >
-          <div>
-            {left.map((f, i) => <SwatchRow key={f.title} f={f} isLast={i === left.length - 1} />)}
-          </div>
-          <div>
-            {right.map((f, i) => <SwatchRow key={f.title} f={f} isLast={i === right.length - 1} />)}
-          </div>
-        </motion.div>
-      </Section>
-
-      {/* ─── Flow ────────────────────────────────────────────────────────── */}
-      <Section>
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-80px' }} variants={fadeUp} style={{ textAlign: 'center', marginBottom: 46 }}>
-          <div style={{ fontSize: 11.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 12 }}>How it flows</div>
-          <h2 style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 'clamp(26px, 4vw, 38px)', fontWeight: 500 }}>
-            One product, one path — start to sold.
-          </h2>
-        </motion.div>
-        <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-60px' }} variants={stagger}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 0 }}
-        >
-          {STAGES.map((s, i) => (
-            <React.Fragment key={s.key}>
-              {i > 0 && (
-                <motion.div variants={fadeUp} style={{ width: 32, height: 2, background: 'var(--border-2)', marginTop: -20 }} />
-              )}
-              <motion.div variants={fadeUp} className="gl-flow-step" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '0 12px' }}>
-                <div className="gl-flow-dot" style={{
-                  width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'var(--bg-1)', border: '2px solid var(--accent)', color: 'var(--accent)', fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 13,
-                }}>
-                  {i + 1}
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{s.label}</div>
-              </motion.div>
-            </React.Fragment>
+        {/* spec strip — true one-liners, not fabricated stats */}
+        <div className="ds-strip">
+          {['6 stages · concept → sold', 'AI assists — never decides', 'Real vendors, real quotes', 'Free plan, one product, forever'].map((t, i) => (
+            <span key={i} className="ds-strip-item"><Grainline h={12} color={C.ink3} stroke={2.6} /> {t}</span>
           ))}
-        </motion.div>
-      </Section>
+        </div>
+      </section>
 
-      {/* ─── Pricing ─────────────────────────────────────────────────────── */}
-      <Section id="pricing" dark>
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-80px' }} variants={fadeUp} style={{ textAlign: 'center', marginBottom: 46 }}>
-          <div style={{ fontSize: 11.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 12 }}>Pricing</div>
-          <h2 style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 'clamp(26px, 4vw, 38px)', fontWeight: 500, color: 'var(--cream)' }}>
-            Start free. Grow into it.
-          </h2>
-        </motion.div>
-        <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-60px' }} variants={stagger}
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18 }}
-        >
-          {PLANS.map(p => (
-            <motion.div
-              key={p.id} variants={fadeUp}
-              whileHover={{ y: -6, transition: { type: 'spring', stiffness: 300, damping: 20 } }}
-              style={{
-                background: p.id === 'basic' ? 'var(--accent)' : 'var(--charcoal-2)',
-                border: `1px solid ${p.id === 'basic' ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}`,
-                borderRadius: 'var(--r-lg)', padding: 26, position: 'relative',
-                color: p.id === 'basic' ? 'var(--charcoal)' : 'var(--cream)',
-                boxShadow: '0 0 0 rgba(0,0,0,0)',
-              }}
-            >
-              {p.id === 'basic' && (
-                <div style={{ position: 'absolute', top: -12, left: 26, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', background: 'var(--charcoal)', color: 'var(--accent)', padding: '4px 10px', borderRadius: 99 }}>
-                  Most popular
-                </div>
-              )}
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{p.name}</div>
-              <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 18 }}>{p.tagline}</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 22 }}>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 34, fontWeight: 700 }}>{p.price}</span>
-                <span style={{ fontSize: 12, opacity: 0.7 }}>{p.priceSuffix}</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-                {p.summary.map(s => (
-                  <div key={s} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, lineHeight: 1.5 }}>
-                    <i className="ph ph-check" style={{ marginTop: 2, flexShrink: 0 }} />
-                    <span>{s}</span>
-                  </div>
-                ))}
-              </div>
-              <button
-                className={p.id === 'basic' ? 'btn' : 'btn btn-primary'}
-                style={{ width: '100%', justifyContent: 'center', ...(p.id === 'basic' ? { background: 'var(--charcoal)', color: 'var(--cream)', border: 'none' } : {}) }}
-                onClick={() => navigate('/signup')}
-              >
-                {p.id === 'free' ? 'Start for free' : `Choose ${p.name}`}
-              </button>
-            </motion.div>
-          ))}
-        </motion.div>
-      </Section>
+      {/* ── mission — inverted title block band ───────────────────────────── */}
+      <section className="ds-mission">
+        <div className="ds-wrap">
+          <Reveal><Eyebrow color="#7FB3D0">Mission</Eyebrow></Reveal>
+          <Reveal as="p" style={{ margin: 0 }}>
+            <span className="ds-mission-lead">
+              Starting a clothing brand shouldn't take a rolodex, a manufacturing degree, and a miracle.
+            </span>{' '}
+            <span className="ds-mission-body">
+              Atelier gives an independent founder the tools to take a sketch seriously — and turn it into something real, sourceable, and sellable.
+            </span>
+          </Reveal>
+          <Reveal>
+            <div className="ds-mission-foot">AI drafts, extracts, scores, and suggests. You review and decide — always.</div>
+          </Reveal>
+        </div>
+      </section>
 
-      {/* ─── Final CTA ───────────────────────────────────────────────────── */}
-      <Section>
-        <motion.div
-          initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-80px' }} variants={fadeUp}
-          style={{
-            textAlign: 'center', padding: '56px 20px',
-            borderTop: '1px dashed var(--border-2)', borderBottom: '1px dashed var(--border-2)',
-          }}
-        >
-          <motion.div
-            whileHover={{ scale: 1.1, rotate: -6 }} transition={{ type: 'spring', stiffness: 300 }}
-            style={{ display: 'flex', justifyContent: 'center', marginBottom: 20, cursor: 'default' }}
-          >
-            <WaxSeal initials="GL" size={44} color="var(--c-vendors)" />
+      {/* ── specification index (features) ───────────────────────────────── */}
+      <section className="ds-section" id="index">
+        <div className="ds-wrap">
+          <Reveal>
+            <div className="ds-sec-head">
+              <Eyebrow>Specification index</Eyebrow>
+              <h2 className="ds-h2">Every stage of making a product — on one sheet.</h2>
+            </div>
+          </Reveal>
+          <motion.div className="ds-index" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}>
+            {FEATURES.map(f => (
+              <motion.article key={f.n} variants={reveal} className="ds-cell">
+                <span className="ds-cell-corner" aria-hidden />
+                <div className="ds-cell-n">{f.n}</div>
+                <h3 className="ds-cell-title">{f.title}</h3>
+                <p className="ds-cell-text">{f.text}</p>
+              </motion.article>
+            ))}
           </motion.div>
-          <h2 style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 'clamp(24px, 3.5vw, 34px)', fontWeight: 500, marginBottom: 14 }}>
-            Cut your first pattern this week.
-          </h2>
-          <p style={{ fontSize: 14, color: 'var(--ink-3)', marginBottom: 26, maxWidth: 440, marginLeft: 'auto', marginRight: 'auto' }}>
-            Set up your brand workspace and take one real product from sketch to spec — free, no card, one product forever on the Free plan.
-          </p>
-          <motion.button
-            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            className="btn btn-primary" style={{ padding: '13px 26px', fontSize: 14.5 }} onClick={() => navigate('/signup')}
-          >
-            Start your first product <i className="ph ph-arrow-right" />
-          </motion.button>
-        </motion.div>
-      </Section>
+        </div>
+      </section>
 
-      {/* ─── Footer ──────────────────────────────────────────────────────── */}
-      <footer style={{ padding: '40px 24px', borderTop: '1px solid var(--border)' }}>
-        <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Logomark size={20} />
-            <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14 }}>Atelier</span>
+      {/* ── flow — a grade rule from concept to sold ─────────────────────── */}
+      <section className="ds-section ds-flow-sec">
+        <div className="ds-wrap">
+          <Reveal><Eyebrow>Assembly sequence</Eyebrow></Reveal>
+          <Reveal><h2 className="ds-h2" style={{ marginBottom: 34 }}>One product, one path — measured end to end.</h2></Reveal>
+          <Reveal>
+            <div className="ds-rule">
+              <div className="ds-rule-line" aria-hidden />
+              {STAGES.map((s, i) => (
+                <div className="ds-rule-stop" key={s.key}>
+                  <span className="ds-rule-tick" aria-hidden />
+                  <span className="ds-rule-n">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="ds-rule-label">{s.label}</span>
+                </div>
+              ))}
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ── pricing ───────────────────────────────────────────────────────── */}
+      <section className="ds-section" id="pricing">
+        <div className="ds-wrap">
+          <Reveal>
+            <div className="ds-sec-head">
+              <Eyebrow>Size run</Eyebrow>
+              <h2 className="ds-h2">Start free. Grow into it.</h2>
+            </div>
+          </Reveal>
+          <motion.div className="ds-price" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}>
+            {PLANS.map(p => {
+              const feature = p.id === 'basic';
+              return (
+                <motion.div key={p.id} variants={reveal} className={`ds-plan${feature ? ' ds-plan-feat' : ''}`}>
+                  {feature && <div className="ds-plan-flag">Most chosen</div>}
+                  <div className="ds-plan-name">{p.name}</div>
+                  <div className="ds-plan-tag">{p.tagline}</div>
+                  <div className="ds-plan-price"><span className="ds-plan-amt">{p.price}</span><span className="ds-plan-suf">{p.priceSuffix}</span></div>
+                  <div className="ds-plan-rule" />
+                  <ul className="ds-plan-list">
+                    {p.summary.map(s => (
+                      <li key={s}><Grainline h={12} color={feature ? '#7FB3D0' : C.blue} stroke={2.6} /><span>{s}</span></li>
+                    ))}
+                  </ul>
+                  <button className={`ds-btn ds-btn-lg ${feature ? 'ds-btn-cream' : 'ds-btn-solid'}`} style={{ width: '100%', justifyContent: 'center' }} onClick={() => navigate('/signup')}>
+                    {p.id === 'free' ? 'Start for free' : `Choose ${p.name}`}
+                  </button>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── final cta ─────────────────────────────────────────────────────── */}
+      <section className="ds-section">
+        <div className="ds-wrap">
+          <Reveal>
+            <div className="ds-final">
+              <CornerMarks color="rgba(233,234,228,0.35)" />
+              <Grainline h={40} color="#7FB3D0" stroke={2.4} />
+              <h2 className="ds-final-h">Your next product deserves a real workspace.</h2>
+              <p className="ds-final-p">Set up your brand in a couple minutes and start on your first product today — free, no card needed.</p>
+              <button className="ds-btn ds-btn-cream ds-btn-lg" onClick={() => navigate('/signup')}>Start free <span className="ds-btn-arrow">→</span></button>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ── footer title block ────────────────────────────────────────────── */}
+      <footer className="ds-foot">
+        <div className="ds-wrap ds-foot-in">
+          <div className="ds-brand">
+            <Grainline h={18} color={C.ink} stroke={2.6} />
+            <span className="ds-brand-name" style={{ color: C.ink }}>Atelier</span>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>The production operating system for independent clothing brands.</div>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-            <a href="#" onClick={e => { e.preventDefault(); navigate('/terms'); }} className="gl-footer-link" style={{ fontSize: 12, color: 'var(--ink-3)' }}>Terms</a>
-            <a href="#" onClick={e => { e.preventDefault(); navigate('/privacy'); }} className="gl-footer-link" style={{ fontSize: 12, color: 'var(--ink-3)' }}>Privacy</a>
-            <a href="#" onClick={e => { e.preventDefault(); navigate('/login'); }} className="gl-footer-link" style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 600, marginLeft: 8 }}>Log in</a>
+          <div className="ds-foot-meta">Production OS for independent clothing brands</div>
+          <div className="ds-foot-links">
+            <a href="#" onClick={e => { e.preventDefault(); navigate('/login'); }}>Log in</a>
+            <a href="#" onClick={e => { e.preventDefault(); navigate('/terms'); }}>Terms</a>
+            <a href="#" onClick={e => { e.preventDefault(); navigate('/privacy'); }}>Privacy</a>
           </div>
         </div>
       </footer>
     </div>
   );
 }
+
+const CSS = `
+.ds-root { background: ${C.sheet}; color: ${C.ink}; font-family: ${BODY};
+  min-height: 100vh; overflow-x: hidden; -webkit-font-smoothing: antialiased;
+  background-image: linear-gradient(${C.line} 1px, transparent 1px), linear-gradient(90deg, ${C.line} 1px, transparent 1px);
+  background-size: 26px 26px; background-position: center top; }
+.ds-root ::selection { background: ${C.blue}; color: ${C.cream}; }
+.ds-wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+
+/* title bar */
+.ds-bar { position: sticky; top: 0; z-index: 40; background: rgba(231,232,226,0.82);
+  backdrop-filter: blur(8px); border-bottom: 1px solid ${C.line2}; }
+.ds-bar-in { max-width: 1120px; margin: 0 auto; padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; }
+.ds-brand { display: flex; align-items: center; gap: 9px; }
+.ds-brand-name { font-family: ${DISPLAY}; font-weight: 800; font-size: 18px; letter-spacing: -0.01em; }
+.ds-brand-sub { font-family: ${MONO}; font-size: 9.5px; letter-spacing: 0.16em; color: ${C.ink3}; padding: 3px 6px; border: 1px solid ${C.line2}; border-radius: 3px; }
+.ds-nav { display: flex; align-items: center; gap: 20px; }
+.ds-nav-link { font-family: ${MONO}; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: ${C.ink2}; text-decoration: none; }
+.ds-nav-link:hover { color: ${C.ink}; }
+
+/* buttons */
+.ds-btn { font-family: ${MONO}; font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  border: 1.5px solid transparent; border-radius: 4px; padding: 9px 16px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+  text-decoration: none; transition: transform .12s ease, background .12s ease, color .12s ease, border-color .12s ease; }
+.ds-btn:active { transform: translateY(1px); }
+.ds-btn-lg { padding: 13px 22px; font-size: 13px; }
+.ds-btn-solid { background: ${C.ink}; color: ${C.cream}; border-color: ${C.ink}; }
+.ds-btn-solid:hover { background: ${C.blueDeep}; border-color: ${C.blueDeep}; }
+.ds-btn-cream { background: ${C.cream}; color: ${C.ink}; border-color: ${C.cream}; }
+.ds-btn-cream:hover { background: #fff; }
+.ds-btn-line { background: transparent; color: ${C.ink}; border-color: ${C.ink}; }
+.ds-btn-line:hover { background: ${C.ink}; color: ${C.cream}; }
+.ds-btn-ghost { background: transparent; color: ${C.ink2}; border-color: transparent; }
+.ds-btn-ghost:hover { color: ${C.ink}; }
+.ds-btn-arrow { transition: transform .16s ease; }
+.ds-btn:hover .ds-btn-arrow { transform: translateX(3px); }
+
+/* hero */
+.ds-hero { position: relative; padding: 64px 0 20px; }
+.ds-hero-grid { max-width: 1120px; margin: 0 auto; padding: 0 28px; display: grid; grid-template-columns: 1.02fr 1.1fr; gap: 40px; align-items: center; }
+.ds-hero-copy { display: flex; flex-direction: column; gap: 22px; }
+.ds-h1 { font-family: ${DISPLAY}; font-weight: 900; font-size: clamp(42px, 6.4vw, 82px); line-height: 0.94;
+  letter-spacing: -0.025em; text-transform: uppercase; margin: 4px 0 0; }
+.ds-h1-blue { color: ${C.blue}; }
+.ds-lede { font-size: 16.5px; line-height: 1.62; color: ${C.ink2}; max-width: 480px; margin: 0; }
+.ds-cta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ds-note { font-family: ${MONO}; font-size: 12px; color: ${C.ink3}; display: flex; align-items: center; gap: 9px; }
+.ds-tick { width: 7px; height: 7px; background: ${C.blue}; border-radius: 50%; flex-shrink: 0; }
+.ds-hero-panel { border: 1.5px solid ${C.line2}; border-radius: 6px; background: ${C.panel}; box-shadow: 0 24px 60px -30px rgba(21,23,27,0.32); overflow: hidden; }
+
+/* spec strip */
+.ds-strip { max-width: 1120px; margin: 44px auto 0; padding: 16px 28px; border-top: 1px solid ${C.line2}; border-bottom: 1px solid ${C.line2};
+  display: flex; flex-wrap: wrap; gap: 12px 30px; }
+.ds-strip-item { font-family: ${MONO}; font-size: 12px; letter-spacing: 0.03em; color: ${C.ink2}; display: inline-flex; align-items: center; gap: 8px; text-transform: uppercase; }
+
+/* mission */
+.ds-mission { background: ${C.ink}; color: ${C.cream}; padding: 96px 0; margin-top: 60px; }
+.ds-mission .ds-wrap { display: flex; flex-direction: column; gap: 26px; max-width: 900px; }
+.ds-mission-lead { font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(24px, 3.4vw, 38px); line-height: 1.18; letter-spacing: -0.01em; color: ${C.cream}; }
+.ds-mission-body { font-size: clamp(18px, 2.2vw, 24px); line-height: 1.5; color: #A9B4BC; font-family: ${BODY}; }
+.ds-mission-foot { font-family: ${MONO}; font-size: 12.5px; letter-spacing: 0.04em; color: #7FB3D0; text-transform: uppercase; }
+
+/* generic section */
+.ds-section { padding: 90px 0; }
+.ds-sec-head { display: flex; flex-direction: column; gap: 14px; margin-bottom: 40px; }
+.ds-h2 { font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(26px, 3.6vw, 40px); line-height: 1.06; letter-spacing: -0.02em; text-transform: uppercase; margin: 0; max-width: 640px; }
+
+/* specification index */
+.ds-index { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1.5px solid ${C.line2}; border-left: 1.5px solid ${C.line2}; }
+.ds-cell { position: relative; padding: 26px 24px 30px; border-right: 1.5px solid ${C.line2}; border-bottom: 1.5px solid ${C.line2}; background: ${C.sheet2}; transition: background .16s ease; }
+.ds-cell:hover { background: ${C.panel}; }
+.ds-cell-corner { position: absolute; top: 0; right: 0; width: 14px; height: 14px; border-top: 2px solid transparent; border-right: 2px solid transparent; transition: border-color .16s ease; }
+.ds-cell:hover .ds-cell-corner { border-color: ${C.blue}; }
+.ds-cell-n { font-family: ${MONO}; font-size: 12px; font-weight: 700; color: ${C.blue}; letter-spacing: 0.08em; }
+.ds-cell-title { font-family: ${DISPLAY}; font-weight: 700; font-size: 16.5px; margin: 12px 0 8px; letter-spacing: -0.01em; }
+.ds-cell-text { font-size: 13px; line-height: 1.6; color: ${C.ink2}; margin: 0; }
+
+/* flow rule */
+.ds-flow-sec { background: ${C.sheet2}; border-top: 1px solid ${C.line2}; border-bottom: 1px solid ${C.line2}; }
+.ds-rule { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; padding-top: 26px; }
+.ds-rule-line { position: absolute; top: 26px; left: 0; right: 0; height: 2px; background: ${C.line2}; }
+.ds-rule-stop { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
+.ds-rule-tick { width: 2px; height: 16px; background: ${C.blue}; margin-top: -7px; }
+.ds-rule-n { font-family: ${MONO}; font-size: 12px; font-weight: 700; color: ${C.blue}; }
+.ds-rule-label { font-family: ${DISPLAY}; font-weight: 700; font-size: 13.5px; letter-spacing: -0.01em; line-height: 1.15; }
+
+/* pricing */
+.ds-price { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.ds-plan { position: relative; border: 1.5px solid ${C.line2}; border-radius: 6px; background: ${C.sheet2}; padding: 26px 24px; display: flex; flex-direction: column; }
+.ds-plan-feat { background: ${C.ink}; color: ${C.cream}; border-color: ${C.ink}; }
+.ds-plan-flag { position: absolute; top: -11px; left: 24px; font-family: ${MONO}; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; background: ${C.blue}; color: ${C.cream}; padding: 4px 10px; border-radius: 3px; }
+.ds-plan-name { font-family: ${DISPLAY}; font-weight: 800; font-size: 18px; text-transform: uppercase; letter-spacing: -0.01em; }
+.ds-plan-tag { font-size: 12.5px; color: ${C.ink3}; margin-top: 4px; }
+.ds-plan-feat .ds-plan-tag { color: #9BA6AE; }
+.ds-plan-price { display: flex; align-items: baseline; gap: 5px; margin: 18px 0; }
+.ds-plan-amt { font-family: ${MONO}; font-size: 34px; font-weight: 700; }
+.ds-plan-suf { font-family: ${MONO}; font-size: 12px; color: ${C.ink3}; }
+.ds-plan-feat .ds-plan-suf { color: #9BA6AE; }
+.ds-plan-rule { height: 1px; background: ${C.line2}; margin-bottom: 18px; }
+.ds-plan-feat .ds-plan-rule { background: rgba(233,234,228,0.18); }
+.ds-plan-list { list-style: none; margin: 0 0 22px; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.ds-plan-list li { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; }
+.ds-plan-list svg { margin-top: 1px; flex-shrink: 0; }
+
+/* final cta */
+.ds-final { position: relative; background: ${C.ink}; color: ${C.cream}; border-radius: 8px; padding: 60px 40px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.ds-final-h { font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(24px, 3.4vw, 36px); text-transform: uppercase; letter-spacing: -0.02em; line-height: 1.08; margin: 4px 0 0; max-width: 560px; }
+.ds-final-p { font-size: 14.5px; color: #A9B4BC; max-width: 460px; margin: 0 0 8px; line-height: 1.6; }
+
+/* footer */
+.ds-foot { border-top: 1.5px solid ${C.line2}; padding: 26px 0 40px; }
+.ds-foot-in { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.ds-foot-meta { font-family: ${MONO}; font-size: 11.5px; color: ${C.ink3}; letter-spacing: 0.03em; }
+.ds-foot-links { display: flex; gap: 20px; }
+.ds-foot-links a { font-family: ${MONO}; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: ${C.ink2}; text-decoration: none; }
+.ds-foot-links a:hover { color: ${C.blue}; }
+
+/* responsive */
+@media (max-width: 900px) {
+  .ds-hero-grid { grid-template-columns: 1fr; gap: 30px; }
+  .ds-hero { padding-top: 40px; }
+  .ds-index { grid-template-columns: repeat(2, 1fr); }
+  .ds-rule { grid-template-columns: repeat(4, 1fr); row-gap: 22px; }
+  .ds-rule-line { display: none; }
+  .ds-price { grid-template-columns: 1fr; }
+  .ds-nav .ds-nav-link { display: none; }
+}
+@media (max-width: 640px) {
+  .ds-brand-sub { display: none; }
+  .ds-bar-in { padding: 11px 18px; }
+  .ds-nav { gap: 12px; }
+  .ds-wrap, .ds-hero-grid { padding-left: 18px; padding-right: 18px; }
+}
+@media (max-width: 520px) {
+  .ds-index { grid-template-columns: 1fr; }
+  .ds-rule { grid-template-columns: repeat(2, 1fr); }
+  .ds-mission { padding: 68px 0; }
+  .ds-section { padding: 64px 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-btn, .ds-btn-arrow { transition: none; }
+}
+`;
