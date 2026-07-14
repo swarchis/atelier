@@ -32,7 +32,11 @@ export default function VariantsTab({ productId, variants, onChange, onCapture, 
     }
   };
 
-  const remove = (url) => onChange(variants.filter(v => v.url !== url));
+  const remove = async (url) => {
+    const fileName = url.split('/').pop();
+    await supabase.storage.from('mockups').remove([fileName]);
+    onChange(variants.filter(v => v.url !== url));
+  };
 
   return (
     <div style={{ maxWidth: 1080 }}>

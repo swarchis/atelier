@@ -32,8 +32,13 @@ function VersionHistory({ productId, onApplyToCanvas }) {
   useEffect(() => { load(); }, [productId]);
 
   const remove = async (versionId) => {
+    const v = versions.find(ver => ver.id === versionId);
+    if (v && v.image_url) {
+      const fileName = v.image_url.split('/').pop();
+      await supabase.storage.from('mockups').remove([fileName]);
+    }
     const { error } = await supabase.from('design_versions').delete().eq('id', versionId);
-    if (!error) setVersions(prev => prev.filter(v => v.id !== versionId));
+    if (!error) setVersions(prev => prev.filter(ver => ver.id !== versionId));
   };
 
   return (

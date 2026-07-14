@@ -26,7 +26,11 @@ function Moodboard({ productId, moodboard, onChange }) {
     }
   };
 
-  const remove = (url) => onChange(moodboard.filter(m => m.url !== url));
+  const remove = async (url) => {
+    const fileName = url.split('/').pop();
+    await supabase.storage.from('mockups').remove([fileName]);
+    onChange(moodboard.filter(m => m.url !== url));
+  };
 
   return (
     <div className="card-raised" style={{ padding: 18 }}>

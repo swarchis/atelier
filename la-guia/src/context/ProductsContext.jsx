@@ -196,6 +196,27 @@ export function ProductsProvider({ children }) {
   // their FK (ON DELETE CASCADE), so this is the one call that removes a
   // piece entirely, not just its tech pack or design data.
   const deleteProduct = async (id) => {
+    // 1. Clean up Supabase Storage before deleting the DB row
+    try {
+      const pathsToDelete = [];
+      const { data: tp } = await supabase.from('tech_packs').select('image_url').eq('product_id', id).maybeSingle();
+      if (tp?.image_url) pathsToDelete.push(tp.image_url.split('/').pop());
+
+      const { data: dv } = await supabase.from('design_versions').select('image_url').eq('product_id', id);
+      (dv || []).forEach(v => v.image_url && pathsToDelete.push(v.image_url.split('/').pop()));
+
+      const { data: d } = await supabase.from('designs').select('variants, moodboard').eq('product_id', id).maybeSingle();
+      (d?.variants || []).forEach(v => v.url && pathsToDelete.push(v.url.split('/').pop()));
+      (d?.moodboard || []).forEach(m => m.url && pathsToDelete.push(m.url.split('/').pop()));
+
+      if (pathsToDelete.length > 0) {
+        await supabase.storage.from('mockups').remove(pathsToDelete);
+      }
+    } catch (cleanupErr) {
+      console.error('Failed to cleanup storage, but continuing with product deletion:', cleanupErr);
+    }
+
+    // 2. Delete the DB row (cascades to related tables automatically)
     const { error } = await supabase.from('products').delete().eq('id', id);
     if (error) throw error;
     setProducts(prev => prev.filter(p => p.id !== id));

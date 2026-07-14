@@ -87,8 +87,17 @@ export function SamplingProvider({ children }) {
   };
 
   const deleteSample = async (id) => {
+    // 1. Delete associated images from storage
+    const sampleImgs = images.filter(i => i.sample_id === id);
+    const pathsToDelete = sampleImgs.map(i => i.image_url?.split('/').pop()).filter(Boolean);
+    if (pathsToDelete.length > 0) {
+      await supabase.storage.from('mockups').remove(pathsToDelete);
+    }
+
+    // 2. Delete the DB row
     const { error } = await supabase.from('samples').delete().eq('id', id);
     if (error) throw error;
+    
     setSamples(prev => prev.filter(s => s.id !== id));
     setImages(prev => prev.filter(i => i.sample_id !== id));
     setAnnotations(prev => prev.filter(a => a.sample_id !== id));
@@ -116,8 +125,15 @@ export function SamplingProvider({ children }) {
   };
 
   const deleteImage = async (imageId) => {
+    const img = images.find(i => i.id === imageId);
+    if (img && img.image_url) {
+      const fileName = img.image_url.split('/').pop();
+      await supabase.storage.from('mockups').remove([fileName]);
+    }
+
     const { error } = await supabase.from('sample_images').delete().eq('id', imageId);
     if (error) throw error;
+    
     setImages(prev => prev.filter(i => i.id !== imageId));
     setAnnotations(prev => prev.filter(a => a.image_id !== imageId));
   };
