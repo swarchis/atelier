@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProduction } from '../context/ProductionContext.jsx';
+import { currency } from '../lib/format.js';
 import FlowStepper from '../components/FlowStepper.jsx';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
@@ -9,6 +10,7 @@ const TABS = [
   { key: 'overview', label: 'Overview', icon: 'ph-squares-four' },
   { key: 'quality', label: 'Quality & Issues', icon: 'ph-check-circle' },
   { key: 'shipment', label: 'Shipment & Inventory', icon: 'ph-truck' },
+  { key: 'payments', label: 'Payments', icon: 'ph-currency-dollar' }, // NEW
 ];
 
 const SEVERITY_TAG = { Low: 'tag-neutral', Medium: 'tag-amber', High: 'tag-red', Critical: 'tag-red' };
@@ -20,6 +22,7 @@ export default function ProductionOrderDetail() {
     orders, loading, updateOrder, updateOrderStage,
     issuesByOrder, loadIssues, addIssue, toggleIssueResolved,
     updatesByOrder, loadUpdates, addUpdate,
+    paymentsByOrder, loadPayments, addPayment, deletePayment // NEW
   } = useProduction();
   const [updating, setUpdating] = useState(false);
   const [tab, setTab] = useState('overview');
@@ -27,6 +30,7 @@ export default function ProductionOrderDetail() {
   const order = orders.find(o => String(o.id) === id);
   const issues = issuesByOrder[id] || [];
   const updates = updatesByOrder[id] || [];
+  const payments = paymentsByOrder[id] || [];
 
   const [newCheckpointLabel, setNewCheckpointLabel] = useState('');
   const [issueForm, setIssueForm] = useState({ severity: 'Medium', description: '' });
@@ -36,10 +40,15 @@ export default function ProductionOrderDetail() {
   const [shipmentDraft, setShipmentDraft] = useState(null);
   const [receivedDraft, setReceivedDraft] = useState(null);
 
+  // Payments Form State
+  const [paymentForm, setPaymentForm] = useState({ amount: '', paid_at: new Date().toISOString().slice(0,10), note: '' });
+  const [paymentSaving, setPaymentSaving] = useState(false);
+
   useEffect(() => {
     if (!id) return;
     loadIssues(id);
     loadUpdates(id);
+    loadPayments(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -55,8 +64,6 @@ export default function ProductionOrderDetail() {
   const checkpoints = order.checkpoints || [];
   const doneCount = checkpoints.filter(c => c.status === 'done').length;
 
-  // Real progress vs. real elapsed time, projected forward — no AI, just
-  // arithmetic on data that's already there.
   const createdAt = new Date(order.created_at);
   const now = new Date();
   const progress = checkpoints.length ? doneCount / checkpoints.length : 0;
@@ -64,6 +71,8 @@ export default function ProductionOrderDetail() {
   const projectedDate = progress > 0 ? new Date(createdAt.getTime() + (daysElapsed / progress) * 86400000) : null;
   const dueDate = order.due_date ? new Date(order.due_date) : null;
   const atRisk = order.stage !== 'Delivered' && projectedDate && dueDate && projectedDate > dueDate;
+
+  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
 
   const setCheckpoints = async (next) => {
     setUpdating(true);
@@ -115,6 +124,20 @@ export default function ProductionOrderDetail() {
       alert('Could not log that update: ' + err.message);
     } finally {
       setUpdateSaving(false);
+    }
+  };
+
+  const submitPayment = async e => {
+    e.preventDefault();
+    if (!paymentForm.amount || !paymentForm.paid_at) return;
+    setPaymentSaving(true);
+    try {
+      await addPayment(order.id, paymentForm);
+      setPaymentForm({ amount: '', paid_at: new Date().toISOString().slice(0,10), note: '' });
+    } catch (err) {
+      alert('Could not log payment: ' + err.message);
+    } finally {
+      setPaymentSaving(false);
     }
   };
 
@@ -343,6 +366,67 @@ export default function ProductionOrderDetail() {
             <form onSubmit={submitUpdate} style={{ display: 'flex', gap: 8 }}>
               <input className="form-input" style={{ flex: 1 }} placeholder="e.g. Factory confirmed cutting complete, sewing starts Monday" value={updateNote} onChange={e => setUpdateNote(e.target.value)} />
               <button className="btn btn-sm btn-primary" type="submit" disabled={updateSaving || !updateNote.trim()}>Log update</button>
+            </form>
+          </>
+        )}
+
+        {tab === 'payments' && (
+          <>
+            <div className="section-label">Payment Ledger</div>
+            <div className="card-raised" style={{ marginBottom: 20, padding: 22 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Total Paid to Vendor</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 32, fontWeight: 700, color: 'var(--c-materials)' }}>
+                    {currency(totalPaid)}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Order Size</div>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{order.units || 0} units</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              {payments.length === 0 ? (
+                <div style={{ padding: 20, color: 'var(--ink-3)', fontSize: 13.5, fontStyle: 'italic', textAlign: 'center' }}>
+                  No payments logged yet. Add your initial deposit below.
+                </div>
+              ) : (
+                payments.map(p => (
+                  <div className="list-row" key={p.id}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{currency(p.amount)}</div>
+                      {p.note && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{p.note}</div>}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>{new Date(p.paid_at).toLocaleDateString()}</span>
+                      <button onClick={() => deletePayment(p.id, order.id)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 14 }}>
+                        <i className="ph ph-trash" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <form onSubmit={submitPayment} className="card-raised">
+              <div className="card-body" style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="form-group" style={{ marginBottom: 0, minWidth: 140 }}>
+                  <label className="form-label">Amount ($)</label>
+                  <input className="form-input" type="number" step="0.01" placeholder="0.00" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0, width: 150 }}>
+                  <label className="form-label">Date Paid</label>
+                  <input className="form-input" type="date" value={paymentForm.paid_at} onChange={e => setPaymentForm(f => ({ ...f, paid_at: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: 200 }}>
+                  <label className="form-label">Note</label>
+                  <input className="form-input" placeholder="e.g. 50% Upfront Deposit via Wire" value={paymentForm.note} onChange={e => setPaymentForm(f => ({ ...f, note: e.target.value }))} />
+                </div>
+                <button className="btn btn-sm btn-primary" type="submit" disabled={paymentSaving || !paymentForm.amount || !paymentForm.paid_at}>Log Payment</button>
+              </div>
             </form>
           </>
         )}

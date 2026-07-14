@@ -25,6 +25,7 @@ export default function ProductInsights() {
   const thisProductSales = productSales[id] || [];
   
   const [bomCost, setBomCost] = useState(0);
+  const [actualProductionSpend, setActualProductionSpend] = useState(0); // NEW
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -44,6 +45,17 @@ export default function ProductInsights() {
         if (tpData && tpData.bom) {
           const totalBom = tpData.bom.reduce((sum, item) => sum + ((parseFloat(item.qtyPerUnit) || 0) * (parseFloat(item.unitCost) || 0)), 0);
           setBomCost(totalBom);
+        }
+
+        // Fetch real payments logged against ANY production order for this product
+        const { data: payData } = await supabase
+          .from('production_payments')
+          .select('amount, production_orders!inner(product_id)')
+          .eq('production_orders.product_id', id);
+        
+        if (payData) {
+          const totalPay = payData.reduce((s, p) => s + Number(p.amount), 0);
+          setActualProductionSpend(totalPay);
         }
 
         if (product.financials) {
@@ -89,8 +101,9 @@ export default function ProductInsights() {
   const wholesaleProfit = num(form.wholesalePrice) - landedCost;
   const wholesaleMargin = num(form.wholesalePrice) > 0 ? (wholesaleProfit / num(form.wholesalePrice)) * 100 : 0;
   
-  // Break Even & Progress
-  const breakEvenUnits = retailProfit > 0 ? Math.ceil(num(form.fixedCosts) / retailProfit) : 0;
+  // Break Even incorporates REAL production spend + OTHER manual sunk costs
+  const totalCostToRecover = actualProductionSpend + num(form.fixedCosts);
+  const breakEvenUnits = retailProfit > 0 ? Math.ceil(totalCostToRecover / retailProfit) : 0;
   const totalSold = thisProductSales.reduce((s, m) => s + m.orders_count, 0);
   const totalRev = thisProductSales.reduce((s, m) => s + m.revenue, 0);
   const breakEvenProgress = breakEvenUnits > 0 ? Math.min((totalSold / breakEvenUnits) * 100, 100) : 0;
@@ -124,7 +137,6 @@ export default function ProductInsights() {
       riskColor = 'var(--amber)';
     }
   }
-  // ----------------------------------
 
   return (
     <>
@@ -181,7 +193,7 @@ export default function ProductInsights() {
               <div className="stat-card" style={{ '--stat-accent': 'var(--c-design)' }}>
                 <div className="stat-label">Break-Even Point</div>
                 <div className="stat-value">{breakEvenUnits} units</div>
-                <div className="stat-delta delta-muted">To recover fixed costs</div>
+                <div className="stat-delta delta-muted">To recover total sunk cost</div>
               </div>
             </div>
 
@@ -246,15 +258,32 @@ export default function ProductInsights() {
                 </div>
 
                 <div className="card-raised">
-                  <div className="card-header"><span className="card-title">Fixed Development Costs</span></div>
+                  <div className="card-header"><span className="card-title">Total Sunk Costs (Break-Even Target)</span></div>
                   <div className="card-body">
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Total Sunk Cost</label>
+                    <div className="form-group">
+                      <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Actual Factory Payments</span>
+                        <a href="/production" style={{ fontSize: 10, textTransform: 'none', letterSpacing: 'normal' }}>View Ledgers</a>
+                      </label>
+                      <div style={{ padding: '11px 13px', background: 'var(--bg-1)', border: '1.5px solid var(--border)', borderRadius: 'var(--r-sm)', fontFamily: 'var(--mono)', color: 'var(--c-materials)', fontWeight: 600 }}>
+                        {currency(actualProductionSpend)}
+                      </div>
+                      <div className="form-hint">Auto-calculated from your Production Order payment ledgers.</div>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 16 }}>
+                      <label className="form-label">Other Development Costs</label>
                       <div style={{ position: 'relative' }}>
                         <span style={{ position: 'absolute', left: 12, top: 12, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>$</span>
                         <input className="form-input" type="number" style={{ paddingLeft: 24, fontFamily: 'var(--mono)' }} placeholder="0.00" value={form.fixedCosts} onChange={e => f('fixedCosts', e.target.value)} />
                       </div>
-                      <div className="form-hint">Sum of patternmaking, fit samples, grading, and photoshoots. You must sell <strong>{breakEvenUnits} units</strong> to pay this off.</div>
+                      <div className="form-hint">Patternmaking, photoshoots, marketing, etc.</div>
+                    </div>
+                    
+                    <div style={{ height: 1, background: 'var(--border)', margin: '14px 0' }} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700 }}>
+                      <span>Total Cost to Recover</span>
+                      <span style={{ fontFamily: 'var(--mono)' }}>{currency(totalCostToRecover)}</span>
                     </div>
                   </div>
                 </div>
@@ -283,7 +312,7 @@ export default function ProductInsights() {
                   {breakEvenProgress >= 100 ? (
                     <div style={{ fontSize: 13, color: 'var(--green)', fontWeight: 600 }}><i className="ph ph-check-circle" /> Product is officially profitable!</div>
                   ) : (
-                    <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>You need to sell {Math.max(0, breakEvenUnits - totalSold)} more units to cover development costs.</div>
+                    <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>You need to sell {Math.max(0, breakEvenUnits - totalSold)} more units to cover development & production costs.</div>
                   )}
                 </div>
               </div>
@@ -297,7 +326,8 @@ export default function ProductInsights() {
                   </div>
                 </div>
               </div>
-              {/* INVENTORY RISK ENGINE CARD */}
+              
+            {/* INVENTORY RISK ENGINE CARD */}
             <div className="card-raised" style={{ marginTop: 18 }}>
               <div className="card-header">
                 <span className="card-title">Inventory & Reorder Intelligence</span>
