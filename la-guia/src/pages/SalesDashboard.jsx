@@ -35,8 +35,6 @@ export default function SalesDashboard() {
   const { connection, connections, monthlySales, productSales, loading: salesLoading, disconnectStore, refresh: refreshSales } = useSales();
   const { vendors, quotes } = useVendors();
   const { orders } = useProduction();
-  const [shopDomain, setShopDomain] = useState('');
-
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(null);
 
@@ -96,17 +94,6 @@ export default function SalesDashboard() {
       revenue: m.revenue
     };
   });
-
-  const handleConnect = (e) => {
-    e.preventDefault();
-    const domain = shopDomain.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
-    if (!domain) return;
-    if (!domain.includes('.myshopify.com')) {
-      alert('Please enter your full .myshopify.com domain.');
-      return;
-    }
-    window.location.href = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/shopify/auth?shop=${domain}&brandId=${activeBrand?.id}`;
-  };
 
   // Shared by every platform's sync — orders already normalized to
   // { created_at, total_price, line_items: [{ sku, price, quantity }] }
@@ -373,21 +360,15 @@ export default function SalesDashboard() {
                 </div>
               </div>
             ) : (
-              <form className="card-raised" style={{ marginBottom: 20 }} onSubmit={handleConnect}>
+              <div className="card-raised" style={{ marginBottom: 20, opacity: 0.75 }}>
                 <div className="card-header">
-                  <span className="card-title">Connect Shopify</span>
+                  <span className="card-title">Shopify</span>
+                  <span className="tag tag-neutral">Coming soon</span>
                 </div>
                 <div className="card-body">
-                   <div className="form-group" style={{ marginBottom: 0 }}>
-                     <label className="form-label">Store Domain</label>
-                     <div style={{ display: 'flex', gap: 10 }}>
-                       <input className="form-input" placeholder="e.g. my-brand.myshopify.com" value={shopDomain} onChange={e => setShopDomain(e.target.value)} required />
-                       <button type="submit" className="btn btn-primary" disabled={!shopDomain.trim()}>Connect Store</button>
-                     </div>
-                     <div className="form-hint" style={{ marginTop: 8 }}>You will be redirected to Shopify to authorize Atelier. NOTE: You must add your Shopify API Keys to your `api/.env` file first.</div>
-                   </div>
+                  <div style={{ fontSize: 13.5, color: 'var(--ink-2)' }}>Shopify's App Store review requires the app to have real users first — we'll turn this on once Atelier has its first ones.</div>
                 </div>
-              </form>
+              </div>
             )}
 
             {wooConnection ? (
