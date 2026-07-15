@@ -136,6 +136,7 @@ export function ProductsProvider({ children }) {
               layers: [{ name: d.base_type === 'upload' ? 'Uploaded mockup' : 'Silhouette base', visible: true }],
               analysis: d.analysis,
               aiPaths: d.ai_paths || null,
+              fabricTags: d.fabric_tags || [],
             };
           });
         }
@@ -193,6 +194,22 @@ export function ProductsProvider({ children }) {
     const current = products.find(p => p.id === id);
     if (!current) return;
     return updateProduct(id, { is_favorite: !current.is_favorite });
+  };
+
+  // designs.status ('Sketching'/'Refining'/'Ready') was previously only ever
+  // written once, at creation — nothing in the app ever moved a design
+  // forward, so it silently stuck at "Sketching" forever. Powers the new
+  // Design.jsx Kanban view.
+  const updateDesignStatus = async (productId, status) => {
+    const { error } = await supabase.from('designs').update({ status }).eq('product_id', productId);
+    if (error) throw error;
+    setDesigns(prev => (prev[productId] ? { ...prev, [productId]: { ...prev[productId], status } } : prev));
+  };
+
+  const updateDesignFabricTags = async (productId, fabricTags) => {
+    const { error } = await supabase.from('designs').update({ fabric_tags: fabricTags }).eq('product_id', productId);
+    if (error) throw error;
+    setDesigns(prev => (prev[productId] ? { ...prev, [productId]: { ...prev[productId], fabricTags } } : prev));
   };
 
   // Deletes the product row outright — designs and tech_packs cascade via
@@ -431,6 +448,7 @@ export function ProductsProvider({ children }) {
       deleteCollection, updateBrand, getUploadedFile, activeBrand, brands, switchBrand, createBrand,
       categories, createCategory, deleteCategory,
       archivedProducts, loadArchivedProducts, duplicateProduct, setProductStatus, archiveProduct,
+      updateDesignStatus, updateDesignFabricTags,
       loading: loading || loadingBrands,
     }}>
       {children}

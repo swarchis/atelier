@@ -18,6 +18,13 @@ import SkuVariantsTab from '../components/design-studio/SkuVariantsTab.jsx';
 import { blobToBase64 } from '../lib/designImages.js';
 
 const SEVERITY_ICON = { amber: 'ph-warning', blue: 'ph-info', green: 'ph-check-circle', red: 'ph-x-circle' };
+const DESIGN_STATUSES = ['Sketching', 'Refining', 'Ready'];
+const FABRIC_TAG_TYPES = [
+  { key: 'composition', label: 'Composition', color: 'var(--c-materials)' },
+  { key: 'care', label: 'Care', color: 'var(--c-vendors)' },
+  { key: 'origin', label: 'Origin', color: 'var(--c-organization)' },
+  { key: 'certification', label: 'Certification', color: 'var(--green)' },
+];
 const CANVAS_STATUS = {
   loading: { label: 'Canvas ready', color: 'var(--green)' },
   ready: { label: 'Canvas ready', color: 'var(--green)' },
@@ -35,7 +42,7 @@ const TABS = [
 export default function DesignDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { products, designs, getUploadedFile, deleteProduct, updateProduct, activeBrand, categories, duplicateProduct, setProductStatus } = useProducts();
+  const { products, designs, getUploadedFile, deleteProduct, updateProduct, activeBrand, categories, duplicateProduct, setProductStatus, updateDesignStatus, updateDesignFabricTags } = useProducts();
   const { canUse: canUseAI, remaining: aiRemaining, logUsage } = useAIUsage();
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -48,6 +55,9 @@ export default function DesignDetail() {
   const [captureError, setCaptureError] = useState(null);
   const [restoreFile, setRestoreFile] = useState(null);
   const [toggling, setToggling] = useState(false);
+  const [tagDraft, setTagDraft] = useState('');
+  const [tagType, setTagType] = useState('composition');
+  const [savingStatus, setSavingStatus] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [findingVendors, setFindingVendors] = useState(false);
   const [tab, setTab] = useState('canvas');
@@ -293,6 +303,38 @@ export default function DesignDetail() {
     }
   };
 
+  const handleDesignStatusChange = async (status) => {
+    setSavingStatus(true);
+    try {
+      await updateDesignStatus(id, status);
+    } catch (err) {
+      setCaptureError('Failed to update design status: ' + err.message);
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
+  const addFabricTag = async () => {
+    const label = tagDraft.trim();
+    if (!label) return;
+    const next = [...(design.fabricTags || []), { type: tagType, label }];
+    setTagDraft('');
+    try {
+      await updateDesignFabricTags(id, next);
+    } catch (err) {
+      setCaptureError('Failed to save tag: ' + err.message);
+    }
+  };
+
+  const removeFabricTag = async (index) => {
+    const next = (design.fabricTags || []).filter((_, i) => i !== index);
+    try {
+      await updateDesignFabricTags(id, next);
+    } catch (err) {
+      setCaptureError('Failed to remove tag: ' + err.message);
+    }
+  };
+
   return (
     <>
       <div className="topbar">
@@ -435,9 +477,38 @@ export default function DesignDetail() {
                     <option value="archived">Archived</option>
                   </select>
                 </div>
-                <div className="form-group" style={{ marginBottom: 12 }}>
+                <div className="form-group">
                   <label className="form-label">Design status</label>
-                  <span className="tag tag-accent">{design.status}</span>
+                  <select className="form-input" value={design.status || 'Sketching'} onChange={e => handleDesignStatusChange(e.target.value)} disabled={savingStatus}>
+                    {DESIGN_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 12 }}>
+                  <label className="form-label">Fabric tags</label>
+                  {(design.fabricTags || []).length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                      {design.fabricTags.map((t, i) => {
+                        const meta = FABRIC_TAG_TYPES.find(ft => ft.key === t.type) || FABRIC_TAG_TYPES[0];
+                        return (
+                          <span key={i} className="tag" style={{ background: 'transparent', borderColor: meta.color, color: meta.color, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            {t.label}
+                            <button onClick={() => removeFabricTag(i)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, opacity: 0.7 }}>×</button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <select className="form-input" style={{ width: 108, fontSize: 12 }} value={tagType} onChange={e => setTagType(e.target.value)}>
+                      {FABRIC_TAG_TYPES.map(ft => <option key={ft.key} value={ft.key}>{ft.label}</option>)}
+                    </select>
+                    <input
+                      className="form-input" style={{ flex: 1, fontSize: 12 }} placeholder="e.g. 100% GOTS cotton"
+                      value={tagDraft} onChange={e => setTagDraft(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addFabricTag(); } }}
+                    />
+                    <button className="btn btn-sm" onClick={addFabricTag} disabled={!tagDraft.trim()}><i className="ph ph-plus" /></button>
+                  </div>
                 </div>
                 <button className="btn btn-sm" style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }} onClick={() => setTab('skus')}>
                   <i className="ph ph-barcode" /> Manage SKUs & Variants

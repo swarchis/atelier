@@ -5,12 +5,26 @@ import { useAIUsage } from '../context/AIUsageContext.jsx';
 import { getPlan } from '../data/plans.js';
 import GarmentSilhouette, { CustomSilhouette, GARMENT_TYPES } from '../components/GarmentSilhouette.jsx';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal.jsx';
+import { useMultiSelect } from '../lib/useMultiSelect.js';
+import { useDragAndDrop } from '../lib/useDragAndDrop.js';
+import BulkActionBar from '../components/BulkActionBar.jsx';
+import { ContextMenuTarget } from '../components/ContextMenu.jsx';
+import { SkeletonCard } from '../components/Skeleton.jsx';
 
 const STATUS_COLOR = { Sketching: 'var(--ink-3)', Refining: 'var(--c-design)', Ready: 'var(--green)' };
+const DESIGN_STATUSES = ['Sketching', 'Refining', 'Ready'];
+const VIEWS = [
+  { key: 'cards', label: 'Cards', icon: 'ph-squares-four' },
+  { key: 'kanban', label: 'Kanban', icon: 'ph-kanban' },
+  { key: 'table', label: 'Table', icon: 'ph-table' },
+];
 
 export default function Design() {
   const navigate = useNavigate();
-  const { products, designs, createDesign, deleteProduct, activeBrand, duplicateProduct, setProductStatus, archivedProducts, loadArchivedProducts } = useProducts();
+  const {
+    products, designs, createDesign, deleteProduct, activeBrand, duplicateProduct, setProductStatus,
+    archivedProducts, loadArchivedProducts, updateDesignStatus, loading: dataLoading,
+  } = useProducts();
   const { canUse: canUseAI, remaining: aiRemaining, logUsage } = useAIUsage();
   const [showNew, setShowNew] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -21,8 +35,12 @@ export default function Design() {
   const [showArchived, setShowArchived] = useState(false);
   const [duplicatingId, setDuplicatingId] = useState(null);
   const [actionError, setActionError] = useState(null);
+  const [view, setView] = useState('cards');
+  const [bulkArchiving, setBulkArchiving] = useState(false);
   const fileRef = useRef(null);
   const designProducts = products.filter(p => p.stage === 'concept' || p.stage === 'design');
+  const multiSelect = useMultiSelect(designProducts);
+  const dnd = useDragAndDrop();
 
   useEffect(() => {
     if (showArchived) loadArchivedProducts();
@@ -50,6 +68,27 @@ export default function Design() {
       if (showArchived) loadArchivedProducts();
     } catch (err) {
       setActionError(`Couldn't update "${product.name}": ${err.message}`);
+    }
+  };
+
+  const handleBulkArchive = async () => {
+    setActionError(null);
+    setBulkArchiving(true);
+    try {
+      await Promise.all(multiSelect.selectedItems.map(p => setProductStatus(p.id, 'archived')));
+      multiSelect.clear();
+    } catch (err) {
+      setActionError(`Couldn't archive the selection: ${err.message}`);
+    } finally {
+      setBulkArchiving(false);
+    }
+  };
+
+  const handleKanbanDrop = async (productId, status) => {
+    try {
+      await updateDesignStatus(productId, status);
+    } catch (err) {
+      setActionError(`Couldn't move that design: ${err.message}`);
     }
   };
 
@@ -121,6 +160,13 @@ export default function Design() {
           <div className="page-sub">{designProducts.length} in concept or design</div>
         </div>
         <div className="topbar-right">
+          <div className="pill-group">
+            {VIEWS.map(v => (
+              <button key={v.key} className={`pill ${view === v.key ? 'active' : ''}`} onClick={() => setView(v.key)} title={v.label}>
+                <i className={`ph ${v.icon}`} style={{ marginRight: 6 }} /> {v.label}
+              </button>
+            ))}
+          </div>
           <button className="btn btn-sm" onClick={() => setShowArchived(s => !s)}>
             <i className={`ph ${showArchived ? 'ph-eye-slash' : 'ph-archive'}`} /> {showArchived ? 'Hide archived' : 'Show archived'}
           </button>
@@ -214,55 +260,155 @@ export default function Design() {
         )}
 
         <div className="section-label">In progress</div>
-        <div className="grid-cards">
-          {designProducts.map(p => {
-            const d = designs[p.id];
-            return (
-              <div key={p.id} className="card-raised card-hover" style={{ padding: '16px 18px', cursor: 'pointer' }} onClick={() => navigate(`/design/${p.id}`)}>
-                <div className="corner-fold" style={{ '--fold-color': 'var(--c-design)' }} />
-                <button
-                  className="piece-move-btn"
-                  title="Delete design"
-                  onClick={e => { e.stopPropagation(); setDeleteTarget(p); }}
-                  style={{ color: 'var(--red)' }}
-                >
-                  <i className="ph ph-trash" />
-                </button>
-                <button
-                  className="piece-move-btn"
-                  title="Duplicate design"
-                  onClick={e => handleDuplicate(e, p)}
-                  disabled={duplicatingId === p.id}
-                  style={{ right: 40 }}
-                >
-                  <i className={`ph ${duplicatingId === p.id ? 'ph-spinner ph-spin' : 'ph-copy'}`} />
-                </button>
-                <button
-                  className="piece-move-btn"
-                  title="Archive design"
-                  onClick={e => handleArchiveToggle(e, p, true)}
-                  style={{ right: 70 }}
-                >
-                  <i className="ph ph-archive" />
-                </button>
-                <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center' }}>
-                  <div style={{ width: 44, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-3)', borderRadius: 8, color: 'var(--ink-3)', flexShrink: 0 }}>
-                    {d?.baseType === 'ai-silhouette' && d?.aiPaths?.paths?.length
-                      ? <CustomSilhouette paths={d.aiPaths.paths} accents={d.aiPaths.accents} size={30} />
-                      : <GarmentSilhouette type={d?.silhouette || 'tee'} size={30} />}
+
+        {dataLoading ? (
+          <div className="grid-cards">
+            {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        ) : view === 'cards' ? (
+          <div className="grid-cards">
+            {designProducts.map(p => {
+              const d = designs[p.id];
+              const menuItems = [
+                { label: 'Duplicate', icon: 'ph-copy', onClick: () => handleDuplicate({ stopPropagation() {} }, p) },
+                { label: 'Archive', icon: 'ph-archive', onClick: () => handleArchiveToggle({ stopPropagation() {} }, p, true) },
+                { label: 'Delete', icon: 'ph-trash', danger: true, onClick: () => setDeleteTarget(p) },
+              ];
+              return (
+                <ContextMenuTarget key={p.id} items={menuItems}>
+                  <div className="card-raised card-hover" style={{ padding: '16px 18px', cursor: 'pointer' }} onClick={() => navigate(`/design/${p.id}`)}>
+                    <div className="corner-fold" style={{ '--fold-color': 'var(--c-design)' }} />
+                    <input
+                      type="checkbox"
+                      checked={multiSelect.isSelected(p.id)}
+                      onClick={e => e.stopPropagation()}
+                      onChange={() => multiSelect.toggle(p.id)}
+                      style={{ position: 'absolute', top: 14, left: 14, width: 16, height: 16, cursor: 'pointer', zIndex: 1 }}
+                      title="Select"
+                    />
+                    <button
+                      className="piece-move-btn"
+                      title="Delete design"
+                      onClick={e => { e.stopPropagation(); setDeleteTarget(p); }}
+                      style={{ color: 'var(--red)' }}
+                    >
+                      <i className="ph ph-trash" />
+                    </button>
+                    <button
+                      className="piece-move-btn"
+                      title="Duplicate design"
+                      onClick={e => handleDuplicate(e, p)}
+                      disabled={duplicatingId === p.id}
+                      style={{ right: 40 }}
+                    >
+                      <i className={`ph ${duplicatingId === p.id ? 'ph-spinner ph-spin' : 'ph-copy'}`} />
+                    </button>
+                    <button
+                      className="piece-move-btn"
+                      title="Archive design"
+                      onClick={e => handleArchiveToggle(e, p, true)}
+                      style={{ right: 70 }}
+                    >
+                      <i className="ph ph-archive" />
+                    </button>
+                    <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center', marginTop: 6 }}>
+                      <div style={{ width: 44, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-3)', borderRadius: 8, color: 'var(--ink-3)', flexShrink: 0 }}>
+                        {d?.baseType === 'ai-silhouette' && d?.aiPaths?.paths?.length
+                          ? <CustomSilhouette paths={d.aiPaths.paths} accents={d.aiPaths.accents} size={30} />
+                          : <GarmentSilhouette type={d?.silhouette || 'tee'} size={30} />}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{p.category}</div>
+                      </div>
+                    </div>
+                    <span className="tag" style={{ background: 'transparent', borderColor: STATUS_COLOR[d?.status] || 'var(--border-2)', color: STATUS_COLOR[d?.status] || 'var(--ink-3)' }}>
+                      {d ? d.status : 'Not started'}
+                    </span>
                   </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{p.category}</div>
+                </ContextMenuTarget>
+              );
+            })}
+          </div>
+        ) : view === 'kanban' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${DESIGN_STATUSES.length}, 1fr)`, gap: 16 }}>
+            {DESIGN_STATUSES.map(status => {
+              const inColumn = designProducts.filter(p => (designs[p.id]?.status || 'Sketching') === status);
+              const isOver = dnd.overZone === status;
+              return (
+                <div
+                  key={status}
+                  {...dnd.dropZoneProps(status, id => handleKanbanDrop(id, status))}
+                  style={{
+                    background: isOver ? 'color-mix(in srgb, var(--c-design) 8%, transparent)' : 'var(--bg-2)',
+                    border: `1.5px dashed ${isOver ? 'var(--c-design)' : 'var(--border)'}`, borderRadius: 'var(--r)',
+                    padding: 12, minHeight: 200,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: STATUS_COLOR[status] }}>{status}</span>
+                    <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{inColumn.length}</span>
+                  </div>
+                  {inColumn.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--ink-4)', fontStyle: 'italic', padding: '10px 0' }}>Drop a design here</div>}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {inColumn.map(p => (
+                      <div
+                        key={p.id}
+                        {...dnd.draggableProps(p.id)}
+                        onClick={() => navigate(`/design/${p.id}`)}
+                        className="card-raised card-hover"
+                        style={{ padding: '10px 12px', cursor: dnd.draggingId === p.id ? 'grabbing' : 'grab', opacity: dnd.draggingId === p.id ? 0.5 : 1 }}
+                      >
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{p.category}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <span className="tag" style={{ background: 'transparent', borderColor: STATUS_COLOR[d?.status] || 'var(--border-2)', color: STATUS_COLOR[d?.status] || 'var(--ink-3)' }}>
-                  {d ? d.status : 'Not started'}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="card" style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+                  <th style={{ textAlign: 'left', padding: '12px 20px', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)' }}>Name</th>
+                  <th style={{ textAlign: 'left', padding: '12px 20px', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)' }}>Category</th>
+                  <th style={{ textAlign: 'left', padding: '12px 20px', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)' }}>Design status</th>
+                  <th style={{ textAlign: 'left', padding: '12px 20px', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)' }}>Risk</th>
+                  <th style={{ textAlign: 'right', padding: '12px 20px', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)' }}>Readiness</th>
+                </tr>
+              </thead>
+              <tbody>
+                {designProducts.map((p, i) => {
+                  const d = designs[p.id];
+                  return (
+                    <tr
+                      key={p.id}
+                      className="card-hover"
+                      style={{ borderBottom: i < designProducts.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+                      onClick={() => navigate(`/design/${p.id}`)}
+                    >
+                      <td style={{ padding: '10px 20px', fontWeight: 700 }}>{p.name}</td>
+                      <td style={{ padding: '10px 20px', color: 'var(--ink-3)' }}>{p.category || '—'}</td>
+                      <td style={{ padding: '10px 20px' }}>
+                        <span className="tag" style={{ background: 'transparent', borderColor: STATUS_COLOR[d?.status] || 'var(--border-2)', color: STATUS_COLOR[d?.status] || 'var(--ink-3)' }}>
+                          {d ? d.status : 'Not started'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 20px', color: 'var(--ink-3)' }}>{p.risk}</td>
+                      <td style={{ padding: '10px 20px', textAlign: 'right', fontFamily: 'var(--mono)' }}>{p.readiness}%</td>
+                    </tr>
+                  );
+                })}
+                {designProducts.length === 0 && (
+                  <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: 'var(--ink-4)', fontStyle: 'italic', fontSize: 12.5 }}>No designs in progress yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {showArchived && (
           <>
@@ -301,6 +447,16 @@ export default function Design() {
         warning="Its tech pack, measurements, and BOM will be deleted with it."
         onConfirm={async () => { await deleteProduct(deleteTarget.id); }}
       />
+
+      {view === 'cards' && (
+        <BulkActionBar
+          count={multiSelect.count}
+          onClear={multiSelect.clear}
+          actions={[
+            { label: bulkArchiving ? 'Archiving…' : 'Archive', icon: 'ph-archive', onClick: handleBulkArchive },
+          ]}
+        />
+      )}
     </>
   );
 }
