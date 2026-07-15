@@ -30,13 +30,19 @@ export function ContentProvider({ children }) {
 
   useEffect(() => { loadData(); }, [activeBrand]);
 
-  const connectAccount = async (platform, handle) => {
+  // Stores the real OAuth token now (it used to be discarded entirely —
+  // see api/index.js's social OAuth rebuild). No follower count is
+  // fabricated; each platform's real count would need its own extra API
+  // call/scope this doesn't make yet, so it's left unset rather than
+  // showing a made-up number.
+  const connectAccount = async (platform, handle, accessToken, refreshToken) => {
     const { data, error } = await supabase.from('social_accounts').upsert({
-      brand_id: activeBrand.id, 
-      platform: platform.toLowerCase(), 
-      handle, 
-      connected: true, 
-      followers: Math.floor(Math.random() * 10000) + 100 // Mock follower count for UI purposes
+      brand_id: activeBrand.id,
+      platform: platform.toLowerCase(),
+      handle,
+      connected: true,
+      access_token: accessToken || null,
+      refresh_token: refreshToken || null,
     }, { onConflict: 'brand_id, platform' }).select().single();
     if (error) throw error;
     setAccounts(prev => [...prev.filter(a => a.platform !== platform.toLowerCase()), data]);

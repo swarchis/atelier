@@ -4,6 +4,7 @@ import { useContent } from '../context/ContentContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useProduction } from '../context/ProductionContext.jsx';
 import { supabase } from '../lib/supabase.js';
+import { consumeOAuthHandoff } from '../lib/oauthHandoff.js';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { PhotoPanel } from '../components/decor.jsx';
@@ -14,9 +15,9 @@ const TABS = [
   { key: 'accounts', label: 'Accounts', icon: 'ph-link' },
 ];
 
-const PLATFORM_ICON = { instagram: 'ph-instagram-logo', tiktok: 'ph-tiktok-logo', youtube: 'ph-youtube-logo' };
+const PLATFORM_ICON = { instagram: 'ph-instagram-logo', tiktok: 'ph-tiktok-logo', youtube: 'ph-youtube-logo', pinterest: 'ph-pinterest-logo' };
 const STATUS_TAG = { Scheduled: 'tag-blue', Posted: 'tag-green', Draft: 'tag-neutral' };
-const DEFAULT_PLATFORMS = ['instagram', 'tiktok', 'youtube'];
+const DEFAULT_PLATFORMS = ['instagram', 'tiktok', 'youtube', 'pinterest'];
 
 export default function ContentHub() {
   const location = useLocation();
@@ -40,14 +41,20 @@ export default function ContentHub() {
     
     if (success === 'true' && activeBrand) {
       const platform = params.get('platform');
-      const handle = params.get('handle') || 'Connected';
+      const handoffCode = params.get('handoff');
       const brandId = params.get('brandId');
 
-      if (brandId === activeBrand.id) {
-        connectAccount(platform, handle).then(() => {
-          window.history.replaceState({}, '', '/content');
-          setTab('accounts');
-        });
+      if (brandId === activeBrand.id && handoffCode) {
+        consumeOAuthHandoff(handoffCode)
+          .then(({ handle, accessToken, refreshToken }) => connectAccount(platform, handle, accessToken, refreshToken))
+          .then(() => {
+            window.history.replaceState({}, '', '/content');
+            setTab('accounts');
+          })
+          .catch(err => {
+            alert(`Failed to connect social account: ${err.message}`);
+            window.history.replaceState({}, '', '/content');
+          });
       }
     } else if (error) {
       alert(`Failed to connect social account. Reason: ${error}`);
@@ -203,6 +210,7 @@ export default function ContentHub() {
                             <option value="instagram">Instagram</option>
                             <option value="tiktok">TikTok</option>
                             <option value="youtube">YouTube</option>
+                            <option value="pinterest">Pinterest</option>
                           </select>
                         </div>
                         <div className="form-group">

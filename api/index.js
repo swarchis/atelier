@@ -1331,83 +1331,115 @@ Return 3 to 6 entries.`;
 });
 
 // ---------------------------------------------------------
-// 8. SOCIAL MEDIA OAUTH (Instagram & TikTok)
+// 8. SOCIAL MEDIA OAUTH (Instagram, TikTok, YouTube, Pinterest)
 // ---------------------------------------------------------
+// Rebuilt on the same shared OAuth handoff helper Shopify/Etsy use
+// (signed state, single-use handoff code instead of a raw token in the
+// URL) — the previous version here had two real bugs: `state` was just
+// the bare brandId (no CSRF protection, same gap Shopify had), and
+// ContentContext.jsx's connectAccount() never actually read the `token`
+// query param at all, so every "connected" account had no real access
+// token behind it — the OAuth handshake ran for nothing. Both fixed now.
+const SOCIAL_OAUTH = {
+  instagram: {
+    envId: 'INSTAGRAM_CLIENT_ID', envSecret: 'INSTAGRAM_CLIENT_SECRET',
+    authUrl: (redirectUri, state) => `https://api.instagram.com/oauth/authorize?client_id=${process.env.INSTAGRAM_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user_profile,user_media&response_type=code&state=${state}`,
+    getToken: async (code, redirectUri) => {
+      const form = new URLSearchParams({ client_id: process.env.INSTAGRAM_CLIENT_ID, client_secret: process.env.INSTAGRAM_CLIENT_SECRET, grant_type: 'authorization_code', redirect_uri: redirectUri, code });
+      const response = await fetch('https://api.instagram.com/oauth/access_token', { method: 'POST', body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error_message || 'Instagram token exchange failed');
+      return { accessToken: data.access_token };
+    },
+    getHandle: async ({ accessToken }) => {
+      const response = await fetch(`https://graph.instagram.com/me?fields=username&access_token=${accessToken}`);
+      const data = await response.json();
+      return data.username || 'Connected';
+    },
+  },
+  tiktok: {
+    envId: 'TIKTOK_CLIENT_KEY', envSecret: 'TIKTOK_CLIENT_SECRET',
+    authUrl: (redirectUri, state) => `https://www.tiktok.com/v2/auth/authorize/?client_key=${process.env.TIKTOK_CLIENT_KEY}&response_type=code&scope=user.info.basic&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`,
+    getToken: async (code, redirectUri) => {
+      const form = new URLSearchParams({ client_key: process.env.TIKTOK_CLIENT_KEY, client_secret: process.env.TIKTOK_CLIENT_SECRET, code, grant_type: 'authorization_code', redirect_uri: redirectUri });
+      const response = await fetch('https://open.tiktokapis.com/v2/oauth/token/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' }, body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'TikTok token exchange failed');
+      return { accessToken: data.access_token };
+    },
+    getHandle: async ({ accessToken }) => {
+      const response = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=display_name', { headers: { Authorization: `Bearer ${accessToken}` } });
+      const data = await response.json();
+      return data.data?.user?.display_name || 'Connected';
+    },
+  },
+  youtube: {
+    envId: 'YOUTUBE_CLIENT_ID', envSecret: 'YOUTUBE_CLIENT_SECRET',
+    authUrl: (redirectUri, state) => `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.YOUTUBE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&access_type=offline&prompt=consent&scope=${encodeURIComponent('https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload')}&state=${state}`,
+    getToken: async (code, redirectUri) => {
+      const form = new URLSearchParams({ client_id: process.env.YOUTUBE_CLIENT_ID, client_secret: process.env.YOUTUBE_CLIENT_SECRET, code, grant_type: 'authorization_code', redirect_uri: redirectUri });
+      const response = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error_description || 'YouTube token exchange failed');
+      return { accessToken: data.access_token, refreshToken: data.refresh_token };
+    },
+    getHandle: async ({ accessToken }) => {
+      const response = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', { headers: { Authorization: `Bearer ${accessToken}` } });
+      const data = await response.json();
+      return data.items?.[0]?.snippet?.title || 'Connected';
+    },
+  },
+  pinterest: {
+    envId: 'PINTEREST_CLIENT_ID', envSecret: 'PINTEREST_CLIENT_SECRET',
+    authUrl: (redirectUri, state) => `https://www.pinterest.com/oauth/?client_id=${process.env.PINTEREST_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent('boards:read,pins:read,pins:write')}&state=${state}`,
+    getToken: async (code, redirectUri) => {
+      const basic = Buffer.from(`${process.env.PINTEREST_CLIENT_ID}:${process.env.PINTEREST_CLIENT_SECRET}`).toString('base64');
+      const form = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri });
+      const response = await fetch('https://api.pinterest.com/v5/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}` }, body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Pinterest token exchange failed');
+      return { accessToken: data.access_token, refreshToken: data.refresh_token };
+    },
+    getHandle: async ({ accessToken }) => {
+      const response = await fetch('https://api.pinterest.com/v5/user_account', { headers: { Authorization: `Bearer ${accessToken}` } });
+      const data = await response.json();
+      return data.username || 'Connected';
+    },
+  },
+};
 
 app.get('/api/social/auth/:platform', (req, res) => {
   const { platform } = req.params;
   const { brandId } = req.query;
-  if (!brandId) return res.status(400).send('Missing brandId');
-
+  const cfg = SOCIAL_OAUTH[platform];
   const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  if (!brandId) return res.status(400).send('Missing brandId');
+  if (!cfg) return res.status(400).send('Unsupported platform');
+  if (!process.env[cfg.envId]) return res.redirect(`${appUrl}/content?social_error=missing_keys`);
+
   const apiUrl = process.env.API_URL || 'http://localhost:3001';
   const redirectUri = `${apiUrl}/api/social/callback/${platform}`;
-
-  if (platform === 'instagram') {
-    if (!process.env.INSTAGRAM_CLIENT_ID) return res.redirect(`${appUrl}/content?social_error=missing_keys`);
-    const authUrl = `https://api.instagram.com/oauth/authorize?client_id=${process.env.INSTAGRAM_CLIENT_ID}&redirect_uri=${redirectUri}&scope=user_profile,user_media&response_type=code&state=${brandId}`;
-    return res.redirect(authUrl);
-  }
-
-  if (platform === 'tiktok') {
-    if (!process.env.TIKTOK_CLIENT_KEY) return res.redirect(`${appUrl}/content?social_error=missing_keys`);
-    const authUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${process.env.TIKTOK_CLIENT_KEY}&response_type=code&scope=user.info.basic&redirect_uri=${redirectUri}&state=${brandId}`;
-    return res.redirect(authUrl);
-  }
-
-  res.status(400).send('Unsupported platform');
+  const state = signOAuthState(brandId);
+  res.redirect(cfg.authUrl(redirectUri, state));
 });
 
 app.get('/api/social/callback/:platform', async (req, res) => {
   const { platform } = req.params;
-  const { code, state: brandId } = req.query;
+  const { code, state } = req.query;
+  const cfg = SOCIAL_OAUTH[platform];
   const appUrl = process.env.APP_URL || 'http://localhost:5173';
   const apiUrl = process.env.API_URL || 'http://localhost:3001';
-  
-  if (!code || !brandId) return res.redirect(`${appUrl}/content?social_error=missing_params`);
+  const brandId = verifyOAuthState(state);
 
-  const redirectUri = `${apiUrl}/api/social/callback/${platform}`;
+  if (!code || !brandId || !cfg) return res.redirect(`${appUrl}/content?social_error=missing_params`);
 
   try {
-    let token = null;
-    let handle = 'Connected User';
+    const redirectUri = `${apiUrl}/api/social/callback/${platform}`;
+    const tokenData = await cfg.getToken(code, redirectUri);
+    const handle = await cfg.getHandle(tokenData).catch(() => 'Connected');
 
-    if (platform === 'instagram') {
-      const form = new URLSearchParams();
-      form.append('client_id', process.env.INSTAGRAM_CLIENT_ID);
-      form.append('client_secret', process.env.INSTAGRAM_CLIENT_SECRET);
-      form.append('grant_type', 'authorization_code');
-      form.append('redirect_uri', redirectUri);
-      form.append('code', code);
-
-      const response = await fetch('https://api.instagram.com/oauth/access_token', {
-        method: 'POST',
-        body: form
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error_message || 'IG Token failed');
-      token = data.access_token;
-    }
-
-    if (platform === 'tiktok') {
-      const form = new URLSearchParams();
-      form.append('client_key', process.env.TIKTOK_CLIENT_KEY);
-      form.append('client_secret', process.env.TIKTOK_CLIENT_SECRET);
-      form.append('code', code);
-      form.append('grant_type', 'authorization_code');
-      form.append('redirect_uri', redirectUri);
-
-      const response = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' },
-        body: form
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'TikTok Token failed');
-      token = data.access_token;
-    }
-
-    res.redirect(`${appUrl}/content?social_success=true&platform=${platform}&token=${token}&handle=${handle}&brandId=${brandId}`);
+    const handoffCode = createOAuthHandoff({ platform, handle, accessToken: tokenData.accessToken, refreshToken: tokenData.refreshToken || null, brandId });
+    res.redirect(`${appUrl}/content?social_success=true&platform=${platform}&handoff=${handoffCode}&brandId=${brandId}`);
   } catch (err) {
     console.error(`${platform} OAuth Error:`, err);
     res.redirect(`${appUrl}/content?social_error=true`);
