@@ -1150,6 +1150,41 @@ app.post('/api/send-invite', async (req, res) => {
   }
 });
 
+// Real send via Resend, one call per recipient (Resend's batch endpoint caps
+// at 100 and this app has no queue/retry infra, so a simple sequential loop
+// with per-recipient error capture is the honest choice over pretending a
+// bulk-send guarantee this doesn't have). Only ever called after the founder
+// explicitly confirms in the UI — this can email real people.
+app.post('/api/send-campaign', async (req, res) => {
+  console.log("📥 Received campaign send request...");
+  if (!resend) {
+    return res.status(400).json({ ok: false, error: 'RESEND_API_KEY is missing from api/.env — no campaign can be sent without it.' });
+  }
+  try {
+    const { subject, body, recipients } = req.body;
+    if (!subject || !body || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Missing subject, body, or recipients' });
+    }
+
+    let sent = 0;
+    const failures = [];
+    for (const email of recipients) {
+      try {
+        await resend.emails.send({ from: 'Atelier <onboarding@resend.dev>', to: email, subject, html: body });
+        sent++;
+      } catch (err) {
+        failures.push({ email, error: err.message });
+      }
+    }
+
+    console.log(`✅ Campaign sent: ${sent}/${recipients.length}`);
+    res.json({ ok: true, sent, failed: failures.length, failures });
+  } catch (error) {
+    console.error('❌ Campaign Send Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // ---------------------------------------------------------
 // 5. DASHBOARD AI SUGGESTIONS
 // ---------------------------------------------------------
@@ -1446,6 +1481,49 @@ app.get('/api/social/callback/:platform', async (req, res) => {
   }
 });
 
+// Real publish attempt — only Pinterest's connect flow actually requested a
+// write scope (pins:write, granted at OAuth time). Instagram/TikTok were
+// connected with read-only scopes (user_profile/user_media, user.info.basic)
+// on purpose — real content-publish permissions on both platforms require a
+// separate business-verified app review this integration doesn't have, so
+// attempting the call would just fail in a confusing way. Rather than build
+// a call guaranteed to fail, this says so plainly. YouTube did request an
+// upload scope, but content_posts only stores an image_url — there's no
+// video file to upload, so there's genuinely nothing to publish yet.
+app.post('/api/social/publish/:platform', async (req, res) => {
+  const { platform } = req.params;
+  const { accessToken, caption, imageUrl, boardId } = req.body;
+
+  if (platform === 'pinterest') {
+    if (!accessToken || !imageUrl) return res.status(400).json({ ok: false, error: 'Missing accessToken or imageUrl' });
+    if (!boardId) return res.status(400).json({ ok: false, error: 'Pinterest requires a board ID to pin to — add one in the post composer.' });
+    try {
+      const response = await fetch('https://api.pinterest.com/v5/pins', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ board_id: boardId, title: (caption || '').slice(0, 100), description: caption || '', media_source: { source_type: 'image_url', url: imageUrl } }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Pinterest rejected the pin');
+      res.json({ ok: true, externalUrl: `https://www.pinterest.com/pin/${data.id}/` });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+    return;
+  }
+
+  if (platform === 'instagram') {
+    return res.status(400).json({ ok: false, error: "This Instagram connection only has read-only access (user_profile, user_media) — publishing needs Instagram's separate Business Login flow with a content-publish scope, which requires Meta App Review. Not attempted." });
+  }
+  if (platform === 'tiktok') {
+    return res.status(400).json({ ok: false, error: "This TikTok connection only has read-only access (user.info.basic) — TikTok's Content Posting API needs video.publish/photo.publish scopes, which require an audited app. Not attempted." });
+  }
+  if (platform === 'youtube') {
+    return res.status(400).json({ ok: false, error: 'This YouTube connection has upload access, but Content Hub only stores an image per post — there\'s no video file to upload yet, so there\'s nothing to publish.' });
+  }
+
+  res.status(400).json({ ok: false, error: 'Unsupported platform' });
+});
 
 // ---------------------------------------------------------
 // 9. CHAT ASSISTANT
