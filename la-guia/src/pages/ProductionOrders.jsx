@@ -4,12 +4,20 @@ import { useProduction } from '../context/ProductionContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useVendors } from '../context/VendorsContext.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import GanttChart from '../components/GanttChart.jsx';
+import { SkeletonRow } from '../components/Skeleton.jsx';
 
 const STAGE_TAG = {
   Sampling: 'tag-blue',
   'In production': 'tag-amber',
   Shipped: 'tag-accent',
   Delivered: 'tag-green'
+};
+const STAGE_COLOR = {
+  Sampling: 'var(--blue)',
+  'In production': 'var(--amber)',
+  Shipped: 'var(--accent)',
+  Delivered: 'var(--green)',
 };
 const STAGES_LIST = ['Sampling', 'In production', 'Shipped', 'Delivered'];
 
@@ -23,7 +31,7 @@ export default function ProductionOrders() {
   const [form, setForm] = useState({ productId: '', vendorId: '', units: '', dueDate: '', poNumber: '' });
   const [saving, setSaving] = useState(false);
   const [overrideGate, setOverrideGate] = useState(false);
-  const [viewMode, setViewMode] = useState('list'); // 'list' | 'analytics'
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'analytics' | 'gantt'
 
   // Check the Hard Gate readiness requirement — an explicit, opt-in override
   // lets a founder proceed anyway ("I'm sure"), so this isn't a true hard
@@ -61,6 +69,19 @@ export default function ProductionOrders() {
     ? Math.round(delivered.reduce((sum, o) => sum + (new Date(o.delivered_at) - new Date(o.created_at)) / 86400000, 0) / delivered.length)
     : null;
   const unitsInProgress = orders.filter(o => o.stage !== 'Delivered').reduce((sum, o) => sum + (o.units || 0), 0);
+
+  // Only orders with both a created_at and a due_date can plot a real bar —
+  // skipped rather than guessed for the (rare) order missing a due date.
+  const ganttItems = orders
+    .filter(o => o.created_at && o.due_date)
+    .map(o => ({
+      id: o.id,
+      label: `${o.products?.name || 'Deleted product'} · ${o.po_number}`,
+      start: new Date(o.created_at),
+      end: new Date(o.due_date),
+      color: STAGE_COLOR[o.stage],
+      tag: o.stage,
+    }));
 
   return (
     <>
@@ -143,11 +164,14 @@ export default function ProductionOrders() {
             <button className={`pill ${viewMode === 'analytics' ? 'active' : ''}`} onClick={() => setViewMode('analytics')}>
               <i className="ph ph-chart-bar" style={{ marginRight: 6 }} /> Analytics
             </button>
+            <button className={`pill ${viewMode === 'gantt' ? 'active' : ''}`} onClick={() => setViewMode('gantt')}>
+              <i className="ph ph-chart-bar-horizontal" style={{ marginRight: 6 }} /> Gantt
+            </button>
           </div>
         )}
 
         {loading ? (
-          <div style={{ padding: 40, textAlign: 'center' }}><i className="ph ph-spinner ph-spin" /> Loading orders...</div>
+          <div className="card">{Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} />)}</div>
         ) : orders.length === 0 ? (
           <EmptyState
             icon="ph-package"
@@ -186,6 +210,24 @@ export default function ProductionOrders() {
               ))}
             </div>
           </>
+        ) : viewMode === 'gantt' ? (
+          ganttItems.length === 0 ? (
+            <div className="card-raised" style={{ padding: 30, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>
+              No orders have both a start and due date to plot yet.
+            </div>
+          ) : (
+            <div className="card-raised" style={{ padding: 20 }}>
+              <GanttChart items={ganttItems} />
+              <div style={{ display: 'flex', gap: 14, marginTop: 18, flexWrap: 'wrap' }}>
+                {STAGES_LIST.map(stage => (
+                  <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--ink-3)' }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: STAGE_COLOR[stage] }} />
+                    {stage}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
         ) : (
           <div className="card">
             {orders.map(o => (
