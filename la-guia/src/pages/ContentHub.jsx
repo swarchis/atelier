@@ -10,6 +10,7 @@ import { consumeOAuthHandoff } from '../lib/oauthHandoff.js';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { PhotoPanel } from '../components/decor.jsx';
+import CalendarGrid from '../components/CalendarGrid.jsx';
 
 const TABS = [
   { key: 'hub', label: 'Grid Preview', icon: 'ph-squares-four' },
@@ -44,6 +45,7 @@ export default function ContentHub() {
   const location = useLocation();
   const [tab, setTab] = useState('hub');
   const [showComposer, setShowComposer] = useState(false);
+  const [calView, setCalView] = useState('timeline'); // 'timeline' | 'month'
   const { products, activeBrand, updateProduct } = useProducts();
   const { orders } = useProduction();
   const { accounts, posts, loading, connectAccount, disconnectAccount, schedulePost, updatePostStatus, refresh: refreshContent } = useContent();
@@ -236,6 +238,14 @@ export default function ContentHub() {
 
         {tab === 'calendar' && (
           <>
+            <div className="pill-group" style={{ marginBottom: 18 }}>
+              <button className={`pill ${calView === 'timeline' ? 'active' : ''}`} onClick={() => setCalView('timeline')}>
+                <i className="ph ph-list-dashes" style={{ marginRight: 6 }} /> Timeline
+              </button>
+              <button className={`pill ${calView === 'month' ? 'active' : ''}`} onClick={() => setCalView('month')}>
+                <i className="ph ph-calendar-blank" style={{ marginRight: 6 }} /> Month
+              </button>
+            </div>
             {publishError && (
               <div style={{ background: 'var(--red-bg)', color: 'var(--red)', padding: '10px 14px', borderRadius: 'var(--r-sm)', marginBottom: 16, fontSize: 13, border: '1px solid var(--red-border)' }}>{publishError}</div>
             )}
@@ -299,7 +309,31 @@ export default function ContentHub() {
               </form>
             )}
             
-            {calendarItems.length === 0 ? (
+            {calView === 'month' ? (
+              <CalendarGrid
+                events={calendarItems.map((item, i) => ({
+                  key: `${item.type}-${i}`,
+                  date: item.date,
+                  render: () => item.type === 'post' ? (
+                    <div style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 3, color: 'var(--c-content)' }}>
+                      <i className={`ph ${PLATFORM_ICON[item.data.platform]}`} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.data.caption}</span>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 3, color: 'var(--c-materials)' }}>
+                      <i className="ph ph-package" />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.data.products?.name || item.data.po_number}</span>
+                    </div>
+                  ),
+                }))}
+                accent="var(--c-content)"
+                onDayClick={date => {
+                  const pad = n => String(n).padStart(2, '0');
+                  setForm(f => ({ ...f, scheduledFor: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T09:00` }));
+                  setShowComposer(true);
+                }}
+              />
+            ) : calendarItems.length === 0 ? (
                <EmptyState icon="ph-calendar-plus" color="var(--c-content)" title="Timeline is empty" sub="Schedule marketing content alongside your factory due dates to perfectly time your product drops." />
             ) : (
               <div style={{ position: 'relative', paddingLeft: 16, marginTop: 10 }}>
