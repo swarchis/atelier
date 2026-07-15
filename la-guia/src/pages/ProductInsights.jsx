@@ -5,6 +5,7 @@ import { useProducts } from '../context/ProductsContext.jsx';
 import { useSales } from '../context/SalesContext.jsx';
 import { useProduction } from '../context/ProductionContext.jsx';
 import { supabase } from '../lib/supabase.js';
+import { useAutosave, AutosaveIndicator } from '../lib/useAutosave.js';
 import FlowStepper from '../components/FlowStepper.jsx';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
@@ -93,6 +94,10 @@ export default function ProductInsights() {
     }
   };
 
+  // Real debounced autosave — `undefined` while still loading so the
+  // initial populate-from-server doesn't itself trigger a write-back.
+  const autosaveStatus = useAutosave(loading ? undefined : form, (v) => updateProduct(id, { financials: v }));
+
   const num = val => parseFloat(val) || 0;
   
   const landedCost = bomCost + num(form.cmtCost) + num(form.shippingCost);
@@ -148,10 +153,11 @@ export default function ProductInsights() {
           </div>
           <div className="page-sub">{product.category}</div>
         </div>
-        <div className="topbar-right">
-          <span className={riskTagClass(product.risk)} style={{ marginRight: 8 }}>{product.risk}</span>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
-            <i className="ph ph-check" /> {saving ? 'Saving...' : 'Save Model'}
+        <div className="topbar-right" style={{ gap: 12, display: 'flex', alignItems: 'center' }}>
+          <span className={riskTagClass(product.risk)}>{product.risk}</span>
+          <AutosaveIndicator status={autosaveStatus} />
+          <button className="btn btn-sm" onClick={handleSave} disabled={saving || loading} title="Fields already autosave — this just forces it now">
+            <i className="ph ph-check" /> {saving ? 'Saving...' : 'Save Now'}
           </button>
         </div>
       </div>

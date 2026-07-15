@@ -49,7 +49,7 @@ export default function ContinueWhereYouLeftOff() {
   const resolved = recent
     .map(entry => ({ ...entry, title: resolveTitle(entry, { products, vendors, materials, collections, orders }) }))
     .filter(entry => entry.title)
-    .slice(0, 4);
+    .slice(0, 8); // all 8 slots AppUIContext actually tracks, not just the first 4
 
   return (
     <div data-tour="continue-widget" className="card-raised" style={{ padding: 20 }}>
@@ -61,7 +61,7 @@ export default function ContinueWhereYouLeftOff() {
           Visit a product, vendor, or tech pack and it'll show up here next time.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
           {resolved.map(entry => {
             const meta = TYPE_META[entry.type] || { icon: 'ph-file', label: 'Item' };
             return (

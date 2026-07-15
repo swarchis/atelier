@@ -105,10 +105,13 @@ export function ProductsProvider({ children }) {
         // Falls back to an unfiltered query if `status` doesn't exist yet
         // (migration 014 not run) so the whole product list doesn't go
         // blank over one missing column on an otherwise-working brand.
+        // Capped at 500 — a real safety limit (this query had none at all
+        // before), not full paginated "load more" UI, which would need
+        // matching changes on every page that renders this list.
         let prodData;
-        const filtered = await supabase.from('products').select('*').eq('brand_id', activeBrand.id).neq('status', 'archived').order('created_at', { ascending: false });
+        const filtered = await supabase.from('products').select('*').eq('brand_id', activeBrand.id).neq('status', 'archived').order('created_at', { ascending: false }).limit(500);
         if (filtered.error) {
-          const unfiltered = await supabase.from('products').select('*').eq('brand_id', activeBrand.id).order('created_at', { ascending: false });
+          const unfiltered = await supabase.from('products').select('*').eq('brand_id', activeBrand.id).order('created_at', { ascending: false }).limit(500);
           prodData = unfiltered.data;
         } else {
           prodData = filtered.data;

@@ -9,6 +9,8 @@ import { PhotoPanel } from '../components/decor.jsx';
 import { useMaterials } from '../context/MaterialsContext.jsx';
 import { useVendors } from '../context/VendorsContext.jsx';
 import PriceHistoryChart from '../components/PriceHistoryChart.jsx';
+import { useAutosave, AutosaveIndicator } from '../lib/useAutosave.js';
+import { usePinned } from '../context/PinnedContext.jsx';
 
 const TONE_BY_RISK = { green: 'sage', amber: 'gold', red: 'clay' };
 const TABS = [
@@ -27,6 +29,7 @@ export default function MaterialDetail() {
     vendorLinksByMaterial, loadVendorLinks, linkVendor, unlinkVendor,
   } = useMaterials();
   const { vendors } = useVendors();
+  const { isPinned, togglePin } = usePinned();
 
   const material = materials.find(m => m.id === id);
   const costLog = costLogByMaterial[id] || [];
@@ -42,6 +45,11 @@ export default function MaterialDetail() {
   const [sustainDraft, setSustainDraft] = useState(null);
   const [certDraft, setCertDraft] = useState(null);
 
+  // undefined until the material row is loaded, so the initial populate
+  // from `material.sustainability_info` doesn't itself trigger a write-back
+  const sustainValue = material ? (sustainDraft === null ? (material.sustainability_info || '') : sustainDraft) : undefined;
+  const sustainAutosaveStatus = useAutosave(sustainValue, (v) => updateMaterial(id, { sustainability_info: v }));
+
   const [costForm, setCostForm] = useState({ unitCost: '', note: '' });
   const [costSaving, setCostSaving] = useState(false);
   const [linkVendorId, setLinkVendorId] = useState('');
@@ -51,7 +59,14 @@ export default function MaterialDetail() {
     if (!id) return;
     setLoadingUsage(true);
     async function loadUsage() {
-      const { data: tpData } = await supabase.from('tech_packs').select('product_id, bom, products(name, stage, category)');
+      // Was an unfiltered, unlimited scan of every tech pack this user can
+      // see (no brand scoping in the query at all, relying purely on RLS,
+      // no cap) on every material detail page load — the confirmed N+1
+      // from the QoL audit. Name-matching inside a jsonb BOM array can't be
+      // pushed fully into a WHERE clause without a proper reverse-lookup
+      // table (real future work), but capping it is a real, honest interim
+      // fix — no brand realistically has thousands of tech packs.
+      const { data: tpData } = await supabase.from('tech_packs').select('product_id, bom, products(name, stage, category)').limit(500);
       const target = materials.find(m => m.id === id);
       if (tpData && target) {
         setUsedInProducts(tpData.filter(tp => Array.isArray(tp.bom) && tp.bom.some(b => b.material && b.material.toLowerCase().includes(target.name.toLowerCase()))));
@@ -114,6 +129,14 @@ export default function MaterialDetail() {
           <span className={trustTagClass(material.risk_level)}>
             {material.risk_level === 'green' ? 'Low risk' : material.risk_level === 'red' ? 'High risk' : 'Watch'}
           </span>
+          <button
+            className="canvas-icon-btn"
+            title={isPinned('material', material.id) ? 'Unpin' : 'Pin to Home'}
+            onClick={() => togglePin('material', material.id)}
+            style={{ color: isPinned('material', material.id) ? 'var(--c-materials)' : 'var(--ink-3)' }}
+          >
+            <i className={isPinned('material', material.id) ? 'ph-fill ph-push-pin' : 'ph ph-push-pin'} />
+          </button>
           <button className="canvas-icon-btn" onClick={() => setConfirmingDelete(true)} title="Delete material" style={{ color: 'var(--red)' }}>
             <i className="ph ph-trash" />
           </button>
@@ -155,14 +178,16 @@ export default function MaterialDetail() {
 
             <div className="grid-2" style={{ marginBottom: 20 }}>
               <div className="card-raised">
-                <div className="card-header"><span className="card-title">Sustainability</span></div>
+                <div className="card-header">
+                  <span className="card-title">Sustainability</span>
+                  <AutosaveIndicator status={sustainAutosaveStatus} />
+                </div>
                 <div className="card-body">
                   <textarea
                     className="form-textarea" style={{ minHeight: 60, marginBottom: 12 }}
                     placeholder="e.g. GOTS certified organic cotton, low-impact dyes"
                     value={sustainDraft === null ? (material.sustainability_info || '') : sustainDraft}
                     onChange={e => setSustainDraft(e.target.value)}
-                    onBlur={() => sustainDraft !== null && sustainDraft !== (material.sustainability_info || '') && saveField('sustainability_info', sustainDraft)}
                   />
                   <input
                     className="form-input" placeholder="Certifications, comma-separated (e.g. GOTS, OEKO-TEX)"

@@ -29,7 +29,8 @@ export function VendorsProvider({ children }) {
         .from('vendors')
         .select('*')
         .eq('brand_id', activeBrand.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(500); // safety cap — this query had none before
       if (vendorError) throw vendorError;
       setVendors(vendorData || []);
 

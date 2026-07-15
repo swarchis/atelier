@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 // Debounced (~800ms) autosave, replacing the inconsistent mix of blur-save/
 // instant-save/manual-save-button used across this app's forms. Call with
 // the current value and a save function; returns a status string for a
-// small "Saved" indicator. Skips the save on first mount (the value just
-// loaded from the server, nothing changed yet).
+// small "Saved" indicator. Skips the save on first mount, AND on the
+// transition from `undefined` to the real value — pass `undefined` while
+// your form is still loading from the server, so the moment it populates
+// with real data doesn't itself look like a change worth saving back.
 export function useAutosave(value, onSave, delay = 800) {
   const [status, setStatus] = useState('idle'); // idle | saving | saved | error
   const timer = useRef(null);
@@ -12,6 +14,7 @@ export function useAutosave(value, onSave, delay = 800) {
   const savedValue = useRef(value);
 
   useEffect(() => {
+    if (value === undefined) return; // not loaded yet — nothing to compare against
     if (!mounted.current) { mounted.current = true; savedValue.current = value; return; }
     if (JSON.stringify(value) === JSON.stringify(savedValue.current)) return;
 

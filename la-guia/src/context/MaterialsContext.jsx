@@ -18,7 +18,10 @@ export function MaterialsProvider({ children }) {
 
   useEffect(() => {
     async function load() {
-      const { data, error } = await supabase.from('materials').select('*').order('name', { ascending: true });
+      // materials is a shared, unscoped reference table (no brand_id) —
+      // grows across every brand using the app, so a cap matters more
+      // here than almost anywhere else; this query had none before.
+      const { data, error } = await supabase.from('materials').select('*').order('name', { ascending: true }).limit(500);
       if (!error) setMaterials(data || []);
       else console.error('Error loading materials:', error);
       setLoading(false);

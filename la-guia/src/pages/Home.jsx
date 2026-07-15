@@ -18,6 +18,7 @@ import FavoriteProjects from '../components/dashboard/FavoriteProjects.jsx';
 import CalendarTimeline from '../components/dashboard/CalendarTimeline.jsx';
 import StickyNotes from '../components/dashboard/StickyNotes.jsx';
 import SuggestionInbox from '../components/dashboard/SuggestionInbox.jsx';
+import ActivityFeed from '../components/dashboard/ActivityFeed.jsx';
 
 const QUICK_ACTIONS = [
   { label: 'New Product', desc: 'Start from a sketch or upload', icon: 'ph-plus-circle', color: 'var(--c-design)', path: '/design' },
@@ -25,8 +26,6 @@ const QUICK_ACTIONS = [
   { label: 'Request Quote', desc: 'Ask a vendor to bid', icon: 'ph-file-text', color: 'var(--c-vendors)', path: '/quotes' },
   { label: 'Review Readiness', desc: 'Check stage-gate status', icon: 'ph-check-circle', color: 'var(--c-finalcheck)', path: '/readiness' },
 ];
-
-const NOTIFICATION_DOT = { success: 'var(--green)', info: 'var(--blue)', warning: 'var(--amber)' };
 
 function stageColor(stageKey) {
   const s = STAGES.find(st => st.key === stageKey);
@@ -379,23 +378,7 @@ export default function Home() {
         </div>
 
         <div className="enter enter-4" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 34, alignItems: 'stretch' }}>
-          <div className="card-raised" style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-              <span className="card-title" style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11 }}>Recent activity</span>
-            </div>
-            {notifications.length === 0 ? (
-               <div style={{ fontSize: 12.5, color: 'var(--ink-4)', fontStyle: 'italic', padding: '14px 0' }}>No recent activity.</div>
-            ) : notifications.slice(0, 4).map(n => (
-              <div key={n.id} style={{ display: 'flex', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border)' }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: NOTIFICATION_DOT[n.type] || 'var(--ink-4)', marginTop: 5, flexShrink: 0 }} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-2)' }}>{n.title}</div>
-                  <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.body}</div>
-                </div>
-              </div>
-            ))}
-            <span style={{ fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer', display: 'inline-block', marginTop: 6 }} onClick={() => navigate('/notifications')}>View all activity →</span>
-          </div>
+          <ActivityFeed />
 
           <div className="card-raised" style={{ padding: 20 }}>
             <span className="card-title" style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11, display: 'block', marginBottom: 6 }}>Upcoming production dates</span>
