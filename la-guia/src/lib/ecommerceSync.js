@@ -1,9 +1,10 @@
-// Per-platform adapters for pulling orders/inventory from a connected
-// storefront. One sync engine, not a copy-pasted syncSales() per platform
-// — SalesDashboard.jsx calls these and does the SKU-matching/aggregation
-// itself (same shape as the original Shopify-only sync), so every
-// platform's raw order format gets normalized in one place per adapter
-// rather than leaking platform-specific fields further into the app.
+// Per-platform adapters for pulling orders/inventory (and, where
+// supported, publishing a product) to/from a connected storefront. One
+// sync engine, not a copy-pasted syncSales() per platform — SalesDashboard.jsx
+// calls these and does the SKU-matching/aggregation itself (same shape as
+// the original Shopify-only sync), so every platform's raw order format
+// gets normalized in one place per adapter rather than leaking
+// platform-specific fields further into the app.
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 async function postJSON(path, body) {
@@ -40,7 +41,23 @@ async function ensureFreshEtsyToken(conn, onRefreshed) {
   return refreshed;
 }
 
+// Shopify is intentionally excluded from `publishProduct` — the
+// connection itself is disabled ("coming soon") pending Atelier's own
+// App Store review, so there's no live connection to publish through
+// yet even though the read side (fetchOrders/fetchInventory) still
+// works for any pre-existing test connection.
 export const platformAdapters = {
+  shopify: {
+    label: 'Shopify',
+    async fetchOrders(conn) {
+      const { orders } = await postJSON('/api/shopify/fetch-orders', { shop: conn.shop_domain, token: conn.access_token });
+      return orders || [];
+    },
+    async fetchInventory(conn) {
+      const { products } = await postJSON('/api/shopify/fetch-inventory', { shop: conn.shop_domain, token: conn.access_token });
+      return products || [];
+    },
+  },
   woocommerce: {
     label: 'WooCommerce',
     async validate(conn) {
@@ -54,6 +71,14 @@ export const platformAdapters = {
       const { products } = await postJSON('/api/woocommerce/fetch-inventory', { storeUrl: conn.shop_domain, consumerKey: conn.api_key, consumerSecret: conn.access_token });
       return products || [];
     },
+    // Creates a draft product — the founder reviews and publishes live
+    // themselves in WooCommerce. Returns { externalId, externalUrl }.
+    async publishProduct(conn, { name, description, price, sku, imageUrl }) {
+      return postJSON('/api/woocommerce/publish-product', {
+        storeUrl: conn.shop_domain, consumerKey: conn.api_key, consumerSecret: conn.access_token,
+        name, description, price, sku, imageUrl,
+      });
+    },
   },
   etsy: {
     label: 'Etsy',
@@ -66,6 +91,16 @@ export const platformAdapters = {
       const fresh = await ensureFreshEtsyToken(conn, onRefreshed);
       const { listings } = await postJSON('/api/etsy/fetch-inventory', { shopId: fresh.shop_domain, accessToken: fresh.access_token });
       return listings || [];
+    },
+    // Creates a draft listing (text only — Etsy image upload is a
+    // separate multipart endpoint this doesn't call). Requires a real
+    // Etsy taxonomy_id; see README, there's no safe default to guess.
+    async publishProduct(conn, { name, description, price, sku, quantity, taxonomyId }, onRefreshed) {
+      const fresh = await ensureFreshEtsyToken(conn, onRefreshed);
+      return postJSON('/api/etsy/publish-listing', {
+        shopId: fresh.shop_domain, accessToken: fresh.access_token,
+        title: name, description, price, sku, quantity, taxonomyId,
+      });
     },
   },
 };

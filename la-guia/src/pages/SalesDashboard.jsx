@@ -18,6 +18,7 @@ const TABS = [
   { key: 'vendors', label: 'Vendors', icon: 'ph-handshake' },
   { key: 'manufacturing', label: 'Manufacturing', icon: 'ph-package' },
   { key: 'inventory', label: 'Inventory', icon: 'ph-cube' },
+  { key: 'listings', label: 'Listings', icon: 'ph-storefront' },
   { key: 'marketing', label: 'Marketing', icon: 'ph-megaphone' },
   { key: 'reports', label: 'Reports', icon: 'ph-file-text' },
   { key: 'connections', label: 'Connections', icon: 'ph-plug' },
@@ -184,14 +185,8 @@ export default function SalesDashboard() {
     setSyncing(true);
     setSyncError(null);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/shopify/fetch-orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shop: connection.shop_domain, token: connection.access_token })
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
-      await aggregateAndUpsertOrders(data.orders, 'shopify');
+      const orders = await platformAdapters.shopify.fetchOrders(connection);
+      await aggregateAndUpsertOrders(orders, 'shopify');
       await refreshSales();
     } catch (err) {
       setSyncError(err.message);
@@ -391,7 +386,8 @@ export default function SalesDashboard() {
 
         {tab === 'vendors' && <VendorsTab vendors={vendors} quotes={quotes} orders={orders} navigate={navigate} />}
         {tab === 'manufacturing' && <ManufacturingTab orders={orders} />}
-        {tab === 'inventory' && <InventoryTab products={products} orders={orders} productSales={productSales} navigate={navigate} />}
+        {tab === 'inventory' && <InventoryTab products={products} orders={orders} productSales={productSales} navigate={navigate} connections={connections} />}
+        {tab === 'listings' && <ListingsTab products={products} connections={connections} persistRefreshedEtsyToken={persistRefreshedEtsyToken} />}
         {tab === 'marketing' && (
           <EmptyState
             icon="ph-megaphone"
@@ -617,7 +613,11 @@ function ManufacturingTab({ orders }) {
   );
 }
 
-function InventoryTab({ products, orders, productSales, navigate }) {
+function InventoryTab({ products, orders, productSales, navigate, connections }) {
+  const [platformStock, setPlatformStock] = useState(null); // { sku: { platform, stock_quantity } }
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState(null);
+
   const rows = products.map(p => {
     const produced = orders.filter(o => o.product_id === p.id && o.stage === 'Delivered').reduce((s, o) => s + (o.units || 0), 0);
     const sold = (productSales[p.id] || []).reduce((s, m) => s + m.orders_count, 0);
@@ -628,25 +628,216 @@ function InventoryTab({ products, orders, productSales, navigate }) {
     return { product: p, produced, sold, stock, daysRemaining };
   }).filter(r => r.produced > 0);
 
+  const checkStorefrontStock = async () => {
+    setChecking(true);
+    setCheckError(null);
+    try {
+      const { data: variants } = await supabase.from('product_variants').select('sku, product_id').in('product_id', products.map(p => p.id));
+      const skuToProduct = {};
+      (variants || []).forEach(v => { if (v.sku) skuToProduct[v.sku] = v.product_id; });
+
+      const combined = {};
+      for (const conn of connections) {
+        const adapter = platformAdapters[conn.platform];
+        if (!adapter?.fetchInventory) continue;
+        const items = await adapter.fetchInventory(conn);
+        items.forEach(item => {
+          const productId = skuToProduct[item.sku];
+          if (!productId) return;
+          combined[productId] = combined[productId] || [];
+          combined[productId].push({ platform: adapter.label, stock_quantity: item.stock_quantity });
+        });
+      }
+      setPlatformStock(combined);
+    } catch (err) {
+      setCheckError(err.message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
   if (rows.length === 0) {
     return <EmptyState icon="ph-cube" color="var(--c-materials)" title="No delivered production yet" sub="Once a production order is marked Delivered, its units show up here against real sales." />;
   }
 
   return (
-    <div className="card">
-      <div className="card-header"><span className="card-title">Estimated Stock on Hand</span></div>
-      {rows.sort((a, b) => a.stock - b.stock).map(r => (
-        <div className="list-row" key={r.product.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/products/${r.product.id}/performance`)}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{r.product.name}</span>
-          <div style={{ display: 'flex', gap: 22, fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--ink-3)' }}>
-            <span>{r.produced} produced</span>
-            <span>{r.sold} sold</span>
-            <span style={{ fontWeight: 700, color: 'var(--ink)' }}>{r.stock} in stock</span>
-            <span>{r.daysRemaining != null ? `${r.daysRemaining}d runway` : '—'}</span>
+    <>
+      {connections.length > 0 && (
+        <div className="card" style={{ marginBottom: 18, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button className="btn btn-sm" onClick={checkStorefrontStock} disabled={checking}>
+            {checking ? 'Checking…' : <><i className="ph ph-arrows-clockwise" /> Compare to Storefront Stock</>}
+          </button>
+          <span className="form-hint" style={{ margin: 0 }}>Pulls live stock counts from your connected stores, matched by SKU — a one-time check, not a running sync.</span>
+        </div>
+      )}
+      {checkError && <div style={{ background: 'var(--red-bg)', color: 'var(--red)', padding: '10px 14px', borderRadius: 'var(--r-sm)', marginBottom: 16, fontSize: 13, border: '1px solid var(--red-border)' }}>{checkError}</div>}
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Estimated Stock on Hand</span></div>
+        {rows.sort((a, b) => a.stock - b.stock).map(r => (
+          <div className="list-row" key={r.product.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/products/${r.product.id}/performance`)}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{r.product.name}</span>
+            <div style={{ display: 'flex', gap: 22, fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--ink-3)' }}>
+              <span>{r.produced} produced</span>
+              <span>{r.sold} sold</span>
+              <span style={{ fontWeight: 700, color: 'var(--ink)' }}>{r.stock} in stock</span>
+              <span>{r.daysRemaining != null ? `${r.daysRemaining}d runway` : '—'}</span>
+              {platformStock?.[r.product.id]?.map((p, i) => (
+                <span key={i} style={{ color: 'var(--c-analytics)' }}>{p.platform}: {p.stock_quantity}</span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function ListingsTab({ products, connections, persistRefreshedEtsyToken }) {
+  const writeCapable = connections.filter(c => platformAdapters[c.platform]?.publishProduct);
+  const [listings, setListings] = useState([]);
+  const [loadingListings, setLoadingListings] = useState(true);
+  const [form, setForm] = useState({ productId: '', platform: '', name: '', description: '', price: '', sku: '', imageUrl: '', taxonomyId: '' });
+  const [preview, setPreview] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState(null);
+
+  useEffect(() => {
+    supabase.from('platform_listings').select('*, products(name)').order('published_at', { ascending: false })
+      .then(({ data }) => { setListings(data || []); setLoadingListings(false); });
+  }, []);
+
+  const selectedProduct = products.find(p => p.id === form.productId);
+  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const onPickProduct = productId => {
+    const p = products.find(pr => pr.id === productId);
+    setForm(f => ({ ...f, productId, name: p?.name || '', price: p?.financials?.retailPrice || '' }));
+  };
+
+  const canPreview = form.productId && form.platform && form.name.trim() && form.price && (form.platform !== 'etsy' || form.taxonomyId);
+
+  const doPublish = async () => {
+    setPublishing(true);
+    setPublishError(null);
+    try {
+      const conn = connections.find(c => c.platform === form.platform);
+      const adapter = platformAdapters[form.platform];
+      const args = { name: form.name, description: form.description, price: form.price, sku: form.sku || undefined, imageUrl: form.imageUrl || undefined, quantity: 1, taxonomyId: form.taxonomyId || undefined };
+      const result = form.platform === 'etsy'
+        ? await adapter.publishProduct(conn, args, persistRefreshedEtsyToken)
+        : await adapter.publishProduct(conn, args);
+
+      const { data, error } = await supabase.from('platform_listings').upsert({
+        brand_id: conn.brand_id, product_id: form.productId, platform: form.platform,
+        external_id: result.externalId, external_url: result.externalUrl, status: 'published',
+      }, { onConflict: 'product_id, platform' }).select('*, products(name)').single();
+      if (error) throw error;
+
+      setListings(prev => [data, ...prev.filter(l => !(l.product_id === form.productId && l.platform === form.platform))]);
+      setForm({ productId: '', platform: '', name: '', description: '', price: '', sku: '', imageUrl: '', taxonomyId: '' });
+      setPreview(false);
+    } catch (err) {
+      setPublishError(err.message);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <>
+      {writeCapable.length === 0 ? (
+        <EmptyState icon="ph-storefront" color="var(--c-analytics)" title="No publishable store connected" sub="Connect WooCommerce or Etsy in the Connections tab to publish a product from here — Shopify publishing isn't available while that connection is disabled." />
+      ) : (
+        <div className="card-raised" style={{ marginBottom: 18 }}>
+          <div className="card-header"><span className="card-title">Publish a Product</span></div>
+          <div className="card-body">
+            {publishError && <div style={{ background: 'var(--red-bg)', color: 'var(--red)', padding: '10px 14px', borderRadius: 'var(--r-sm)', marginBottom: 14, fontSize: 13, border: '1px solid var(--red-border)' }}>{publishError}</div>}
+            {!preview ? (
+              <>
+                <div className="grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Product</label>
+                    <select className="form-select" value={form.productId} onChange={e => onPickProduct(e.target.value)}>
+                      <option value="">Choose a product…</option>
+                      {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Platform</label>
+                    <select className="form-select" value={form.platform} onChange={e => setField('platform', e.target.value)}>
+                      <option value="">Choose a store…</option>
+                      {writeCapable.map(c => <option key={c.platform} value={c.platform}>{platformAdapters[c.platform].label}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Listing Title</label>
+                  <input className="form-input" value={form.name} onChange={e => setField('name', e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Description</label>
+                  <textarea className="form-textarea" value={form.description} onChange={e => setField('description', e.target.value)} />
+                </div>
+                <div className="grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Price</label>
+                    <input className="form-input" type="number" value={form.price} onChange={e => setField('price', e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">SKU (optional)</label>
+                    <input className="form-input" value={form.sku} onChange={e => setField('sku', e.target.value)} />
+                  </div>
+                </div>
+                {form.platform === 'woocommerce' && (
+                  <div className="form-group">
+                    <label className="form-label">Image URL (optional)</label>
+                    <input className="form-input" placeholder="https://…" value={form.imageUrl} onChange={e => setField('imageUrl', e.target.value)} />
+                  </div>
+                )}
+                {form.platform === 'etsy' && (
+                  <div className="form-group">
+                    <label className="form-label">Etsy Taxonomy ID</label>
+                    <input className="form-input" type="number" placeholder="e.g. 1297 for Women's Clothing" value={form.taxonomyId} onChange={e => setField('taxonomyId', e.target.value)} />
+                    <div className="form-hint">Etsy requires a numeric category ID on every listing — look yours up via `GET /v3/application/seller-taxonomy/nodes`. There's no safe default across garment types, so this can't be pre-filled. Etsy image upload isn't supported here yet — the listing is created as a draft with text only; add photos directly in Etsy afterward.</div>
+                  </div>
+                )}
+                <button className="btn btn-primary" disabled={!canPreview} onClick={() => setPreview(true)}>Preview</button>
+              </>
+            ) : (
+              <>
+                <div className="form-hint" style={{ marginBottom: 12 }}>This will create a real draft {form.platform === 'etsy' ? 'listing' : 'product'} on your connected {platformAdapters[form.platform]?.label} store. Review before confirming — it stays a draft until you publish it live yourself on the platform.</div>
+                <div style={{ padding: '14px 16px', background: 'var(--bg-1)', border: '1.5px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 14 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{form.name}</div>
+                  <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 8 }}>{form.description || <em>No description</em>}</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>{currency(Number(form.price) || 0)}{form.sku ? ` · SKU ${form.sku}` : ''}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn" onClick={() => setPreview(false)} disabled={publishing}>Back</button>
+                  <button className="btn btn-primary" onClick={doPublish} disabled={publishing}>{publishing ? 'Publishing…' : `Confirm & Create Draft on ${platformAdapters[form.platform]?.label}`}</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
-      ))}
-    </div>
+      )}
+
+      {!loadingListings && listings.length > 0 && (
+        <div className="card">
+          <div className="card-header"><span className="card-title">Published Listings</span></div>
+          {listings.map(l => (
+            <div className="list-row" key={l.id}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{l.products?.name || 'Unknown product'}</span>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', fontSize: 12.5 }}>
+                <span className="tag tag-neutral" style={{ textTransform: 'capitalize' }}>{l.platform}</span>
+                <span style={{ color: 'var(--ink-3)' }}>{new Date(l.published_at).toLocaleDateString()}</span>
+                {l.external_url && <a href={l.external_url} target="_blank" rel="noreferrer">View <i className="ph ph-arrow-square-out" /></a>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

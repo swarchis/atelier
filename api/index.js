@@ -806,6 +806,27 @@ app.post('/api/shopify/fetch-orders', async (req, res) => {
   }
 });
 
+// Read-only stock levels, for the Analytics Inventory tab's "what your
+// storefront reports" comparison — already covered by the existing
+// read_products scope, no reconnect needed. Not the same as the README's
+// long-standing "no inventory endpoint" note, which was about a live
+// write-back sync; this only reads.
+app.post('/api/shopify/fetch-inventory', async (req, res) => {
+  const { shop, token } = req.body;
+  if (!shop || !token) return res.status(400).json({ ok: false, error: 'Missing shop or token' });
+  try {
+    const response = await fetch(`https://${shop}/admin/api/2024-01/products.json?limit=250`, {
+      headers: { 'X-Shopify-Access-Token': token }
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.errors || 'Failed to fetch products');
+    const products = (data.products || []).flatMap(p => (p.variants || []).map(v => ({ sku: v.sku, stock_quantity: v.inventory_quantity })));
+    res.json({ ok: true, products });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ---------------------------------------------------------
 // 4B. WOOCOMMERCE INTEGRATION
 // ---------------------------------------------------------
@@ -873,6 +894,32 @@ app.post('/api/woocommerce/fetch-inventory', async (req, res) => {
   }
 });
 
+// Creates a real, live product on the connected store — only ever called
+// after the founder has explicitly confirmed a preview in the UI, never
+// automatically. Requires the connected Consumer Key to actually have
+// write access (WooCommerce keys are read-only by default).
+app.post('/api/woocommerce/publish-product', async (req, res) => {
+  const { storeUrl, consumerKey, consumerSecret, name, description, price, sku, imageUrl } = req.body;
+  if (!storeUrl || !consumerKey || !consumerSecret || !name || !price) return res.status(400).json({ ok: false, error: 'Missing required fields' });
+  try {
+    const base = normalizeStoreUrl(storeUrl);
+    const response = await fetch(`${base}/wp-json/wc/v3/products`, {
+      method: 'POST',
+      headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name, type: 'simple', regular_price: String(price), description: description || '', sku: sku || undefined,
+        images: imageUrl ? [{ src: imageUrl }] : undefined,
+        status: 'draft', // safer default — the founder reviews and publishes live in WooCommerce themselves
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Failed to create product');
+    res.json({ ok: true, externalId: String(data.id), externalUrl: data.permalink });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ---------------------------------------------------------
 // 4C. ETSY INTEGRATION
 // ---------------------------------------------------------
@@ -901,7 +948,7 @@ app.get('/api/etsy/auth', (req, res) => {
   const challenge = base64url(crypto.createHash('sha256').update(verifier).digest());
 
   const redirectUri = `${API_URL}/api/etsy/callback`;
-  const scopes = 'transactions_r listings_r shops_r';
+  const scopes = 'transactions_r listings_r listings_w shops_r'; // listings_w: needed for Product Publishing
   const authUrl = `https://www.etsy.com/oauth/connect?response_type=code&client_id=${process.env.ETSY_KEYSTRING}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}&code_challenge=${challenge}&code_challenge_method=S256`;
   res.redirect(authUrl);
 });
@@ -1016,6 +1063,51 @@ app.post('/api/etsy/fetch-inventory', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// Creates a real, live (draft or active, per `state`) listing — only
+// ever called after the founder has explicitly confirmed a preview in
+// the UI. Etsy requires a numeric taxonomy_id (its category system) on
+// every listing and there's no safe default across garment types, so
+// the founder has to supply one (see README) rather than this guessing
+// wrong and miscategorizing a real listing. Etsy image upload is a
+// separate multipart endpoint this doesn't call — the listing is created
+// text-only; photos get added directly in Etsy afterward.
+app.post('/api/etsy/publish-listing', async (req, res) => {
+  const { shopId, accessToken, title, description, price, quantity, taxonomyId, sku } = req.body;
+  if (!shopId || !accessToken || !title || !price || !taxonomyId) return res.status(400).json({ ok: false, error: 'Missing required fields (title, price, and an Etsy taxonomy ID are all required)' });
+  try {
+    const response = await fetch(`https://openapi.etsy.com/v3/application/shops/${shopId}/listings`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'x-api-key': process.env.ETSY_KEYSTRING, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        quantity: quantity || 1, title, description: description || '', price: Number(price),
+        who_made: 'i_did', when_made: 'made_to_order', taxonomy_id: Number(taxonomyId),
+        sku: sku ? [sku] : undefined, state: 'draft',
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to create listing');
+    res.json({ ok: true, externalId: String(data.listing_id), externalUrl: data.url });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ---------------------------------------------------------
+// 4D. TIKTOK SHOP — honest stub, not a real connection
+// ---------------------------------------------------------
+// Unlike Shopify/WooCommerce/Etsy, TikTok Shop's Partner API isn't
+// self-serve — a developer app alone doesn't grant access; TikTok has to
+// approve the seller/partner relationship first, and the exact OAuth
+// shape varies by API version and region in ways not confidently
+// verifiable without an approved account to test against. Rather than
+// guess at an auth URL that might be wrong, this always returns a clear
+// "not available yet" response instead of attempting a redirect —
+// honest about what it is, consistent with how this app already handles
+// the Shopify connection while its own App Store review is pending.
+app.get('/api/tiktokshop/auth', (req, res) => {
+  res.status(400).json({ ok: false, error: 'TikTok Shop requires an approved TikTok Shop Partner Center account, not just a developer app — this connection is not available yet.' });
 });
 
 // ---------------------------------------------------------
