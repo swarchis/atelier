@@ -28,6 +28,11 @@ create index if not exists platform_listings_brand_idx on public.platform_listin
 
 alter table public.platform_listings enable row level security;
 
+drop policy if exists "brand access select listings" on public.platform_listings;
+drop policy if exists "brand access insert listings" on public.platform_listings;
+drop policy if exists "brand access update listings" on public.platform_listings;
+drop policy if exists "brand access delete listings" on public.platform_listings;
+
 create policy "brand access select listings" on public.platform_listings for select using (public.has_brand_access(brand_id));
 create policy "brand access insert listings" on public.platform_listings for insert with check (public.has_brand_access(brand_id));
 create policy "brand access update listings" on public.platform_listings for update using (public.has_brand_access(brand_id));

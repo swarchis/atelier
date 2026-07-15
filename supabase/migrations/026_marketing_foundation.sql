@@ -91,30 +91,59 @@ alter table public.influencer_deals enable row level security;
 alter table public.email_contacts enable row level security;
 alter table public.email_campaigns enable row level security;
 
+drop policy if exists "brand access select social_accounts" on public.social_accounts;
+drop policy if exists "brand access insert social_accounts" on public.social_accounts;
+drop policy if exists "brand access update social_accounts" on public.social_accounts;
+drop policy if exists "brand access delete social_accounts" on public.social_accounts;
+
 create policy "brand access select social_accounts" on public.social_accounts for select using (public.has_brand_access(brand_id));
 create policy "brand access insert social_accounts" on public.social_accounts for insert with check (public.has_brand_access(brand_id));
 create policy "brand access update social_accounts" on public.social_accounts for update using (public.has_brand_access(brand_id));
 create policy "brand access delete social_accounts" on public.social_accounts for delete using (public.has_brand_access(brand_id));
+
+drop policy if exists "brand access select content_posts" on public.content_posts;
+drop policy if exists "brand access insert content_posts" on public.content_posts;
+drop policy if exists "brand access update content_posts" on public.content_posts;
+drop policy if exists "brand access delete content_posts" on public.content_posts;
 
 create policy "brand access select content_posts" on public.content_posts for select using (public.has_brand_access(brand_id));
 create policy "brand access insert content_posts" on public.content_posts for insert with check (public.has_brand_access(brand_id));
 create policy "brand access update content_posts" on public.content_posts for update using (public.has_brand_access(brand_id));
 create policy "brand access delete content_posts" on public.content_posts for delete using (public.has_brand_access(brand_id));
 
+drop policy if exists "brand access select influencers" on public.influencers;
+drop policy if exists "brand access insert influencers" on public.influencers;
+drop policy if exists "brand access update influencers" on public.influencers;
+drop policy if exists "brand access delete influencers" on public.influencers;
+
 create policy "brand access select influencers" on public.influencers for select using (public.has_brand_access(brand_id));
 create policy "brand access insert influencers" on public.influencers for insert with check (public.has_brand_access(brand_id));
 create policy "brand access update influencers" on public.influencers for update using (public.has_brand_access(brand_id));
 create policy "brand access delete influencers" on public.influencers for delete using (public.has_brand_access(brand_id));
+
+drop policy if exists "brand access select influencer_deals" on public.influencer_deals;
+drop policy if exists "brand access insert influencer_deals" on public.influencer_deals;
+drop policy if exists "brand access update influencer_deals" on public.influencer_deals;
+drop policy if exists "brand access delete influencer_deals" on public.influencer_deals;
 
 create policy "brand access select influencer_deals" on public.influencer_deals for select using (public.has_brand_access(brand_id));
 create policy "brand access insert influencer_deals" on public.influencer_deals for insert with check (public.has_brand_access(brand_id));
 create policy "brand access update influencer_deals" on public.influencer_deals for update using (public.has_brand_access(brand_id));
 create policy "brand access delete influencer_deals" on public.influencer_deals for delete using (public.has_brand_access(brand_id));
 
+drop policy if exists "brand access select email_contacts" on public.email_contacts;
+drop policy if exists "brand access insert email_contacts" on public.email_contacts;
+drop policy if exists "brand access update email_contacts" on public.email_contacts;
+drop policy if exists "brand access delete email_contacts" on public.email_contacts;
+
 create policy "brand access select email_contacts" on public.email_contacts for select using (public.has_brand_access(brand_id));
 create policy "brand access insert email_contacts" on public.email_contacts for insert with check (public.has_brand_access(brand_id));
 create policy "brand access update email_contacts" on public.email_contacts for update using (public.has_brand_access(brand_id));
 create policy "brand access delete email_contacts" on public.email_contacts for delete using (public.has_brand_access(brand_id));
+
+drop policy if exists "brand access select email_campaigns" on public.email_campaigns;
+drop policy if exists "brand access insert email_campaigns" on public.email_campaigns;
+drop policy if exists "brand access update email_campaigns" on public.email_campaigns;
 
 create policy "brand access select email_campaigns" on public.email_campaigns for select using (public.has_brand_access(brand_id));
 create policy "brand access insert email_campaigns" on public.email_campaigns for insert with check (public.has_brand_access(brand_id));

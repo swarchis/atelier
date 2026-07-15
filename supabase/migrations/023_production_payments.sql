@@ -22,6 +22,10 @@ create index if not exists production_payments_order_idx on public.production_pa
 
 alter table public.production_payments enable row level security;
 
+drop policy if exists "brand access select payments" on public.production_payments;
+drop policy if exists "brand access insert payments" on public.production_payments;
+drop policy if exists "brand access delete payments" on public.production_payments;
+
 create policy "brand access select payments" on public.production_payments for select using (public.has_brand_access(brand_id));
 create policy "brand access insert payments" on public.production_payments for insert with check (public.has_brand_access(brand_id));
 create policy "brand access delete payments" on public.production_payments for delete using (public.has_brand_access(brand_id));

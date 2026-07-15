@@ -33,9 +33,17 @@ alter table public.user_preferences add column if not exists dashboard_layout js
 alter table public.comments enable row level security;
 alter table public.pinned_items enable row level security;
 
+drop policy if exists "brand access select comments" on public.comments;
+drop policy if exists "brand access insert comments" on public.comments;
+drop policy if exists "brand access delete comments" on public.comments;
+
 create policy "brand access select comments" on public.comments for select using (public.has_brand_access(brand_id));
 create policy "brand access insert comments" on public.comments for insert with check (public.has_brand_access(brand_id));
 create policy "brand access delete comments" on public.comments for delete using (public.has_brand_access(brand_id));
+
+drop policy if exists "brand access select pinned_items" on public.pinned_items;
+drop policy if exists "brand access insert pinned_items" on public.pinned_items;
+drop policy if exists "brand access delete pinned_items" on public.pinned_items;
 
 create policy "brand access select pinned_items" on public.pinned_items for select using (public.has_brand_access(brand_id));
 create policy "brand access insert pinned_items" on public.pinned_items for insert with check (public.has_brand_access(brand_id));
