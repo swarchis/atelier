@@ -687,6 +687,62 @@ app.post('/api/subscription-status', async (req, res) => {
 });
 
 // ---------------------------------------------------------
+// OAUTH HANDOFF HELPER — shared by every platform integration below
+// (Shopify, WooCommerce validation, Etsy, Instagram, TikTok, YouTube,
+// Pinterest). Two problems with a plain redirect-based OAuth flow:
+//   1. `state` was just the raw brandId — anyone could construct a
+//      callback URL themselves and satisfy the frontend's post-hoc check.
+//      Signing it closes that CSRF gap without needing server-side session
+//      storage.
+//   2. The access token used to travel in the browser's URL bar (visible
+//      in history, referrer headers, server logs) on its way back to the
+//      frontend, which is the only thing with an RLS-scoped Supabase
+//      client able to persist it (this backend has no DB access itself —
+//      see the architecture note above). A short-lived, single-use code
+//      swap keeps that handoff out of the URL/history entirely.
+// ---------------------------------------------------------
+const crypto = require('crypto');
+const oauthHandoffStore = new Map(); // code -> { payload, expiresAt }
+const OAUTH_HANDOFF_TTL_MS = 2 * 60 * 1000;
+
+function signOAuthState(brandId) {
+  const nonce = crypto.randomBytes(12).toString('hex');
+  const payload = `${brandId}.${nonce}`;
+  const secret = process.env.OAUTH_STATE_SECRET || 'dev-only-insecure-oauth-state-secret';
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  return `${payload}.${sig}`;
+}
+
+function verifyOAuthState(state) {
+  if (!state) return null;
+  const parts = state.split('.');
+  if (parts.length !== 3) return null;
+  const [brandId, nonce, sig] = parts;
+  const secret = process.env.OAUTH_STATE_SECRET || 'dev-only-insecure-oauth-state-secret';
+  const expected = crypto.createHmac('sha256', secret).update(`${brandId}.${nonce}`).digest('hex');
+  const sigBuf = Buffer.from(sig || '', 'hex');
+  const expectedBuf = Buffer.from(expected, 'hex');
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+  return brandId;
+}
+
+function createOAuthHandoff(payload) {
+  const code = crypto.randomBytes(20).toString('hex');
+  oauthHandoffStore.set(code, { payload, expiresAt: Date.now() + OAUTH_HANDOFF_TTL_MS });
+  return code;
+}
+
+app.get('/api/oauth/consume', (req, res) => {
+  const { code } = req.query;
+  const entry = code && oauthHandoffStore.get(code);
+  oauthHandoffStore.delete(code); // single-use regardless of outcome
+  if (!entry || entry.expiresAt < Date.now()) {
+    return res.status(410).json({ ok: false, error: 'This connection link has expired or was already used — try connecting again.' });
+  }
+  res.json({ ok: true, ...entry.payload });
+});
+
+// ---------------------------------------------------------
 // 4. SHOPIFY INTEGRATION
 // ---------------------------------------------------------
 
@@ -700,14 +756,16 @@ app.get('/api/shopify/auth', (req, res) => {
 
   const scopes = 'read_orders,read_products';
   const redirectUri = `${API_URL}/api/shopify/callback`;
-  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_CLIENT_ID}&scope=${scopes}&redirect_uri=${redirectUri}&state=${brandId}`;
-  
+  const state = signOAuthState(brandId);
+  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_CLIENT_ID}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
+
   res.redirect(installUrl);
 });
 
 app.get('/api/shopify/callback', async (req, res) => {
-  const { shop, code, state: brandId } = req.query;
-  if (!shop || !code || !brandId) return res.status(400).send('Missing parameters');
+  const { shop, code, state } = req.query;
+  const brandId = verifyOAuthState(state);
+  if (!shop || !code || !brandId) return res.status(400).send('Missing or invalid parameters');
 
   try {
     const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
@@ -719,11 +777,12 @@ app.get('/api/shopify/callback', async (req, res) => {
         code
       })
     });
-    
+
     const data = await response.json();
     if (!response.ok) throw new Error(data.error_description || 'Failed to get token');
 
-    res.redirect(`${APP_URL}/sales?shopify_success=true&shop=${shop}&token=${data.access_token}&brandId=${brandId}`);
+    const handoffCode = createOAuthHandoff({ platform: 'shopify', shop, accessToken: data.access_token, brandId });
+    res.redirect(`${APP_URL}/sales?shopify_success=true&handoff=${handoffCode}&brandId=${brandId}`);
   } catch (err) {
     console.error('Shopify OAuth Error:', err);
     res.redirect(`${APP_URL}/sales?shopify_error=true`);

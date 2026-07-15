@@ -7,6 +7,7 @@ import { useVendors } from '../context/VendorsContext.jsx';
 import { useProduction } from '../context/ProductionContext.jsx';
 import { supabase } from '../lib/supabase.js';
 import { exportCSV } from '../lib/csvExport.js';
+import { consumeOAuthHandoff } from '../lib/oauthHandoff.js';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import RevenueChart from '../components/RevenueChart.jsx';
@@ -45,21 +46,26 @@ export default function SalesDashboard() {
     const error = params.get('shopify_error');
     
     if (success === 'true' && activeBrand) {
-      const shop = params.get('shop');
-      const token = params.get('token');
+      const handoffCode = params.get('handoff');
       const brandId = params.get('brandId');
 
-      if (brandId === activeBrand.id) {
-        supabase.from('store_connections').upsert({
-          brand_id: activeBrand.id,
-          platform: 'shopify',
-          shop_domain: shop,
-          access_token: token,
-        }, { onConflict: 'brand_id, platform' }).then(() => {
-          refreshSales();
-          window.history.replaceState({}, '', '/sales');
-          setTab('connections');
-        });
+      if (brandId === activeBrand.id && handoffCode) {
+        consumeOAuthHandoff(handoffCode)
+          .then(({ shop, accessToken }) => supabase.from('store_connections').upsert({
+            brand_id: activeBrand.id,
+            platform: 'shopify',
+            shop_domain: shop,
+            access_token: accessToken,
+          }, { onConflict: 'brand_id, platform' }))
+          .then(() => {
+            refreshSales();
+            window.history.replaceState({}, '', '/sales');
+            setTab('connections');
+          })
+          .catch(err => {
+            setSyncError(err.message);
+            window.history.replaceState({}, '', '/sales');
+          });
       }
     } else if (error === 'true') {
       alert("Failed to connect Shopify store.");
