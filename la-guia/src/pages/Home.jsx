@@ -19,6 +19,17 @@ import CalendarTimeline from '../components/dashboard/CalendarTimeline.jsx';
 import StickyNotes from '../components/dashboard/StickyNotes.jsx';
 import SuggestionInbox from '../components/dashboard/SuggestionInbox.jsx';
 import ActivityFeed from '../components/dashboard/ActivityFeed.jsx';
+import { useUserPreferences } from '../context/UserPreferencesContext.jsx';
+import { useDragAndDrop } from '../lib/useDragAndDrop.js';
+
+const DASHBOARD_WIDGETS = [
+  { key: 'continue', label: 'Continue where you left off', Component: ContinueWhereYouLeftOff },
+  { key: 'ai', label: 'AI suggestions', Component: AISuggestions },
+  { key: 'health', label: 'Project health', Component: ProjectHealth },
+  { key: 'pinned', label: 'Pinned', Component: FavoriteProjects },
+  { key: 'calendar', label: 'Calendar timeline', Component: CalendarTimeline },
+];
+const DEFAULT_WIDGET_ORDER = DASHBOARD_WIDGETS.map(w => w.key);
 
 const QUICK_ACTIONS = [
   { label: 'New Product', desc: 'Start from a sketch or upload', icon: 'ph-plus-circle', color: 'var(--c-design)', path: '/design' },
@@ -132,8 +143,31 @@ export default function Home() {
   const { orders: productionOrders } = useProduction();
   const { notifications } = useNotifications();
   const { focusSearch } = useAppUI();
+  const { preferences, updatePreferences } = useUserPreferences();
   const [draggingId, setDraggingId] = useState(null);
   const [overStage, setOverStage] = useState(null);
+  const [editingDashboard, setEditingDashboard] = useState(false);
+  const widgetDnd = useDragAndDrop();
+
+  const dashboardLayout = preferences.dashboard_layout || {};
+  const widgetOrder = (dashboardLayout.order || DEFAULT_WIDGET_ORDER).filter(k => DASHBOARD_WIDGETS.some(w => w.key === k));
+  // Any widget not yet in a saved order (e.g. a newly-added one) still shows, appended at the end.
+  const fullOrder = [...widgetOrder, ...DEFAULT_WIDGET_ORDER.filter(k => !widgetOrder.includes(k))];
+  const hiddenWidgets = dashboardLayout.hidden || [];
+  const visibleWidgets = fullOrder.filter(k => !hiddenWidgets.includes(k));
+
+  const toggleWidgetHidden = (key) => {
+    const next = hiddenWidgets.includes(key) ? hiddenWidgets.filter(k => k !== key) : [...hiddenWidgets, key];
+    updatePreferences({ dashboard_layout: { order: fullOrder, hidden: next } });
+  };
+
+  const reorderWidget = (draggedKey, targetKey) => {
+    if (draggedKey === targetKey) return;
+    const next = fullOrder.filter(k => k !== draggedKey);
+    const targetIdx = next.indexOf(targetKey);
+    next.splice(targetIdx, 0, draggedKey);
+    updatePreferences({ dashboard_layout: { order: next, hidden: hiddenWidgets } });
+  };
 
   const now = new Date();
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
@@ -284,15 +318,55 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="section-label enter enter-2">Your dashboard</div>
-        <div data-tour="dashboard-widgets" className="enter enter-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 18, alignItems: 'stretch' }}>
-          <ContinueWhereYouLeftOff />
-          <AISuggestions />
-          <ProjectHealth />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }} className="enter enter-2">
+          <div className="section-label" style={{ marginBottom: 0 }}>Your dashboard</div>
+          <span style={{ fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }} onClick={() => setEditingDashboard(s => !s)}>
+            <i className={`ph ${editingDashboard ? 'ph-check' : 'ph-sliders'}`} /> {editingDashboard ? 'Done' : 'Customize'}
+          </span>
         </div>
-        <div className="enter enter-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 18, marginBottom: 30, alignItems: 'stretch' }}>
-          <FavoriteProjects />
-          <CalendarTimeline />
+        {editingDashboard && (
+          <div className="card-raised enter" style={{ padding: 16, marginTop: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 10 }}>Drag a widget to reorder it, or toggle it off to hide it. Saved to your account, not just this browser.</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {fullOrder.map(key => {
+                const w = DASHBOARD_WIDGETS.find(d => d.key === key);
+                const hidden = hiddenWidgets.includes(key);
+                return (
+                  <div
+                    key={key}
+                    {...widgetDnd.draggableProps(key)}
+                    {...widgetDnd.dropZoneProps(key, draggedKey => reorderWidget(draggedKey, key))}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 'var(--r-sm)',
+                      border: `1.5px solid ${widgetDnd.overZone === key ? 'var(--accent)' : 'var(--border-2)'}`,
+                      opacity: widgetDnd.draggingId === key ? 0.5 : hidden ? 0.5 : 1, cursor: 'grab', background: 'var(--bg-1)',
+                    }}
+                  >
+                    <i className="ph ph-dots-six-vertical" style={{ color: 'var(--ink-4)' }} />
+                    <span style={{ fontSize: 12.5 }}>{w.label}</span>
+                    <button
+                      onClick={() => toggleWidgetHidden(key)}
+                      title={hidden ? 'Show' : 'Hide'}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: hidden ? 'var(--ink-4)' : 'var(--accent)', padding: 0, marginLeft: 4 }}
+                    >
+                      <i className={`ph ${hidden ? 'ph-eye-slash' : 'ph-eye'}`} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        <div data-tour="dashboard-widgets" className="enter enter-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 18, marginBottom: 30, alignItems: 'stretch' }}>
+          {visibleWidgets.map(key => {
+            const { Component } = DASHBOARD_WIDGETS.find(w => w.key === key);
+            return <Component key={key} />;
+          })}
+          {visibleWidgets.length === 0 && (
+            <div className="card-raised" style={{ padding: 20, fontSize: 12.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>
+              Every widget is hidden — click Customize to bring one back.
+            </div>
+          )}
         </div>
 
         <div className="enter enter-2" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 0.9fr', gap: 18, marginBottom: 30, alignItems: 'stretch' }}>
