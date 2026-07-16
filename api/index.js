@@ -761,6 +761,48 @@ app.get('/api/oauth/consume', (req, res) => {
   res.json({ ok: true, ...entry.payload });
 });
 
+app.post('/api/stripe/webhook', async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!endpointSecret) {
+    console.warn("⚠️ STRIPE_WEBHOOK_SECRET missing in .env");
+    return res.status(400).send('Webhook secret missing');
+  }
+
+  let event;
+  try {
+    // Stripe requires the raw, unparsed body buffer to cryptographically verify the signature
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret);
+  } catch (err) {
+    console.error('❌ Stripe Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle subscription cancellation
+  if (event.type === 'customer.subscription.deleted') {
+    const subscription = event.data.object;
+    const customerId = subscription.customer;
+
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('brands')
+          .update({ plan_tier: 'free' })
+          .eq('stripe_customer_id', customerId);
+          
+        if (error) throw error;
+        console.log(`✅ Automatically downgraded canceled Stripe customer ${customerId} to Free plan.`);
+      } catch (err) {
+        console.error("❌ Failed to downgrade brand in Supabase:", err.message);
+        return res.status(500).send('Database error');
+      }
+    }
+  }
+
+  res.status(200).json({ received: true });
+});
+
 // ---------------------------------------------------------
 // 4. SHOPIFY INTEGRATION
 // ---------------------------------------------------------
