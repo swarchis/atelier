@@ -19,13 +19,11 @@ export function ProductsProvider({ children }) {
   const [activeBrand, setActiveBrandState] = useState(null);
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [productAssets, setProductAssets] = useState({});
 
   const uploadedFiles = useRef(new Map());
 
-  // Load every brand this user owns or has been added to as a team member,
-  // then pick the active one — whichever was last used on this device, or
-  // the first available. Re-runs on login/logout only; switching brands
-  // afterward never re-hits this query.
+  // Load every brand this user owns or has been added to as a team member
   useEffect(() => {
     if (!user) {
       setBrands([]);
@@ -73,8 +71,7 @@ export function ProductsProvider({ children }) {
     loadBrands();
   }, [user]);
 
-  // Load everything scoped to whichever brand is active — reruns whenever
-  // the founder switches brands, not just on login.
+  // Load everything scoped to whichever brand is active
   useEffect(() => {
     if (!activeBrand) {
       setProducts([]);
@@ -99,15 +96,6 @@ export function ProductsProvider({ children }) {
         const catRes = await supabase.from('categories').select('*').eq('brand_id', activeBrand.id).order('name', { ascending: true });
         setCategories(catRes.error ? [] : (catRes.data || []));
 
-        // Archived products are excluded from the main list by default so
-        // they stop cluttering the Kanban/dashboard — Design.jsx's "Show
-        // archived" toggle loads them separately via loadArchivedProducts().
-        // Falls back to an unfiltered query if `status` doesn't exist yet
-        // (migration 014 not run) so the whole product list doesn't go
-        // blank over one missing column on an otherwise-working brand.
-        // Capped at 500 — a real safety limit (this query had none at all
-        // before), not full paginated "load more" UI, which would need
-        // matching changes on every page that renders this list.
         let prodData;
         const filtered = await supabase.from('products').select('*').eq('brand_id', activeBrand.id).neq('status', 'archived').order('created_at', { ascending: false }).limit(500);
         if (filtered.error) {
@@ -176,8 +164,6 @@ export function ProductsProvider({ children }) {
     setProducts(prev => prev.map(p => (p.id === id ? { ...p, stage } : p)));
     const { error } = await supabase.from('products').update({ stage }).eq('id', id);
     if (error) console.error('Failed to move product', error);
-    // Best-effort lifecycle log — a missing product_stage_history table
-    // (migration 014 not run yet) shouldn't block the actual stage move.
     supabase.from('product_stage_history').insert([{ product_id: id, stage }]).then(({ error: histErr }) => {
       if (histErr) console.error('Failed to log stage history', histErr);
     });
@@ -196,10 +182,6 @@ export function ProductsProvider({ children }) {
     return updateProduct(id, { is_favorite: !current.is_favorite });
   };
 
-  // designs.status ('Sketching'/'Refining'/'Ready') was previously only ever
-  // written once, at creation — nothing in the app ever moved a design
-  // forward, so it silently stuck at "Sketching" forever. Powers the new
-  // Design.jsx Kanban view.
   const updateDesignStatus = async (productId, status) => {
     const { error } = await supabase.from('designs').update({ status }).eq('product_id', productId);
     if (error) throw error;
@@ -212,13 +194,11 @@ export function ProductsProvider({ children }) {
     setDesigns(prev => (prev[productId] ? { ...prev, [productId]: { ...prev[productId], fabricTags } } : prev));
   };
 
-  // Deletes the product row outright — designs and tech_packs cascade via
-  // their FK (ON DELETE CASCADE), so this is the one call that removes a
-  // piece entirely, not just its tech pack or design data.
   const deleteProduct = async (id) => {
     // 1. Clean up Supabase Storage before deleting the DB row
     try {
       const pathsToDelete = [];
+      
       const { data: tp } = await supabase.from('tech_packs').select('image_url').eq('product_id', id).maybeSingle();
       if (tp?.image_url) pathsToDelete.push(tp.image_url.split('/').pop());
 
@@ -229,6 +209,9 @@ export function ProductsProvider({ children }) {
       (d?.variants || []).forEach(v => v.url && pathsToDelete.push(v.url.split('/').pop()));
       (d?.moodboard || []).forEach(m => m.url && pathsToDelete.push(m.url.split('/').pop()));
 
+      const { data: pa } = await supabase.from('product_assets').select('file_url').eq('product_id', id);
+      (pa || []).forEach(a => a.file_url && pathsToDelete.push(a.file_url.split('/').pop()));
+
       if (pathsToDelete.length > 0) {
         await supabase.storage.from('mockups').remove(pathsToDelete);
       }
@@ -236,7 +219,7 @@ export function ProductsProvider({ children }) {
       console.error('Failed to cleanup storage, but continuing with product deletion:', cleanupErr);
     }
 
-    // 2. Delete the DB row (cascades to related tables automatically)
+    // 2. Delete the DB row
     const { error } = await supabase.from('products').delete().eq('id', id);
     if (error) throw error;
     setProducts(prev => prev.filter(p => p.id !== id));
@@ -266,9 +249,6 @@ export function ProductsProvider({ children }) {
     setCategories(prev => prev.filter(c => c.id !== id));
   };
 
-  // Clones the product row and its design (if any) into a new product.
-  // Doesn't touch tech packs or variants — those are meant to be generated
-  // fresh for the new piece rather than inherited stale from the original.
   const duplicateProduct = async (id) => {
     const source = products.find(p => p.id === id) || archivedProducts.find(p => p.id === id);
     if (!source) throw new Error('Product not found');
@@ -309,10 +289,6 @@ export function ProductsProvider({ children }) {
     return newProduct.id;
   };
 
-  // Archiving removes a product from the default `products` list and moves
-  // it into `archivedProducts`; any other status change (back to active, or
-  // discontinued) does the reverse. Discontinued products stay in the main
-  // list on purpose — unlike archived, they're still relevant to Kanban/history.
   const setProductStatus = async (id, status) => {
     const { data, error } = await supabase.from('products').update({ status }).eq('id', id).select().single();
     if (error) throw error;
@@ -329,9 +305,6 @@ export function ProductsProvider({ children }) {
 
   const archiveProduct = (id) => setProductStatus(id, 'archived');
 
-  // Lazily loads this brand's archived products — only called when
-  // Design.jsx's "Show archived" toggle is switched on, so browsing the
-  // normal list never pays for it.
   const loadArchivedProducts = async () => {
     if (!activeBrand) return [];
     const { data, error } = await supabase
@@ -353,8 +326,6 @@ export function ProductsProvider({ children }) {
     const { error } = await supabase.from('collections').delete().eq('id', id);
     if (error) throw error;
     setCollections(prev => prev.filter(c => c.id !== id));
-    // Matches the DB's ON DELETE SET NULL on products.collection_id so local
-    // state doesn't keep pointing products at a collection that's gone.
     setProducts(prev => prev.map(p => (p.collection_id === id ? { ...p, collection_id: null } : p)));
   };
 
@@ -434,6 +405,7 @@ export function ProductsProvider({ children }) {
         layers: [{ name: baseType === 'upload' ? 'Uploaded mockup' : 'Silhouette base', visible: true }],
         analysis: null,
         aiPaths: aiPaths || null,
+        fabricTags: [],
       },
     }));
 
@@ -442,6 +414,43 @@ export function ProductsProvider({ children }) {
 
   const getUploadedFile = id => uploadedFiles.current.get(id) || null;
 
+  // --- PRODUCT MEDIA BIN / ASSETS ---
+  const loadProductAssets = async (productId) => {
+    const { data, error } = await supabase.from('product_assets').select('*').eq('product_id', productId).order('created_at', { ascending: false });
+    if (!error) setProductAssets(prev => ({ ...prev, [productId]: data || [] }));
+  };
+
+  const uploadProductAsset = async (productId, file) => {
+    if (!activeBrand) throw new Error("No active brand");
+    const ext = file.name.split('.').pop();
+    const fileName = `${productId}-asset-${Date.now()}.${ext}`;
+    
+    const { error: uploadError } = await supabase.storage.from('mockups').upload(fileName, file, { upsert: true });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from('mockups').getPublicUrl(fileName);
+
+    const { data, error } = await supabase.from('product_assets').insert([{
+      product_id: productId,
+      brand_id: activeBrand.id,
+      file_url: publicUrl,
+      file_name: file.name,
+      file_type: file.type
+    }]).select().single();
+
+    if (error) throw error;
+    setProductAssets(prev => ({ ...prev, [productId]: [data, ...(prev[productId] || [])] }));
+    return data;
+  };
+
+  const deleteProductAsset = async (asset) => {
+    const fileName = asset.file_url.split('/').pop();
+    await supabase.storage.from('mockups').remove([fileName]);
+    const { error } = await supabase.from('product_assets').delete().eq('id', asset.id);
+    if (error) throw error;
+    setProductAssets(prev => ({ ...prev, [asset.product_id]: prev[asset.product_id].filter(a => a.id !== asset.id) }));
+  };
+
   return (
     <ProductsContext.Provider value={{
       products, collections, moveProduct, updateProduct, deleteProduct, toggleFavorite, designs, createDesign, createCollection,
@@ -449,6 +458,7 @@ export function ProductsProvider({ children }) {
       categories, createCategory, deleteCategory,
       archivedProducts, loadArchivedProducts, duplicateProduct, setProductStatus, archiveProduct,
       updateDesignStatus, updateDesignFabricTags,
+      productAssets, loadProductAssets, uploadProductAsset, deleteProductAsset,
       loading: loading || loadingBrands,
     }}>
       {children}

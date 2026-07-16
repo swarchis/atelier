@@ -524,6 +524,9 @@ img { max-width: 100%; display: block; }
      position:fixed + top/bottom:0 gives it a height independent of this rule. */
   height: 100%;
 }
+.canvas-panel:fullscreen {
+  background-color: var(--bg) !important;
+}
 .canvas-panel-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 14px; background: var(--bg-2); border-bottom: 3px solid var(--cp-accent, var(--c-design));

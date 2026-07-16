@@ -5,6 +5,8 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { Resend } = require('resend');
 const sharp = require('sharp');
+const crypto = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
 
 // Load the API env first, then tolerate keys placed in the Vite app env.
 // Existing process env values win, so deploy/runtime secrets are left alone.
@@ -13,15 +15,33 @@ dotenv.config({ path: path.join(__dirname, '..', 'la-guia', '.env.local') });
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+// Captures the raw buffer body. Required to verify Shopify's SHA-256 HMAC signatures
+app.use(express.json({ 
+  limit: '50mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  : null;
 
 const MODEL_NAME = "gemini-flash-lite-latest";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`;
 
 function cleanAIJSON(text) {
   return text.replace(/```json/gi, '').replace(/```/g, '').trim();
+}
+
+function verifyShopifySignature(rawBody, hmacHeader) {
+  if (!rawBody || !hmacHeader) return false;
+  const hash = crypto
+    .createHmac('sha256', process.env.SHOPIFY_CLIENT_SECRET)
+    .update(rawBody)
+    .digest('base64');
+  return hash === hmacHeader;
 }
 
 async function callGemini(prompt, imageBase64 = null) {
@@ -701,7 +721,6 @@ app.post('/api/subscription-status', async (req, res) => {
 //      see the architecture note above). A short-lived, single-use code
 //      swap keeps that handoff out of the URL/history entirely.
 // ---------------------------------------------------------
-const crypto = require('crypto');
 const oauthHandoffStore = new Map(); // code -> { payload, expiresAt }
 const OAUTH_HANDOFF_TTL_MS = 2 * 60 * 1000;
 
@@ -740,6 +759,48 @@ app.get('/api/oauth/consume', (req, res) => {
     return res.status(410).json({ ok: false, error: 'This connection link has expired or was already used — try connecting again.' });
   }
   res.json({ ok: true, ...entry.payload });
+});
+
+app.post('/api/stripe/webhook', async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!endpointSecret) {
+    console.warn("⚠️ STRIPE_WEBHOOK_SECRET missing in .env");
+    return res.status(400).send('Webhook secret missing');
+  }
+
+  let event;
+  try {
+    // Stripe requires the raw, unparsed body buffer to cryptographically verify the signature
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret);
+  } catch (err) {
+    console.error('❌ Stripe Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle subscription cancellation
+  if (event.type === 'customer.subscription.deleted') {
+    const subscription = event.data.object;
+    const customerId = subscription.customer;
+
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('brands')
+          .update({ plan_tier: 'free' })
+          .eq('stripe_customer_id', customerId);
+          
+        if (error) throw error;
+        console.log(`✅ Automatically downgraded canceled Stripe customer ${customerId} to Free plan.`);
+      } catch (err) {
+        console.error("❌ Failed to downgrade brand in Supabase:", err.message);
+        return res.status(500).send('Database error');
+      }
+    }
+  }
+
+  res.status(200).json({ received: true });
 });
 
 // ---------------------------------------------------------
@@ -803,6 +864,55 @@ app.post('/api/shopify/fetch-orders', async (req, res) => {
     res.json({ ok: true, orders: data.orders });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Mandatory Shopify App Uninstalled Webhook
+app.post('/api/shopify/webhooks/app_uninstalled', async (req, res) => {
+  const hmacHeader = req.headers['x-shopify-hmac-sha256'];
+  const shopDomain = req.headers['x-shopify-shop-domain'];
+
+  console.log(`📥 Received Shopify Uninstall Webhook for ${shopDomain}`);
+
+  // 1. Verify the signature is genuinely from Shopify
+  if (!verifyShopifySignature(req.rawBody, hmacHeader)) {
+    console.warn("⚠️ Unauthorized Shopify Webhook Attempt");
+    return res.status(401).send('Unauthorized');
+  }
+
+  if (!supabase) {
+    console.error("❌ Supabase client not initialized on backend.");
+    return res.status(500).send('Database connection error');
+  }
+
+  try {
+    // 2. Locate the existing connection
+    const { data: conn, error: findError } = await supabase
+      .from('store_connections')
+      .select('id')
+      .eq('shop_domain', shopDomain)
+      .eq('platform', 'shopify')
+      .maybeSingle();
+
+    if (findError) throw findError;
+
+    if (conn) {
+      // 3. Delete the connection (Cascades automatically to sales_data)
+      const { error: deleteError } = await supabase
+        .from('store_connections')
+        .delete()
+        .eq('id', conn.id);
+
+      if (deleteError) throw deleteError;
+      console.log(`✅ Successfully disconnected Shopify store: ${shopDomain}`);
+    } else {
+      console.log(`ℹ️ No connection found for store: ${shopDomain}`);
+    }
+
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error("❌ Failed to process uninstall webhook:", err.message);
+    res.status(500).send('Internal Server Error');
   }
 });
 
