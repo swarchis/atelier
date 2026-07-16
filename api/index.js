@@ -5,6 +5,8 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { Resend } = require('resend');
 const sharp = require('sharp');
+const crypto = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
 
 // Load the API env first, then tolerate keys placed in the Vite app env.
 // Existing process env values win, so deploy/runtime secrets are left alone.
@@ -13,15 +15,33 @@ dotenv.config({ path: path.join(__dirname, '..', 'la-guia', '.env.local') });
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+// Captures the raw buffer body. Required to verify Shopify's SHA-256 HMAC signatures
+app.use(express.json({ 
+  limit: '50mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  : null;
 
 const MODEL_NAME = "gemini-flash-lite-latest";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`;
 
 function cleanAIJSON(text) {
   return text.replace(/```json/gi, '').replace(/```/g, '').trim();
+}
+
+function verifyShopifySignature(rawBody, hmacHeader) {
+  if (!rawBody || !hmacHeader) return false;
+  const hash = crypto
+    .createHmac('sha256', process.env.SHOPIFY_CLIENT_SECRET)
+    .update(rawBody)
+    .digest('base64');
+  return hash === hmacHeader;
 }
 
 async function callGemini(prompt, imageBase64 = null) {
@@ -803,6 +823,55 @@ app.post('/api/shopify/fetch-orders', async (req, res) => {
     res.json({ ok: true, orders: data.orders });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Mandatory Shopify App Uninstalled Webhook
+app.post('/api/shopify/webhooks/app_uninstalled', async (req, res) => {
+  const hmacHeader = req.headers['x-shopify-hmac-sha256'];
+  const shopDomain = req.headers['x-shopify-shop-domain'];
+
+  console.log(`📥 Received Shopify Uninstall Webhook for ${shopDomain}`);
+
+  // 1. Verify the signature is genuinely from Shopify
+  if (!verifyShopifySignature(req.rawBody, hmacHeader)) {
+    console.warn("⚠️ Unauthorized Shopify Webhook Attempt");
+    return res.status(401).send('Unauthorized');
+  }
+
+  if (!supabase) {
+    console.error("❌ Supabase client not initialized on backend.");
+    return res.status(500).send('Database connection error');
+  }
+
+  try {
+    // 2. Locate the existing connection
+    const { data: conn, error: findError } = await supabase
+      .from('store_connections')
+      .select('id')
+      .eq('shop_domain', shopDomain)
+      .eq('platform', 'shopify')
+      .maybeSingle();
+
+    if (findError) throw findError;
+
+    if (conn) {
+      // 3. Delete the connection (Cascades automatically to sales_data)
+      const { error: deleteError } = await supabase
+        .from('store_connections')
+        .delete()
+        .eq('id', conn.id);
+
+      if (deleteError) throw deleteError;
+      console.log(`✅ Successfully disconnected Shopify store: ${shopDomain}`);
+    } else {
+      console.log(`ℹ️ No connection found for store: ${shopDomain}`);
+    }
+
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error("❌ Failed to process uninstall webhook:", err.message);
+    res.status(500).send('Internal Server Error');
   }
 });
 
