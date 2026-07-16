@@ -70,6 +70,7 @@ export default function DesignDetail() {
   const [variants, setVariants] = useState([]);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const photopeaRef = useRef(null);
+  const canvasPanelRef = useRef(null);
 
   const product = products.find(p => p.id === id);
   const design = designs[id];
@@ -123,14 +124,15 @@ export default function DesignDetail() {
     return renderToStaticMarkup(<GarmentSilhouette type={design.silhouette || 'tee'} size={900} strokeWidth={4} color="#1a1a1a" />);
   }, [design]);
 
+  // Native Fullscreen Listener: Synchronizes the UI state instantly
+  // even if the user exits fullscreen using the physical Escape key.
   useEffect(() => {
-    if (!expanded) return;
-    const onKey = e => { if (e.key === 'Escape') setExpanded(false); };
-    window.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow; };
-  }, [expanded]);
+    const handleFullscreenChange = () => {
+      setExpanded(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   if (!product || !design) {
     return (
@@ -265,7 +267,17 @@ export default function DesignDetail() {
       setRestoreFile(new File([blob], 'canvas.png', { type: 'image/png' }));
     } catch {}
     setToggling(false);
-    setExpanded(e => !e);
+
+    // Call the browser's native OS-level Fullscreen API
+    if (!document.fullscreenElement) {
+      canvasPanelRef.current?.requestFullscreen().catch(err => {
+        console.error("Error enabling fullscreen:", err);
+      });
+    } else {
+      document.exitFullscreen().catch(err => {
+        console.error("Error exiting fullscreen:", err);
+      });
+    }
   };
 
   const handleDuplicate = async () => {
@@ -429,7 +441,7 @@ export default function DesignDetail() {
 
         <div className="canvas-row" style={{ maxWidth: showSplitStudio ? 'none' : 1080, display: 'flex', gap: showSplitStudio ? 0 : 16, alignItems: 'flex-start', marginBottom: 16 }}>
           <div style={{ flex: showSplitStudio ? '0 0 auto' : 1, width: showSplitStudio ? splitWidth : undefined, minWidth: 0, height: expanded ? 0 : 600 }}>
-            <div className={`canvas-panel ${expanded ? 'expanded' : ''}`} style={{ '--cp-accent': 'var(--c-design)' }}>
+            <div ref={canvasPanelRef} className={`canvas-panel ${expanded ? 'expanded' : ''}`} style={{ '--cp-accent': 'var(--c-design)' }}>
               <div className="canvas-panel-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                   <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-2)' }}>Canvas</span>
