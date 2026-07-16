@@ -18,6 +18,7 @@ import SkuVariantsTab from '../components/design-studio/SkuVariantsTab.jsx';
 import { blobToBase64 } from '../lib/designImages.js';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import Splitter from '../components/Splitter.jsx';
+import AssetsTab from '../components/design-studio/AssetsTab.jsx';
 
 const SEVERITY_ICON = { amber: 'ph-warning', blue: 'ph-info', green: 'ph-check-circle', red: 'ph-x-circle' };
 const DESIGN_STATUSES = ['Sketching', 'Refining', 'Ready'];
@@ -39,6 +40,7 @@ const TABS = [
   { key: 'image-variants', label: 'Image Variants', icon: 'ph-shuffle' },
   { key: 'skus', label: 'SKUs & Variants', icon: 'ph-barcode' },
   { key: 'history', label: 'History & Comments', icon: 'ph-clock-counter-clockwise' },
+  { key: 'assets', label: 'Assets & Media', icon: 'ph-folder-open' },
 ];
 
 export default function DesignDetail() {
@@ -616,6 +618,10 @@ export default function DesignDetail() {
           />
         )}
 
+        {tab === 'assets' && (
+          <AssetsTab productId={id} />
+        )}
+        
         {tab === 'history' && (
           <HistoryTab key={historyRefreshKey} productId={id} onApplyToCanvas={applyResultToCanvas} />
         )}

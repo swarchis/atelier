@@ -19,6 +19,7 @@ export function ProductsProvider({ children }) {
   const [activeBrand, setActiveBrandState] = useState(null);
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [productAssets, setProductAssets] = useState({});
 
   const uploadedFiles = useRef(new Map());
 
@@ -442,6 +443,44 @@ export function ProductsProvider({ children }) {
 
   const getUploadedFile = id => uploadedFiles.current.get(id) || null;
 
+// --- PRODUCT MEDIA BIN / ASSETS ---
+  const loadProductAssets = async (productId) => {
+    const { data, error } = await supabase.from('product_assets').select('*').eq('product_id', productId).order('created_at', { ascending: false });
+    if (!error) setProductAssets(prev => ({ ...prev, [productId]: data || [] }));
+  };
+
+  const uploadProductAsset = async (productId, file) => {
+    if (!activeBrand) throw new Error("No active brand");
+    const ext = file.name.split('.').pop();
+    const fileName = `${productId}-asset-${Date.now()}.${ext}`;
+    
+    // Using the existing mockups bucket for generic asset storage
+    const { error: uploadError } = await supabase.storage.from('mockups').upload(fileName, file, { upsert: true });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from('mockups').getPublicUrl(fileName);
+
+    const { data, error } = await supabase.from('product_assets').insert([{
+      product_id: productId,
+      brand_id: activeBrand.id,
+      file_url: publicUrl,
+      file_name: file.name,
+      file_type: file.type
+    }]).select().single();
+
+    if (error) throw error;
+    setProductAssets(prev => ({ ...prev, [productId]: [data, ...(prev[productId] || [])] }));
+    return data;
+  };
+
+  const deleteProductAsset = async (asset) => {
+    const fileName = asset.file_url.split('/').pop();
+    await supabase.storage.from('mockups').remove([fileName]);
+    const { error } = await supabase.from('product_assets').delete().eq('id', asset.id);
+    if (error) throw error;
+    setProductAssets(prev => ({ ...prev, [asset.product_id]: prev[asset.product_id].filter(a => a.id !== asset.id) }));
+  };
+
   return (
     <ProductsContext.Provider value={{
       products, collections, moveProduct, updateProduct, deleteProduct, toggleFavorite, designs, createDesign, createCollection,
@@ -449,6 +488,7 @@ export function ProductsProvider({ children }) {
       categories, createCategory, deleteCategory,
       archivedProducts, loadArchivedProducts, duplicateProduct, setProductStatus, archiveProduct,
       updateDesignStatus, updateDesignFabricTags,
+      productAssets, loadProductAssets, uploadProductAsset, deleteProductAsset,
       loading: loading || loadingBrands,
     }}>
       {children}
