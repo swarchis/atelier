@@ -284,7 +284,12 @@ function Hero3D({ navigate }) {
       <motion.div className="ds-headline-3d" style={reduce ? {} : { x: headX, y: headY }}>
         <div className="ds-eyebrow"><Grainline h={16} color={C.blue} stroke={2.4} /><span>Rev 2.2 · For independent labels</span></div>
         <h1 className="ds-h1">
-          From flat<br />sketch to<br /><span className="ds-h1-holo">finished run.</span>
+          From flat<br />sketch to<br />
+          <span className="ds-h1-print">
+            <span className="ds-h1-ghost ds-h1-ghost-a" aria-hidden>finished run.</span>
+            <span className="ds-h1-ghost ds-h1-ghost-b" aria-hidden>finished run.</span>
+            <span className="ds-h1-holo">finished run.</span>
+          </span>
         </h1>
         <p className="ds-lede">
           Atelier is the production workspace for independent clothing brands — design, tech-pack, source, sample, and manufacture a product in one place, instead of a stack of spreadsheets, DMs, and freelance tech-pack files.
@@ -604,9 +609,12 @@ const CSS = `
 .ds-btn-solid:hover { background: ${C.blue}; border-color: ${C.blue}; color: ${C.ink}; }
 /* "Expensive SaaS button": a solid dark face over a rotating conic-gradient
    ring, instead of a flat gradient fill — the light chases the edge, the
-   face itself never changes color. */
-.ds-btn-holo { background: ${C.ink2}; color: ${C.paper}; border-color: transparent; }
-.ds-btn-holo::before { content: ''; position: absolute; inset: -60%; z-index: -1;
+   face itself never changes color. overflow:hidden on the button itself is
+   the part that makes this a thin 1.5px ring instead of a giant visible
+   rotating block — without it the oversized ::before (needed so its
+   corners never reveal a gap mid-rotation) just sits there uncropped. */
+.ds-btn-holo { position: relative; overflow: hidden; background: ${C.ink2}; color: ${C.paper}; border-color: transparent; }
+.ds-btn-holo::before { content: ''; position: absolute; inset: -30%; z-index: -1;
   background: conic-gradient(${C.blue}, ${C.violet}, ${C.coral}, ${C.gold}, ${C.blue});
   animation: ds-spin 5s linear infinite; }
 .ds-btn-holo::after { content: ''; position: absolute; inset: 1.5px; z-index: -1; border-radius: 3px; background: ${C.ink2}; transition: background .18s ease; }
@@ -654,10 +662,15 @@ const CSS = `
 .ds-eyebrow { display: inline-flex; align-items: center; gap: 10px; font-family: ${MONO}; font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase; color: ${C.blue}; margin-bottom: 18px; }
 .ds-h1 { font-family: ${DISPLAY}; font-weight: 900; font-size: clamp(34px, 4.8vw, 64px); line-height: 0.96;
   letter-spacing: -0.025em; text-transform: uppercase; margin: 0; color: ${C.paper}; text-shadow: 0 4px 40px rgba(0,0,0,0.5); }
-/* A real backlit glow, not a gradient fill — layered colored text-shadows
-   read as light behind the letters instead of a flat rainbow printed on them. */
-.ds-h1-holo { color: ${C.paper};
-  text-shadow: 0 0 26px rgba(107,168,222,0.55), 0 0 52px rgba(169,140,245,0.4), 0 0 84px rgba(255,138,107,0.28); }
+/* Misregistered print plates, not a glow or a gradient fill — two colored
+   ghost copies of the same word sit a couple px off from the real one,
+   like a spec sheet run through a printer with its color plates slightly
+   out of alignment. A real production artifact, not a decorative effect. */
+.ds-h1-print { position: relative; display: inline-block; }
+.ds-h1-ghost { position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; }
+.ds-h1-ghost-a { color: ${C.blue}; opacity: 0.75; transform: translate(-3px, 2px); }
+.ds-h1-ghost-b { color: ${C.coral}; opacity: 0.7; transform: translate(3px, -1.5px); }
+.ds-h1-holo { position: relative; color: ${C.paper}; white-space: nowrap; }
 .ds-lede { font-size: 14.5px; line-height: 1.58; color: ${C.paperDim}; max-width: 420px; margin: 16px 0 0; }
 .ds-cta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
 .ds-note { font-family: ${MONO}; font-size: 12px; color: ${C.paperFaint}; display: flex; align-items: center; gap: 9px; margin-top: 14px; }
