@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "grainline-backend",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["index.js"],
+      "cwd": "api",
+      "port": 3001
+    },
+    {
+      "name": "grainline-frontend-full",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "la-guia",
+      "port": 5173
+    }
+  ]
+}
