@@ -5,40 +5,31 @@ import { STAGES } from '../../data/mockData.js';
 import { PLANS } from '../../data/plans.js';
 
 /* ───────────────────────────────────────────────────────────────────────────
-   "The Cutting Table" — a real 3D scene built from actual CSS perspective and
-   transforms (no WebGL, no new dependency), not a flat page with animations
-   sprinkled on top.
+   "The Cutting Table" — Rev 3.
 
-   The subject is still a production tool, but its native artifact — the flat
-   pattern — is reimagined as what it actually is right before a garment gets
-   sewn: pieces lifted off the table and fanned out in space, each its own
-   card with a grainline and cutting notches, tilting toward the cursor like
-   you're leaning over the table yourself. A floating instrument reads the
-   grain angle live off your pointer position — the brand's own namesake
-   mark turned into the one genuinely interactive HUD element, not a
-   decorative rainbow dial. Everything else on the page stays disciplined:
-   the same technical drafting vocabulary (title blocks, dimension ticks,
-   mono captions) as before, just lit for depth instead of flattened on
-   cream paper.
+   Same thesis as Rev 2 (the flat pattern, lifted off the table into space,
+   drawn with the drafting vocabulary of a real spec sheet), executed at
+   studio-site scale:
 
-   Revision note: v1 used a flat linear-gradient fill on the hero text and
-   every CTA — the single most common "AI made this" tell, because it's the
-   cheapest way to look colorful and reads as exactly that: cheap. v2 keeps
-   the same thread-holographic palette (blue → violet → coral → gold) but
-   never fills a shape with it flat. Text gets a real backlit glow
-   (layered text-shadow, no gradient clip); buttons get a rotating
-   conic-gradient ring behind a solid dark face (the "expensive SaaS
-   button" trick — light chases the edge, the face stays solid); the page
-   gets a genuine atmosphere layer (drifting blurred aurora blobs + SVG
-   grain texture, both full-bleed and fixed, not just a hero-local glow);
-   and pattern pieces get real per-surface lighting (a specular highlight,
-   a gradient rim-light border, a colored ambient shadow, depth-cued blur
-   on the pieces further from camera) instead of a flat glass panel.
-   Directionality: a single diagonal grainline thread — the brand's own
-   mark — runs the full height of the page as an SVG that draws itself in
-   as you scroll, plus alternating left/right card entrances and skewed
-   section edges, so the page reads as one continuous diagonal cut rather
-   than a stack of centered rectangles.
+   · The hero headline is now the full-bleed object of the scene — display
+     type at ~8vw with a line-by-line reveal, and the "finished run." print
+     plates physically slide INTO registration on load, like a press
+     aligning its color plates. Pattern pieces float among/behind the type
+     and scatter apart as you scroll away from the table.
+   · A cursor-following key light illuminates whatever part of the page the
+     pointer is over (screen-blended radial, whole page, not hero-local).
+   · The feature grid became a scrollytelling ledger: a sticky rail with a
+     giant outlined counter + the active feature's title tracks a list of
+     rows as they cross the center of the viewport.
+   · A tilted kinetic marquee band (outlined display type, infinite track)
+     carries the six stage names across the page between sections.
+   · The assembly-sequence rule physically fills stage by stage as it
+     scrolls through the viewport.
+   · Cards get a specular sheen sweep on hover — a moving light reflection,
+     not a gradient fill (still zero flat-gradient fills and zero text-glow
+     anywhere, per earlier revisions).
+   · The page closes on a giant outlined ATELIER wordmark with the small
+     "labs" subscript — the new lockup, also used in the header.
 ─────────────────────────────────────────────────────────────────────────── */
 
 const C = {
@@ -71,16 +62,29 @@ const FEATURES = [
   { n: '08', title: 'Team & AI Assistant', text: 'Group chats with your team plus a personal assistant grounded in your own brand data — one button, on every page.' },
 ];
 
-/* The grainline symbol — the mark a pattern-maker draws on every cut piece
-   to align it with the fabric's grain. The brand's namesake, so it earns
-   its place as the recurring device (and, in the hero, becomes a literal
-   working instrument rather than a logo). */
+const MARQUEE_ITEMS = ['Design', 'Tech-Pack', 'Source', 'Sample', 'Produce', 'Sell'];
+
+/* The grainline symbol — the pattern-maker's alignment mark, the brand's
+   namesake, and the page's one recurring device. */
 function Grainline({ h = 34, color = C.blue, stroke = 2 }) {
   const w = h * 0.36;
   return (
     <svg width={w} height={h} viewBox="0 0 18 50" fill="none" style={{ display: 'block' }} aria-hidden>
       <path d="M9 6 V44 M3 12 L9 4 L15 12 M3 38 L9 46 L15 38" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+/* The new lockup: Atelier over a tiny "labs". */
+function BrandMark({ size = 18 }) {
+  return (
+    <span className="ds-brand">
+      <Grainline h={size + 4} color={C.blue} stroke={2.6} />
+      <span className="ds-brand-stack">
+        <span className="ds-brand-name" style={{ fontSize: size }}>Atelier</span>
+        <span className="ds-brand-labs">labs</span>
+      </span>
+    </span>
   );
 }
 
@@ -100,15 +104,10 @@ function CornerMarks({ color = C.lineBright }) {
   );
 }
 
-/* ── Pattern pieces — simplified, stylized technical flats, one per garment
-   piece, each carrying its own grainline arrow and cutting notches ──────── */
-function PieceChrome({ label, children, accent }) {
-  return (
-    <>
-      {children}
-      <text x="50%" y="98%" textAnchor="middle" fontFamily={MONO} fontSize="8.5" letterSpacing="0.06em" fill={C.paperDim}>{label}</text>
-    </>
-  );
+/* ── Pattern pieces — stylized technical flats, each with its own grainline
+   arrow and cutting notches ─────────────────────────────────────────────── */
+function PieceChrome({ label }) {
+  return <text x="50%" y="98%" textAnchor="middle" fontFamily={MONO} fontSize="8.5" letterSpacing="0.06em" fill={C.paperDim}>{label}</text>;
 }
 
 function FrontPiece() {
@@ -156,40 +155,50 @@ function CollarPiece() {
   );
 }
 
+/* scatter = [x, y, extra rotZ] applied as you scroll away from the table */
 const PIECES = [
-  { key: 'front', Comp: FrontPiece, top: '4%', left: '46%', z: 60, baseRotY: -12, baseRotZ: -4, w: 168, depth: 1.4, accent: C.blue, floatDur: 7.5, floatDelay: 0 },
-  { key: 'back', Comp: BackPiece, top: '0%', left: '73%', z: 10, baseRotY: 9, baseRotZ: 3, w: 138, depth: 0.7, accent: C.violet, floatDur: 8.5, floatDelay: 1.2 },
-  { key: 'sleeve', Comp: SleevePiece, top: '42%', left: '64%', z: 100, baseRotY: -16, baseRotZ: 6, w: 118, depth: 1.9, accent: C.coral, floatDur: 6.5, floatDelay: 0.6 },
-  { key: 'collar', Comp: CollarPiece, top: '58%', left: '48%', z: 140, baseRotY: 13, baseRotZ: -7, w: 146, depth: 2.4, accent: C.gold, floatDur: 9, floatDelay: 2 },
+  { key: 'front', Comp: FrontPiece, top: '7%', left: '55%', z: 60, baseRotY: -14, baseRotZ: -5, w: 185, depth: 1.3, accent: C.blue, floatDur: 7.5, floatDelay: 0, scatter: [140, -170, -12] },
+  { key: 'back', Comp: BackPiece, top: '3%', left: '79%', z: 10, baseRotY: 10, baseRotZ: 4, w: 148, depth: 0.7, accent: C.violet, floatDur: 8.5, floatDelay: 1.2, scatter: [220, -90, 10] },
+  { key: 'sleeve', Comp: SleevePiece, top: '50%', left: '73%', z: 110, baseRotY: -18, baseRotZ: 7, w: 126, depth: 1.9, accent: C.coral, floatDur: 6.5, floatDelay: 0.6, scatter: [170, 150, 16] },
+  { key: 'collar', Comp: CollarPiece, top: '66%', left: '52%', z: 150, baseRotY: 14, baseRotZ: -8, w: 150, depth: 2.4, accent: C.gold, floatDur: 9, floatDelay: 2, scatter: [-150, 190, -18] },
 ];
 const MAX_Z = Math.max(...PIECES.map(p => p.z));
 
-function PatternCard({ piece, px, py, reduce }) {
-  const { Comp, top, left, z, baseRotY, baseRotZ, w, depth, accent, floatDur, floatDelay } = piece;
-  const x = useTransform(px, v => v * depth * 14);
-  const y = useTransform(py, v => v * depth * 10);
-  // Pieces further from camera (lower z) read as further back — a soft
-  // depth-of-field blur sells that better than stacking order alone.
+function PatternCard({ piece, px, py, scrollP, reduce, index }) {
+  const { Comp, top, left, z, baseRotY, baseRotZ, w, depth, accent, floatDur, floatDelay, scatter } = piece;
+  const pxDepth = useTransform(px, v => v * depth * 14);
+  const pyDepth = useTransform(py, v => v * depth * 10);
+  const sx = useTransform(scrollP, [0, 1], [0, scatter[0]]);
+  const sy = useTransform(scrollP, [0, 1], [0, scatter[1]]);
+  const x = useTransform([pxDepth, sx], ([a, b]) => a + b);
+  const y = useTransform([pyDepth, sy], ([a, b]) => a + b);
+  const rotateZ = useTransform(scrollP, [0, 1], [baseRotZ, baseRotZ + scatter[2]]);
   const depthBlur = Math.max(0, (MAX_Z - z) / 34);
   return (
     <motion.div
       className="ds-piece"
       style={{
-        position: 'absolute', top, left, width: w, x, y,
-        transform: `translateZ(${z}px) rotateY(${baseRotY}deg) rotateZ(${baseRotZ}deg)`,
+        position: 'absolute', top, left, width: w,
+        x, y, z, rotateY: baseRotY, rotateZ,
         transformStyle: 'preserve-3d',
-        animation: reduce ? 'none' : `ds-piece-float ${floatDur}s ease-in-out ${floatDelay}s infinite`,
       }}
     >
-      <div className="ds-piece-card" style={{ '--glow': accent, filter: depthBlur ? `blur(${depthBlur.toFixed(2)}px)` : 'none' }}>
-        <Comp />
-      </div>
+      <motion.div
+        initial={reduce ? false : { opacity: 0, y: 70, scale: 0.88 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.9, ease: [0.16, 0.9, 0.3, 1], delay: 0.65 + index * 0.14 }}
+        style={{ animation: reduce ? 'none' : `ds-piece-float ${floatDur}s ease-in-out ${floatDelay}s infinite` }}
+      >
+        <div className="ds-piece-card" style={{ '--glow': accent, filter: depthBlur ? `blur(${depthBlur.toFixed(2)}px)` : 'none' }}>
+          <Comp />
+        </div>
+      </motion.div>
     </motion.div>
   );
 }
 
-/* ── Grain compass — the one true HUD instrument. Reads a live grain angle
-   straight off pointer position; nothing about the number is invented. ──── */
+/* ── Grain compass — a live instrument, reads angle straight off the
+   pointer. Nothing about the number is invented. ────────────────────────── */
 function GrainCompass({ angle, active }) {
   const rad = (angle * Math.PI) / 180;
   const nx = 42 + Math.sin(rad) * 30;
@@ -201,7 +210,7 @@ function GrainCompass({ angle, active }) {
         <span className="ds-compass-dot" style={{ background: active ? C.blue : C.paperFaint }} />
         MAIN GRAINLINE
       </div>
-      <svg viewBox="0 0 84 84" width="120" height="120" aria-hidden>
+      <svg viewBox="0 0 84 84" width="112" height="112" aria-hidden>
         <circle cx="42" cy="42" r="40" fill="rgba(244,242,236,0.03)" stroke={C.line} strokeWidth="1" />
         <circle cx="42" cy="42" r="30" fill="none" stroke={C.line} strokeWidth="1" />
         {ticks.map(t => {
@@ -222,7 +231,7 @@ function GrainCompass({ angle, active }) {
   );
 }
 
-/* ── The 3D hero scene ─────────────────────────────────────────────────── */
+/* ── The hero: full-bleed display type over the 3D table ────────────────── */
 function Hero3D({ navigate }) {
   const reduce = useReducedMotion();
   const heroRef = useRef(null);
@@ -231,23 +240,20 @@ function Hero3D({ navigate }) {
   const zero = useMotionValue(0);
   const springX = useSpring(px, { stiffness: 60, damping: 16, mass: 0.6 });
   const springY = useSpring(py, { stiffness: 60, damping: 16, mass: 0.6 });
-  const pointerRotateY = useTransform(springX, v => v * 9);
-  const pointerRotateX = useTransform(springY, v => v * -7);
-  const headX = useTransform(springX, v => v * -6);
-  const headY = useTransform(springY, v => v * -4);
+  const pointerRotateY = useTransform(springX, v => v * 8);
+  const pointerRotateX = useTransform(springY, v => v * -6);
   const [angle, setAngle] = useState(24);
   const [active, setActive] = useState(false);
   const raf = useRef(null);
 
-  // Scroll doesn't just fade the hero out — it keeps driving the same 3D
-  // scene, pitching the "camera" further back and scattering the pieces,
-  // like stepping away from the table instead of a flat page cut.
+  // Scroll keeps driving the same scene: the camera pitches back, the
+  // pieces scatter off the table, the whole stage recedes.
   const { scrollYProgress } = useScroll({ target: heroRef, offset: ['start start', 'end start'] });
-  const scrollRotateX = useTransform(scrollYProgress, [0, 1], [0, 16]);
-  const rotateY = pointerRotateY;
+  const scrollRotateX = useTransform(scrollYProgress, [0, 1], [0, 18]);
   const rotateX = useTransform([pointerRotateX, scrollRotateX], ([a, b]) => a + b);
-  const sceneOpacity = useTransform(scrollYProgress, [0, 0.75, 1], [1, 1, 0]);
-  const sceneScale = useTransform(scrollYProgress, [0, 1], [1, 0.85]);
+  const sceneOpacity = useTransform(scrollYProgress, [0, 0.7, 1], [1, 0.9, 0]);
+  const sceneScale = useTransform(scrollYProgress, [0, 1], [1, 0.88]);
+  const headY = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : -60]);
 
   const handleMove = (e) => {
     if (reduce) return;
@@ -266,81 +272,211 @@ function Hero3D({ navigate }) {
       setActive(true);
     });
   };
-  const handleLeave = () => {
-    px.set(0); py.set(0); setActive(false);
-  };
-
+  const handleLeave = () => { px.set(0); py.set(0); setActive(false); };
   useEffect(() => () => raf.current && cancelAnimationFrame(raf.current), []);
+
+  // Two dust layers moving opposite directions against the pointer — the
+  // cheapest honest depth cue there is: near specks travel further than far
+  // ones, and in the opposite sense to the background.
+  const dustNearX = useTransform(springX, v => v * 22);
+  const dustNearY = useTransform(springY, v => v * 15);
+  const dustFarX = useTransform(springX, v => v * -9);
+  const dustFarY = useTransform(springY, v => v * -6);
+
+  const fadeUp = (d) => reduce ? {} : {
+    initial: { opacity: 0, y: 26 },
+    animate: { opacity: 1, y: 0 },
+    transition: { duration: 0.7, ease: [0.16, 0.9, 0.3, 1], delay: d },
+  };
+  const lineAnim = (d) => reduce ? {} : {
+    initial: { y: '108%' },
+    animate: { y: '0%' },
+    transition: { duration: 0.85, ease: [0.16, 0.9, 0.3, 1], delay: d },
+  };
 
   return (
     <div className="ds-hero3d" ref={heroRef} onMouseMove={handleMove} onMouseLeave={handleLeave}>
       <div className="ds-floor" aria-hidden />
       <div className="ds-glow" aria-hidden />
-      <div className="ds-stage">
-        <motion.div className="ds-scene" style={reduce ? {} : { rotateX, rotateY, opacity: sceneOpacity, scale: sceneScale }}>
-          {PIECES.map(p => <PatternCard key={p.key} piece={p} px={reduce ? zero : springX} py={reduce ? zero : springY} reduce={reduce} />)}
+      <div className="ds-beams" aria-hidden />
+      <LiquidField className="ds-liquid-hero" />
+      <motion.div className="ds-dust ds-dust-far" style={reduce ? {} : { x: dustFarX, y: dustFarY }} aria-hidden />
+      <motion.div className="ds-dust ds-dust-near" style={reduce ? {} : { x: dustNearX, y: dustNearY }} aria-hidden />
+      <div className="ds-stage" aria-hidden>
+        <motion.div className="ds-scene" style={reduce ? {} : { rotateX, rotateY: pointerRotateY, opacity: sceneOpacity, scale: sceneScale }}>
+          {PIECES.map((p, i) => (
+            <PatternCard key={p.key} piece={p} index={i}
+              px={reduce ? zero : springX} py={reduce ? zero : springY}
+              scrollP={reduce ? zero : scrollYProgress} reduce={reduce} />
+          ))}
         </motion.div>
       </div>
-      <motion.div className="ds-headline-3d" style={reduce ? {} : { x: headX, y: headY }}>
-        <div className="ds-eyebrow"><Grainline h={16} color={C.blue} stroke={2.4} /><span>Rev 2.2 · For independent labels</span></div>
+
+      <motion.div className="ds-hero-in" style={{ y: headY }}>
+        <motion.div className="ds-eyebrow" {...fadeUp(0.05)}>
+          <Grainline h={16} color={C.blue} stroke={2.4} /><span>Rev 3.0 · For independent labels</span>
+        </motion.div>
         <h1 className="ds-h1">
-          From flat<br />sketch to<br />
-          <span className="ds-h1-print">
-            <span className="ds-h1-ghost ds-h1-ghost-a" aria-hidden>finished run.</span>
-            <span className="ds-h1-ghost ds-h1-ghost-b" aria-hidden>finished run.</span>
-            <span className="ds-h1-holo">finished run.</span>
-          </span>
+          <span className="ds-line"><motion.span className="ds-line-in" {...lineAnim(0.16)}>From flat sketch</motion.span></span>
+          <span className="ds-line"><motion.span className="ds-line-in" {...lineAnim(0.3)}>
+            to&nbsp;
+            <span className="ds-h1-print">
+              <span className="ds-h1-ghost ds-h1-ghost-a" aria-hidden>finished run.</span>
+              <span className="ds-h1-ghost ds-h1-ghost-b" aria-hidden>finished run.</span>
+              <span className="ds-h1-solid">finished run.</span>
+            </span>
+          </motion.span></span>
         </h1>
-        <p className="ds-lede">
-          Atelier is the production workspace for independent clothing brands — design, tech-pack, source, sample, and manufacture a product in one place, instead of a stack of spreadsheets, DMs, and freelance tech-pack files.
-        </p>
-        <div className="ds-cta-row">
-          <button className="ds-btn ds-btn-holo ds-btn-lg" onClick={() => navigate('/signup')}>
-            Start free <span className="ds-btn-arrow">→</span>
-          </button>
-          <a href="#index" className="ds-btn ds-btn-line ds-btn-lg">See the spec</a>
+        <div className="ds-hero-row">
+          <motion.p className="ds-lede" {...fadeUp(0.55)}>
+            Atelier is the production workspace for independent clothing brands — design, tech-pack, source, sample, and manufacture a product in one place, instead of a stack of spreadsheets, DMs, and freelance tech-pack files.
+          </motion.p>
+          <motion.div className="ds-cta-col" {...fadeUp(0.68)}>
+            <div className="ds-cta-row">
+              <button className="ds-btn ds-btn-holo ds-btn-lg" onClick={() => navigate('/signup')}>
+                Start free <span className="ds-btn-arrow">→</span>
+              </button>
+              <a href="#index" className="ds-btn ds-btn-line ds-btn-lg">See the spec</a>
+            </div>
+            <div className="ds-note"><span className="ds-tick" /> No card. The free plan runs one product, forever.</div>
+          </motion.div>
         </div>
-        <div className="ds-note"><span className="ds-tick" /> No card. The free plan runs one product, forever.</div>
       </motion.div>
-      <div className="ds-compass-dock"><GrainCompass angle={angle} active={active} /></div>
+
+      <motion.div className="ds-compass-dock" {...fadeUp(1)}>
+        <GrainCompass angle={angle} active={active} />
+      </motion.div>
       <CornerMarks />
     </div>
   );
 }
 
-/* ── Page-wide atmosphere — fixed behind everything, not just the hero, so
-   the "cool background" reads across the whole page rather than one
-   section. Three drifting blurred aurora blobs + an SVG grain texture
-   (the same feTurbulence technique the in-app sidebar already uses, doubly
-   apt here since "grain" is literally the brand's subject). ──────────────── */
+/* ── Page-wide atmosphere ───────────────────────────────────────────────── */
 function Atmosphere() {
   return (
     <div className="ds-atmosphere" aria-hidden>
+      {/* The goo filter: blur + alpha-contrast turns separate blobs into one
+         merging liquid surface (metaballs) wherever they drift close. */}
+      <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden>
+        <defs>
+          <filter id="ds-goo">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="b" />
+            <feColorMatrix in="b" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -13" result="g" />
+            <feBlend in="SourceGraphic" in2="g" />
+          </filter>
+        </defs>
+      </svg>
       <div className="ds-aurora ds-aurora-1" />
       <div className="ds-aurora ds-aurora-2" />
       <div className="ds-aurora ds-aurora-3" />
+      <div className="ds-aurora ds-aurora-4" />
       <div className="ds-grain" />
     </div>
   );
 }
 
-/* ── The persistent grainline thread — the brand's own directional mark,
-   made structural: one diagonal path zigzags the full height of the page
-   and draws itself in as you scroll, so the page reads as a single
-   continuous diagonal cut instead of a stack of centered rectangles. ────── */
+/* ── Liquid light — three colored blobs run through the goo filter, so when
+   their drift paths cross they visibly merge and split like one liquid
+   surface, then the whole field is softened into molten light. ──────────── */
+function LiquidField({ className }) {
+  return (
+    <div className={`ds-liquid ${className || ''}`} aria-hidden>
+      <div className="ds-liquid-field">
+        <span className="ds-lb ds-lb-1" />
+        <span className="ds-lb ds-lb-2" />
+        <span className="ds-lb ds-lb-3" />
+      </div>
+    </div>
+  );
+}
+
+/* ── Cursor key light — a soft screen-blended radial that follows the
+   pointer across the whole page, so every section reads as "lit" by where
+   you're looking. Writes CSS vars straight to the node: zero re-renders. ── */
+function CursorLight() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let raf;
+    const move = (e) => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        el.style.setProperty('--mx', `${e.clientX}px`);
+        el.style.setProperty('--my', `${e.clientY}px`);
+      });
+    };
+    window.addEventListener('mousemove', move, { passive: true });
+    return () => { window.removeEventListener('mousemove', move); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+  return <div ref={ref} className="ds-cursorlight" aria-hidden />;
+}
+
+/* ── The persistent grainline thread — draws itself in as you scroll, and
+   now weaves in TRUE depth: the full path runs dim and thin BEHIND the
+   sections, while alternating segments are redrawn thicker, brighter, and
+   glowing ABOVE the content — so the thread passes behind one card and in
+   front of the next, like a real needle through cloth. The two layers also
+   drift apart laterally as you scroll (parallax) and the near layer slowly
+   breathes in scale, so it reads as moving toward and away from you, not
+   just side to side. ────────────────────────────────────────────────────── */
+const THREAD_PATH = 'M8 0 L88 6 L18 16 L82 26 L14 38 L86 48 L20 58 L80 68 L16 80 L84 90 L50 100';
+const THREAD_FRONT_PATH = 'M88 6 L18 16 M82 26 L14 38 M86 48 L20 58 M80 68 L16 80 M84 90 L50 100';
+
 function GrainlineThread() {
   const reduce = useReducedMotion();
   const { scrollYProgress } = useScroll();
   const dashoffset = useSpring(useTransform(scrollYProgress, [0, 1], [1, 0]), { stiffness: 40, damping: 20 });
+  const backX = useTransform(scrollYProgress, [0, 1], [0, 2.2]);
+  const frontX = useTransform(scrollYProgress, [0, 1], [0, -2.2]);
   return (
-    <svg className="ds-thread" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
-      <motion.path
-        d="M8 0 L88 6 L18 16 L82 26 L14 38 L86 48 L20 58 L80 68 L16 80 L84 90 L50 100"
-        fill="none" stroke={C.blue} strokeWidth="0.15" strokeLinecap="round"
-        pathLength="1" strokeDasharray="1"
-        style={{ strokeDashoffset: reduce ? 0 : dashoffset }}
-      />
-    </svg>
+    <>
+      {/* vector-effect keeps the thread a constant pixel width — without it,
+         the non-uniform viewBox stretch turns diagonals into wide ribbons */}
+      <svg className="ds-thread" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+        <motion.path
+          d={THREAD_PATH} vectorEffect="non-scaling-stroke"
+          fill="none" stroke={C.blue} strokeWidth="1.1" strokeLinecap="round" opacity="0.5"
+          pathLength="1" strokeDasharray="1"
+          style={reduce ? {} : { strokeDashoffset: dashoffset, x: backX }}
+        />
+      </svg>
+      <svg className="ds-thread ds-thread-front" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+        <motion.path
+          d={THREAD_FRONT_PATH} vectorEffect="non-scaling-stroke"
+          fill="none" stroke={C.blue} strokeWidth="2.2" strokeLinecap="round"
+          pathLength="1" strokeDasharray="1"
+          style={reduce ? {} : { strokeDashoffset: dashoffset, x: frontX }}
+        />
+      </svg>
+    </>
+  );
+}
+
+/* ── Kinetic marquee band — outlined display type on an infinite track,
+   tilted a couple degrees so it cuts across the page like the thread. ───── */
+function Marquee() {
+  const half = (
+    <div className="ds-marquee-half" aria-hidden>
+      {MARQUEE_ITEMS.map((t, i) => (
+        <span key={t} className="ds-marquee-item">
+          <span className={i % 2 === 0 ? 'ds-marquee-out' : 'ds-marquee-fill'}>{t}</span>
+          <Grainline h={26} color={[C.blue, C.violet, C.coral, C.gold][i % 4]} stroke={2.2} />
+        </span>
+      ))}
+    </div>
+  );
+  return (
+    <div className="ds-marquee-clip" aria-hidden>
+      <div className="ds-marquee-stage">
+        <div className="ds-marquee ds-marquee-back">
+          <div className="ds-marquee-track ds-marquee-rev">{half}{half}</div>
+        </div>
+        <div className="ds-marquee ds-marquee-frontlayer">
+          <div className="ds-marquee-track">{half}{half}</div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -358,12 +494,12 @@ const reveal = {
   show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.16, 0.9, 0.35, 1] } },
 };
 const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
-// Alternating left/right entrance instead of uniform bottom-up — one of the
-// small devices that makes the page feel like it has a direction, not just
-// a vertical stack of centered blocks.
+/* Entrances arrive from 3D space — tipped back and slightly offset toward
+   their side — not just slid in flat. transformPerspective makes rotateX
+   read as real depth without needing a perspective wrapper. */
 const revealDir = (dir) => ({
-  hidden: { opacity: 0, y: 18, x: dir * 26 },
-  show: { opacity: 1, y: 0, x: 0, transition: { duration: 0.6, ease: [0.16, 0.9, 0.35, 1] } },
+  hidden: { opacity: 0, y: 20, x: dir * 26, rotateX: 16, transformPerspective: 1000 },
+  show: { opacity: 1, y: 0, x: 0, rotateX: 0, transformPerspective: 1000, transition: { duration: 0.65, ease: [0.16, 0.9, 0.35, 1] } },
 });
 
 function Reveal({ children, style, as = 'div' }) {
@@ -375,8 +511,7 @@ function Reveal({ children, style, as = 'div' }) {
   );
 }
 
-/* Cheap, imperative 3D hover-tilt — writes CSS vars directly to the DOM node
-   instead of going through React state, so it costs nothing on re-render. */
+/* Cheap imperative hover-tilt — CSS vars straight to the node. */
 function useTilt(strength = 8) {
   const ref = useRef(null);
   const onMove = (e) => {
@@ -406,6 +541,70 @@ function TiltCard({ className, children, style, strength = 7 }) {
   );
 }
 
+/* ── The specification ledger — scrollytelling. A sticky rail (giant
+   outlined counter + active title) tracks the row currently crossing the
+   center band of the viewport. ──────────────────────────────────────────── */
+const ROW_ACCENTS = [C.blue, C.violet, C.coral, C.gold, C.blue, C.violet, C.coral, C.gold];
+
+function SpecLedger() {
+  const [active, setActive] = useState(0);
+  const f = FEATURES[active];
+  return (
+    <div className="ds-ledger">
+      <div className="ds-ledger-rail">
+        <div className="ds-ledger-sticky">
+          <div className="ds-ledger-count">SPEC {f.n} / 08</div>
+          <motion.div key={f.n} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.16, 0.9, 0.35, 1] }}>
+            <div className="ds-ledger-ghost" style={{ WebkitTextStrokeColor: `${ROW_ACCENTS[active]}66` }}>{f.n}</div>
+            <div className="ds-ledger-title">{f.title}</div>
+          </motion.div>
+          <div className="ds-ledger-ticks">
+            {FEATURES.map((_, i) => <span key={i} className={`ds-ledger-tick${i <= active ? ' on' : ''}`} />)}
+          </div>
+        </div>
+      </div>
+      <div className="ds-ledger-list">
+        {FEATURES.map((feat, i) => (
+          <motion.div key={feat.n} onViewportEnter={() => setActive(i)} viewport={{ margin: '-46% 0px -46% 0px', amount: 'some' }}>
+            <motion.div
+              className={`ds-row${active === i ? ' on' : ''}`}
+              style={{ '--acc': ROW_ACCENTS[i] }}
+              variants={revealDir(i % 2 === 0 ? -1 : 1)}
+              initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}
+            >
+              <div className="ds-row-n">{feat.n}</div>
+              <div>
+                <div className="ds-row-title">{feat.title}</div>
+                <p className="ds-row-text">{feat.text}</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Assembly sequence — the rule fills stage by stage as it scrolls. ───── */
+function FlowRule() {
+  const ref = useRef(null);
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start 85%', 'end 40%'] });
+  const scaleX = useSpring(scrollYProgress, { stiffness: 55, damping: 18 });
+  return (
+    <div className="ds-rule" ref={ref} style={{ gridTemplateColumns: `repeat(${STAGES.length}, 1fr)` }}>
+      <div className="ds-rule-line" aria-hidden />
+      <motion.div className="ds-rule-fill" aria-hidden style={{ scaleX }} />
+      {STAGES.map((s, i) => (
+        <div className="ds-rule-stop" key={s.key}>
+          <span className="ds-rule-tick" aria-hidden />
+          <span className="ds-rule-n">{String(i + 1).padStart(2, '0')}</span>
+          <span className="ds-rule-label">{s.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Welcome() {
   const navigate = useNavigate();
 
@@ -414,14 +613,11 @@ export default function Welcome() {
       <style>{CSS}</style>
       <Atmosphere />
       <GrainlineThread />
+      <CursorLight />
 
       <header className="ds-bar">
         <div className="ds-bar-in">
-          <div className="ds-brand">
-            <Grainline h={22} color={C.blue} stroke={2.6} />
-            <span className="ds-brand-name">Atelier</span>
-            <span className="ds-brand-sub">PRODUCTION&nbsp;OS</span>
-          </div>
+          <BrandMark />
           <nav className="ds-nav">
             <a href="#index" className="ds-nav-link">Index</a>
             <a href="#pricing" className="ds-nav-link">Pricing</a>
@@ -433,15 +629,17 @@ export default function Welcome() {
 
       <section className="ds-hero">
         <Hero3D navigate={navigate} />
-
         <div className="ds-strip">
           {['6 stages · concept → sold', 'AI assists — never decides', 'Real vendors, real quotes', 'Free plan, one product, forever'].map((t, i) => (
-            <span key={i} className="ds-strip-item"><Grainline h={12} color={C.paperFaint} stroke={2.6} /> {t}</span>
+            <span key={i} className="ds-strip-item">
+              <Grainline h={12} color={[C.blue, C.violet, C.coral, C.gold][i % 4]} stroke={2.6} /> {t}
+            </span>
           ))}
         </div>
       </section>
 
       <section className="ds-mission">
+        <LiquidField className="ds-liquid-mission" />
         <div className="ds-wrap">
           <Reveal><Eyebrow color={C.violet}>Mission</Eyebrow></Reveal>
           <Reveal as="p" style={{ margin: 0 }}>
@@ -458,6 +656,8 @@ export default function Welcome() {
         </div>
       </section>
 
+      <Marquee />
+
       <section className="ds-section" id="index">
         <div className="ds-wrap">
           <Reveal>
@@ -466,36 +666,15 @@ export default function Welcome() {
               <h2 className="ds-h2">Every stage of making a product — on one sheet.</h2>
             </div>
           </Reveal>
-          <motion.div className="ds-index" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}>
-            {FEATURES.map((f, i) => (
-              <motion.div key={f.n} variants={revealDir(i % 2 === 0 ? -1 : 1)}>
-                <TiltCard className="ds-cell">
-                  <div className="ds-cell-n">{f.n}</div>
-                  <h3 className="ds-cell-title">{f.title}</h3>
-                  <p className="ds-cell-text">{f.text}</p>
-                </TiltCard>
-              </motion.div>
-            ))}
-          </motion.div>
+          <SpecLedger />
         </div>
       </section>
 
       <section className="ds-section ds-flow-sec">
         <div className="ds-wrap">
           <Reveal><Eyebrow>Assembly sequence</Eyebrow></Reveal>
-          <Reveal><h2 className="ds-h2" style={{ marginBottom: 34 }}>One product, one path — measured end to end.</h2></Reveal>
-          <Reveal>
-            <div className="ds-rule">
-              <div className="ds-rule-line" aria-hidden />
-              {STAGES.map((s, i) => (
-                <div className="ds-rule-stop" key={s.key}>
-                  <span className="ds-rule-tick" aria-hidden />
-                  <span className="ds-rule-n">{String(i + 1).padStart(2, '0')}</span>
-                  <span className="ds-rule-label">{s.label}</span>
-                </div>
-              ))}
-            </div>
-          </Reveal>
+          <Reveal><h2 className="ds-h2" style={{ marginBottom: 40 }}>One product, one path — measured end to end.</h2></Reveal>
+          <FlowRule />
         </div>
       </section>
 
@@ -512,7 +691,7 @@ export default function Welcome() {
               const feature = p.id === 'basic';
               return (
                 <motion.div key={p.id} variants={revealDir(i === 0 ? -1 : i === PLANS.length - 1 ? 1 : 0)}>
-                  <TiltCard className={`ds-plan${feature ? ' ds-plan-feat' : ''}`} strength={feature ? 9 : 6}>
+                  <TiltCard className={`ds-plan ds-sheen${feature ? ' ds-plan-feat' : ''}`} strength={feature ? 9 : 6}>
                     {feature && <div className="ds-plan-flag">Most chosen</div>}
                     <div className="ds-plan-name">{p.name}</div>
                     <div className="ds-plan-tag">{p.tagline}</div>
@@ -537,7 +716,7 @@ export default function Welcome() {
       <section className="ds-section">
         <div className="ds-wrap">
           <Reveal>
-            <div className="ds-final">
+            <div className="ds-final ds-sheen">
               <CornerMarks color="rgba(244,242,236,0.18)" />
               <Grainline h={40} color={C.violet} stroke={2.4} />
               <h2 className="ds-final-h">Your next product deserves a real workspace.</h2>
@@ -549,11 +728,9 @@ export default function Welcome() {
       </section>
 
       <footer className="ds-foot">
+        <div className="ds-foot-mark" aria-hidden>ATELIER<span className="ds-foot-mark-labs">labs</span></div>
         <div className="ds-wrap ds-foot-in">
-          <div className="ds-brand">
-            <Grainline h={18} color={C.paperDim} stroke={2.6} />
-            <span className="ds-brand-name" style={{ color: C.paper }}>Atelier</span>
-          </div>
+          <BrandMark size={16} />
           <div className="ds-foot-meta">Production OS for independent clothing brands</div>
           <div className="ds-foot-links">
             <a href="#" onClick={e => { e.preventDefault(); navigate('/login'); }}>Log in</a>
@@ -567,34 +744,51 @@ export default function Welcome() {
 }
 
 const CSS = `
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 .ds-root { position: relative; background: ${C.ink}; color: ${C.paper}; font-family: ${BODY};
   min-height: 100vh; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
 .ds-root ::selection { background: ${C.blue}; color: ${C.ink}; }
 .ds-wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
 
-/* atmosphere — fixed, full-bleed, sits behind every section */
+/* atmosphere — fixed, full-bleed, behind every section */
 .ds-atmosphere { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-.ds-aurora { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.4; mix-blend-mode: screen; }
+.ds-aurora { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.42; mix-blend-mode: screen; }
 .ds-aurora-1 { width: 58vw; height: 58vw; top: -22%; left: -12%; background: radial-gradient(circle, ${C.blue}, transparent 70%); animation: ds-drift1 28s ease-in-out infinite; }
 .ds-aurora-2 { width: 48vw; height: 48vw; top: 28%; right: -16%; background: radial-gradient(circle, ${C.violet}, transparent 70%); animation: ds-drift2 34s ease-in-out infinite; }
 .ds-aurora-3 { width: 44vw; height: 44vw; bottom: -14%; left: 22%; background: radial-gradient(circle, ${C.coral}, transparent 70%); animation: ds-drift3 24s ease-in-out infinite; }
+.ds-aurora-4 { width: 30vw; height: 30vw; top: 58%; left: -10%; background: radial-gradient(circle, ${C.gold}, transparent 70%); opacity: 0.3; animation: ds-drift2 30s ease-in-out infinite reverse; }
 @keyframes ds-drift1 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(6%, 8%) scale(1.15); } }
 @keyframes ds-drift2 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-8%, -6%) scale(1.12); } }
 @keyframes ds-drift3 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(5%, -8%) scale(1.2); } }
 .ds-grain { position: absolute; inset: -10%; opacity: 0.05;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 .ds-thread { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; opacity: 0.55; }
+/* the near pass of the thread: brighter, thicker, glowing, drawn ABOVE the
+   sections, breathing slowly in scale — in front of the page, not behind it */
+.ds-thread-front { z-index: 25; opacity: 0.8; transform-origin: 50% 50%;
+  filter: drop-shadow(0 0 6px rgba(107,168,222,0.75));
+  animation: ds-thread-breathe 9s ease-in-out infinite; }
+@keyframes ds-thread-breathe { 0%, 100% { transform: scale(1); opacity: 0.7; } 50% { transform: scale(1.012); opacity: 1; } }
+
+/* the cursor key light — a colored key with a small white-hot core */
+.ds-cursorlight { position: fixed; inset: 0; z-index: 30; pointer-events: none; mix-blend-mode: screen;
+  background:
+    radial-gradient(150px circle at var(--mx, -600px) var(--my, -600px), rgba(255,255,255,0.05), transparent 70%),
+    radial-gradient(560px circle at var(--mx, -600px) var(--my, -600px),
+      rgba(107,168,222,0.13), rgba(169,140,245,0.06) 42%, transparent 68%); }
+@media (hover: none) { .ds-cursorlight { display: none; } }
 
 /* everything else paints above the atmosphere + thread */
-.ds-bar, .ds-hero, .ds-mission, .ds-section, .ds-flow-sec, .ds-foot { position: relative; z-index: 2; }
+.ds-bar, .ds-hero, .ds-mission, .ds-marquee-clip, .ds-section, .ds-flow-sec, .ds-foot { position: relative; z-index: 2; }
 
 /* title bar */
 .ds-bar { position: sticky; top: 0; z-index: 40; background: rgba(10,12,17,0.72);
   backdrop-filter: blur(10px); border-bottom: 1px solid ${C.line}; }
-.ds-bar-in { max-width: 1120px; margin: 0 auto; padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; }
-.ds-brand { display: flex; align-items: center; gap: 9px; }
-.ds-brand-name { font-family: ${DISPLAY}; font-weight: 800; font-size: 18px; letter-spacing: -0.01em; color: ${C.paper}; }
-.ds-brand-sub { font-family: ${MONO}; font-size: 9.5px; letter-spacing: 0.16em; color: ${C.paperFaint}; padding: 3px 6px; border: 1px solid ${C.line}; border-radius: 3px; }
+.ds-bar-in { max-width: 1120px; margin: 0 auto; padding: 11px 28px; display: flex; align-items: center; justify-content: space-between; }
+.ds-brand { display: inline-flex; align-items: center; gap: 10px; }
+.ds-brand-stack { display: flex; flex-direction: column; line-height: 1; }
+.ds-brand-name { font-family: ${DISPLAY}; font-weight: 800; letter-spacing: -0.01em; color: ${C.paper}; }
+.ds-brand-labs { font-family: ${MONO}; font-size: 8.5px; letter-spacing: 0.42em; text-transform: uppercase; color: ${C.paperDim}; margin-top: 3px; }
 .ds-nav { display: flex; align-items: center; gap: 20px; }
 .ds-nav-link { font-family: ${MONO}; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: ${C.paperDim}; text-decoration: none; }
 .ds-nav-link:hover { color: ${C.paper}; }
@@ -607,12 +801,8 @@ const CSS = `
 .ds-btn-lg { padding: 13px 22px; font-size: 13px; }
 .ds-btn-solid { background: ${C.paper}; color: ${C.ink}; border-color: ${C.paper}; }
 .ds-btn-solid:hover { background: ${C.blue}; border-color: ${C.blue}; color: ${C.ink}; }
-/* "Expensive SaaS button": a solid dark face over a rotating conic-gradient
-   ring, instead of a flat gradient fill — the light chases the edge, the
-   face itself never changes color. overflow:hidden on the button itself is
-   the part that makes this a thin 1.5px ring instead of a giant visible
-   rotating block — without it the oversized ::before (needed so its
-   corners never reveal a gap mid-rotation) just sits there uncropped. */
+/* solid dark face over a rotating conic ring — light chases the edge, the
+   face never changes color. overflow:hidden crops the ring to 1.5px. */
 .ds-btn-holo { position: relative; overflow: hidden; background: ${C.ink2}; color: ${C.paper}; border-color: transparent; }
 .ds-btn-holo::before { content: ''; position: absolute; inset: -30%; z-index: -1;
   background: conic-gradient(${C.blue}, ${C.violet}, ${C.coral}, ${C.gold}, ${C.blue});
@@ -628,29 +818,63 @@ const CSS = `
 .ds-btn-arrow { transition: transform .16s ease; }
 .ds-btn:hover .ds-btn-arrow { transform: translateX(3px); }
 
-/* ── 3D hero scene ────────────────────────────────────────────────────── */
-.ds-hero { position: relative; padding: 8px 0 20px; }
-.ds-hero3d { position: relative; height: min(88vh, 780px); min-height: 560px; overflow: hidden; }
+/* ── hero ─────────────────────────────────────────────────────────────── */
+.ds-hero { position: relative; padding: 0 0 20px; }
+.ds-hero3d { position: relative; overflow: hidden; padding: 9vh 0 84px; min-height: min(88vh, 820px); }
 .ds-glow { position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(60% 50% at 32% 40%, rgba(107,168,222,0.16), transparent 70%),
-              radial-gradient(45% 40% at 78% 62%, rgba(255,138,107,0.12), transparent 70%); }
+  background: radial-gradient(60% 50% at 30% 38%, rgba(107,168,222,0.15), transparent 70%),
+              radial-gradient(45% 40% at 78% 64%, rgba(255,138,107,0.12), transparent 70%); }
 .ds-floor { position: absolute; left: -20%; right: -20%; bottom: -30%; height: 90%;
   background-image: linear-gradient(${C.line} 1px, transparent 1px), linear-gradient(90deg, ${C.line} 1px, transparent 1px);
   background-size: 46px 46px;
   transform: perspective(700px) rotateX(72deg);
   transform-origin: bottom center;
+  animation: ds-floor-slide 22s linear infinite;
   -webkit-mask-image: linear-gradient(to top, black 0%, transparent 75%);
   mask-image: linear-gradient(to top, black 0%, transparent 75%);
 }
-.ds-stage { position: absolute; inset: 0; perspective: 1500px; display: flex; align-items: center; justify-content: center; }
-.ds-scene { position: relative; width: min(920px, 92vw); height: 100%; transform-style: preserve-3d; }
+@keyframes ds-floor-slide { to { background-position: 0 46px, 0 0; } }
+
+/* god-ray beams sweeping slowly from above the table */
+.ds-beams { position: absolute; inset: -12% -6% 0; pointer-events: none; mix-blend-mode: screen; filter: blur(10px);
+  background:
+    conic-gradient(from 196deg at 72% -8%, transparent 42%, rgba(107,168,222,0.12) 47%, transparent 53%),
+    conic-gradient(from 168deg at 26% -8%, transparent 41%, rgba(169,140,245,0.10) 47%, transparent 54%),
+    conic-gradient(from 182deg at 50% -12%, transparent 44%, rgba(240,197,106,0.06) 48%, transparent 52%);
+  transform-origin: 50% 0; animation: ds-beam-sway 16s ease-in-out infinite alternate; }
+@keyframes ds-beam-sway { from { transform: rotate(-1.6deg); } to { transform: rotate(1.6deg); } }
+
+/* liquid light fields (see LiquidField) */
+.ds-liquid { position: absolute; pointer-events: none; mix-blend-mode: screen; filter: blur(24px) saturate(1.15); opacity: 0.55; }
+.ds-liquid-field { position: absolute; inset: 0; filter: url(#ds-goo); }
+.ds-lb { position: absolute; border-radius: 50%; will-change: transform; }
+.ds-lb-1 { width: 250px; height: 250px; background: ${C.blue}; left: 6%; top: 10%; animation: ds-lb1 17s ease-in-out infinite; }
+.ds-lb-2 { width: 195px; height: 195px; background: ${C.violet}; left: 36%; top: 38%; animation: ds-lb2 21s ease-in-out infinite; }
+.ds-lb-3 { width: 150px; height: 150px; background: ${C.coral}; left: 18%; top: 58%; animation: ds-lb3 15s ease-in-out infinite; }
+@keyframes ds-lb1 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(95px, 75px) scale(1.14); } }
+@keyframes ds-lb2 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-85px, -65px) scale(0.9); } }
+@keyframes ds-lb3 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(60px, -95px) scale(1.2); } }
+.ds-liquid-hero { right: -3%; top: 4%; width: 620px; height: 560px; }
+.ds-liquid-mission { left: -5%; bottom: -8%; width: 520px; height: 460px; opacity: 0.4; }
+
+/* parallax dust — near specks big/bright, far specks small/blurred */
+.ds-dust { position: absolute; inset: 0; pointer-events: none; animation: ds-dust-float 12s ease-in-out infinite alternate; }
+.ds-dust::before { content: ''; position: absolute; border-radius: 50%; }
+.ds-dust-near { animation-duration: 10s; }
+.ds-dust-near::before { width: 3px; height: 3px; background: rgba(244,242,236,0.9);
+  box-shadow: 18vw 12vh 0 rgba(107,168,222,0.85), 63vw 9vh 0 rgba(244,242,236,0.5), 79vw 31vh 0 rgba(169,140,245,0.75),
+    31vw 52vh 0 rgba(244,242,236,0.4), 86vw 58vh 0 rgba(255,138,107,0.65), 51vw 22vh 0 rgba(244,242,236,0.55),
+    9vw 66vh 0 rgba(107,168,222,0.5), 70vw 70vh 0 rgba(240,197,106,0.6); }
+.ds-dust-far { filter: blur(1px); opacity: 0.55; animation-duration: 16s; animation-direction: alternate-reverse; }
+.ds-dust-far::before { width: 2px; height: 2px; background: rgba(244,242,236,0.7);
+  box-shadow: 26vw 20vh 0 rgba(244,242,236,0.6), 55vw 15vh 0 rgba(107,168,222,0.55), 74vw 44vh 0 rgba(244,242,236,0.45),
+    40vw 38vh 0 rgba(169,140,245,0.5), 12vw 40vh 0 rgba(244,242,236,0.4), 90vw 18vh 0 rgba(255,138,107,0.45), 60vw 62vh 0 rgba(244,242,236,0.5); }
+@keyframes ds-dust-float { from { translate: 0 0; } to { translate: 0 -12px; } }
+
+.ds-stage { position: absolute; inset: 0; perspective: 1500px; }
+.ds-scene { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; }
 .ds-piece { transform-style: preserve-3d; will-change: transform; pointer-events: none; }
 @keyframes ds-piece-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -8px; } }
-/* Real per-surface lighting instead of a flat glass panel: a two-layer
-   background paints a soft gradient rim-light border (brighter top-left,
-   like a real edge catching light), a specular highlight blob sits in the
-   corner, and a colored ambient glow (each piece's own accent, set via
-   --glow inline) grounds it in the scene under the plain drop shadow. */
 .ds-piece-card { position: relative; padding: 10px 10px 16px; border-radius: 10px;
   background: linear-gradient(rgba(20,23,31,0.62), rgba(20,23,31,0.62)) padding-box,
               linear-gradient(135deg, rgba(244,242,236,0.45), rgba(244,242,236,0.05) 35%, rgba(244,242,236,0.03) 65%, rgba(244,242,236,0.22)) border-box;
@@ -658,26 +882,32 @@ const CSS = `
   box-shadow: 0 30px 60px -30px rgba(0,0,0,0.75), 0 0 44px -14px var(--glow, transparent); }
 .ds-piece-card::before { content: ''; position: absolute; top: -14%; left: -8%; width: 55%; height: 45%;
   background: radial-gradient(circle, rgba(255,255,255,0.3), transparent 72%); filter: blur(6px); pointer-events: none; }
-.ds-headline-3d { position: absolute; left: 28px; top: 12%; width: min(430px, 72vw); z-index: 4; }
-.ds-eyebrow { display: inline-flex; align-items: center; gap: 10px; font-family: ${MONO}; font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase; color: ${C.blue}; margin-bottom: 18px; }
-.ds-h1 { font-family: ${DISPLAY}; font-weight: 900; font-size: clamp(34px, 4.8vw, 64px); line-height: 0.96;
-  letter-spacing: -0.025em; text-transform: uppercase; margin: 0; color: ${C.paper}; text-shadow: 0 4px 40px rgba(0,0,0,0.5); }
-/* Misregistered print plates, not a glow or a gradient fill — two colored
-   ghost copies of the same word sit a couple px off from the real one,
-   like a spec sheet run through a printer with its color plates slightly
-   out of alignment. A real production artifact, not a decorative effect. */
+
+.ds-hero-in { position: relative; z-index: 4; max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+.ds-eyebrow { display: inline-flex; align-items: center; gap: 10px; font-family: ${MONO}; font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase; color: ${C.blue}; margin-bottom: 26px; }
+.ds-h1 { font-family: ${DISPLAY}; font-weight: 900; font-size: clamp(44px, 8vw, 104px); line-height: 0.94;
+  letter-spacing: -0.03em; text-transform: uppercase; margin: 0; color: ${C.paper}; text-shadow: 0 4px 40px rgba(0,0,0,0.5); }
+.ds-line { display: block; overflow: hidden; padding-bottom: 0.06em; margin-bottom: -0.06em; }
+.ds-line-in { display: inline-block; will-change: transform; }
+/* misregistered print plates that slide INTO registration on load — a
+   press aligning its color plates, not a glow, not a gradient fill */
 .ds-h1-print { position: relative; display: inline-block; }
 .ds-h1-ghost { position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; }
-.ds-h1-ghost-a { color: ${C.blue}; opacity: 0.75; transform: translate(-3px, 2px); }
-.ds-h1-ghost-b { color: ${C.coral}; opacity: 0.7; transform: translate(3px, -1.5px); }
-.ds-h1-holo { position: relative; color: ${C.paper}; white-space: nowrap; }
-.ds-lede { font-size: 14.5px; line-height: 1.58; color: ${C.paperDim}; max-width: 420px; margin: 16px 0 0; }
-.ds-cta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
-.ds-note { font-family: ${MONO}; font-size: 12px; color: ${C.paperFaint}; display: flex; align-items: center; gap: 9px; margin-top: 14px; }
+.ds-h1-ghost-a { color: ${C.blue}; opacity: 0.75; transform: translate(-3px, 2px); animation: ds-reg-a 0.9s cubic-bezier(0.16,0.9,0.35,1) 1.05s both; }
+.ds-h1-ghost-b { color: ${C.coral}; opacity: 0.7; transform: translate(3px, -1.5px); animation: ds-reg-b 0.9s cubic-bezier(0.16,0.9,0.35,1) 1.05s both; }
+@keyframes ds-reg-a { from { opacity: 0; transform: translate(-18px, 10px); } to { opacity: 0.75; transform: translate(-3px, 2px); } }
+@keyframes ds-reg-b { from { opacity: 0; transform: translate(18px, -9px); } to { opacity: 0.7; transform: translate(3px, -1.5px); } }
+.ds-h1-solid { position: relative; color: ${C.paper}; white-space: nowrap; }
+
+.ds-hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; flex-wrap: wrap; margin-top: 38px; max-width: 880px; }
+.ds-lede { font-size: 15px; line-height: 1.6; color: ${C.paperDim}; max-width: 430px; margin: 0; }
+.ds-cta-col { display: flex; flex-direction: column; gap: 14px; }
+.ds-cta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ds-note { font-family: ${MONO}; font-size: 12px; color: ${C.paperDim}; display: flex; align-items: center; gap: 9px; text-shadow: 0 1px 8px rgba(10,12,17,0.8); }
 .ds-tick { width: 7px; height: 7px; background: ${C.blue}; border-radius: 50%; flex-shrink: 0; }
 
-.ds-compass-dock { position: absolute; right: 22px; top: 50%; transform: translateY(-50%); z-index: 5; }
-.ds-compass { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 14px; border-radius: 12px;
+.ds-compass-dock { position: absolute; right: 28px; bottom: 26px; z-index: 5; }
+.ds-compass { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 15px 14px; border-radius: 12px;
   background: rgba(18,21,29,0.62); border: 1px solid ${C.line}; backdrop-filter: blur(6px); }
 .ds-compass-label { font-family: ${MONO}; font-size: 9px; letter-spacing: 0.1em; color: ${C.paperFaint}; display: flex; align-items: center; gap: 6px; text-transform: uppercase; }
 .ds-compass-dot { width: 5px; height: 5px; border-radius: 50%; transition: background .2s ease; }
@@ -685,42 +915,82 @@ const CSS = `
 .ds-compass-read b { color: ${C.blue}; font-weight: 700; }
 
 /* spec strip */
-.ds-strip { max-width: 1120px; margin: 28px auto 0; padding: 16px 28px; border-top: 1px solid ${C.line}; border-bottom: 1px solid ${C.line};
+.ds-strip { max-width: 1120px; margin: 0 auto; padding: 16px 28px; border-top: 1px solid ${C.line}; border-bottom: 1px solid ${C.line};
   display: flex; flex-wrap: wrap; gap: 12px 30px; }
 .ds-strip-item { font-family: ${MONO}; font-size: 12px; letter-spacing: 0.03em; color: ${C.paperDim}; display: inline-flex; align-items: center; gap: 8px; text-transform: uppercase; }
 
-/* mission — a diagonal clip instead of a flat rule, so the section break
-   itself carries direction rather than just stacking under the last one */
-.ds-mission { padding: 96px 0; background: radial-gradient(60% 100% at 50% 0%, rgba(169,140,245,0.06), transparent 60%);
+/* mission */
+.ds-mission { padding: 100px 0 110px; background: radial-gradient(60% 100% at 50% 0%, rgba(169,140,245,0.06), transparent 60%);
   clip-path: polygon(0 0, 100% 2.2%, 100% 100%, 0 97.8%); margin-bottom: -1px; }
-.ds-mission .ds-wrap { display: flex; flex-direction: column; gap: 26px; max-width: 900px; }
-.ds-mission-lead { font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(24px, 3.4vw, 38px); line-height: 1.18; letter-spacing: -0.01em; color: ${C.paper}; }
+.ds-mission .ds-wrap { display: flex; flex-direction: column; gap: 26px; max-width: 940px; }
+.ds-mission-lead { font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(26px, 3.8vw, 44px); line-height: 1.14; letter-spacing: -0.015em; color: ${C.paper}; }
 .ds-mission-body { font-size: clamp(18px, 2.2vw, 24px); line-height: 1.5; color: ${C.paperDim}; font-family: ${BODY}; }
 .ds-mission-foot { font-family: ${MONO}; font-size: 12.5px; letter-spacing: 0.04em; color: ${C.violet}; text-transform: uppercase; }
 
-/* generic section */
-.ds-section { padding: 90px 0; }
-.ds-sec-head { display: flex; flex-direction: column; gap: 14px; margin-bottom: 40px; }
-.ds-h2 { font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(26px, 3.6vw, 40px); line-height: 1.06; letter-spacing: -0.02em; text-transform: uppercase; margin: 0; max-width: 640px; color: ${C.paper}; }
+/* kinetic marquee band — two tracks in real perspective: a dim, blurred
+   reverse-side layer runs the opposite direction behind the front one, both
+   pitched back like a ribbon lying across the page rather than a flat bar */
+.ds-marquee-clip { overflow: hidden; padding: 44px 0; margin: -14px 0; }
+.ds-marquee-stage { position: relative; perspective: 900px; transform: rotate(-1.6deg) scale(1.03); }
+.ds-marquee { overflow: hidden; border-block: 1px solid ${C.line}; background: rgba(18,21,29,0.4); backdrop-filter: blur(2px); }
+.ds-marquee-frontlayer { position: relative; transform: rotateX(11deg); }
+.ds-marquee-back { position: absolute; inset: 0; transform: rotateX(30deg) scaleY(0.96) translateY(-10px);
+  opacity: 0.28; filter: blur(1.4px); border-color: transparent; background: none; backdrop-filter: none; }
+.ds-marquee-track { display: inline-flex; white-space: nowrap; animation: ds-marq 30s linear infinite; will-change: transform; }
+.ds-marquee-rev { animation-direction: reverse; }
+@keyframes ds-marq { to { transform: translateX(-50%); } }
+.ds-marquee-half { display: inline-flex; align-items: center; }
+.ds-marquee-item { display: inline-flex; align-items: center; gap: 42px; padding: 20px 0 20px 42px;
+  font-family: ${DISPLAY}; font-weight: 900; font-size: clamp(30px, 4.4vw, 56px); text-transform: uppercase; letter-spacing: -0.02em; line-height: 1; }
+.ds-marquee-out { color: transparent; -webkit-text-stroke: 1.4px rgba(244,242,236,0.34); }
+.ds-marquee-fill { color: ${C.paperDim}; }
+@media (prefers-reduced-motion: reduce) { .ds-marquee-track { animation: none; } }
 
-/* 3D tilt cards (shared by spec index + pricing) */
+/* generic section */
+.ds-section { padding: 96px 0; }
+.ds-sec-head { display: flex; flex-direction: column; gap: 14px; margin-bottom: 48px; }
+.ds-h2 { font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(28px, 4vw, 48px); line-height: 1.04; letter-spacing: -0.02em; text-transform: uppercase; margin: 0; max-width: 720px; color: ${C.paper}; }
+
+/* 3D tilt cards */
 .ds-tilt { perspective: 900px; }
 .ds-tilt-inner { transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .1s ease-out; transform-style: preserve-3d; height: 100%; }
 
-/* specification index */
-.ds-index { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5px; background: ${C.line}; border: 1.5px solid ${C.line}; }
-.ds-cell { position: relative; background: ${C.ink2}; height: 100%; }
-.ds-cell .ds-tilt-inner { padding: 26px 24px 30px; }
-.ds-cell:hover { background: ${C.ink3}; }
-.ds-cell-n { font-family: ${MONO}; font-size: 12px; font-weight: 700; color: ${C.blue}; letter-spacing: 0.08em; }
-.ds-cell-title { font-family: ${DISPLAY}; font-weight: 700; font-size: 16.5px; margin: 12px 0 8px; letter-spacing: -0.01em; color: ${C.paper}; }
-.ds-cell-text { font-size: 13px; line-height: 1.6; color: ${C.paperDim}; margin: 0; }
+/* specular sheen sweep — a moving reflection, not a gradient fill */
+.ds-sheen { position: relative; overflow: hidden; }
+.ds-sheen::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,0.05) 45%, rgba(255,255,255,0.11) 50%, rgba(255,255,255,0.05) 55%, transparent 68%);
+  transform: translateX(-130%); transition: transform .9s cubic-bezier(0.16,0.9,0.35,1); }
+.ds-sheen:hover::after { transform: translateX(130%); }
 
-/* flow rule — clipped the opposite direction from the mission band above it,
-   so the two cuts read as a single zigzag running down the page */
-.ds-flow-sec { background: ${C.ink2}; clip-path: polygon(0 2.2%, 100% 0, 100% 100%, 0 97.8%); margin: -1px 0; }
-.ds-rule { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; padding-top: 26px; }
+/* the specification ledger */
+.ds-ledger { display: grid; grid-template-columns: 0.85fr 1.5fr; gap: 56px; align-items: start; }
+.ds-ledger-sticky { position: sticky; top: 116px; }
+.ds-ledger-count { font-family: ${MONO}; font-size: 12px; letter-spacing: 0.14em; color: ${C.blue}; text-transform: uppercase; margin-bottom: 10px; }
+.ds-ledger-ghost { font-family: ${DISPLAY}; font-weight: 900; font-size: clamp(110px, 13vw, 180px); line-height: 0.82; letter-spacing: -0.05em;
+  color: transparent; -webkit-text-stroke-width: 1.6px; -webkit-text-stroke-color: ${C.blue}66; }
+.ds-ledger-title { font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(20px, 2.2vw, 28px); letter-spacing: -0.01em; text-transform: uppercase; color: ${C.paper}; margin-top: 20px; max-width: 320px; line-height: 1.1; }
+.ds-ledger-ticks { display: flex; gap: 6px; margin-top: 26px; }
+.ds-ledger-tick { width: 24px; height: 2px; background: ${C.line}; transition: background .25s ease; }
+.ds-ledger-tick.on { background: ${C.blue}; }
+.ds-ledger-list { border-bottom: 1px solid ${C.line}; }
+.ds-row { position: relative; display: grid; grid-template-columns: 60px 1fr; gap: 22px; padding: 30px 10px 30px 22px;
+  border-top: 1px solid ${C.line}; transition: background .3s ease; }
+.ds-row::before { content: ''; position: absolute; left: 0; top: 16%; bottom: 16%; width: 2.5px; background: var(--acc, ${C.blue});
+  transform: scaleY(0); transform-origin: top; transition: transform .35s cubic-bezier(0.16,0.9,0.35,1); }
+.ds-row.on { background: rgba(244,242,236,0.025); }
+.ds-row.on::before { transform: scaleY(1); }
+.ds-row-n { font-family: ${MONO}; font-size: 13px; font-weight: 700; color: ${C.paperFaint}; letter-spacing: 0.08em; padding-top: 3px; transition: color .3s ease; }
+.ds-row.on .ds-row-n { color: var(--acc, ${C.blue}); }
+.ds-row-title { font-family: ${DISPLAY}; font-weight: 700; font-size: 19px; letter-spacing: -0.01em; color: ${C.paperDim}; transition: color .3s ease; }
+.ds-row.on .ds-row-title { color: ${C.paper}; }
+.ds-row-text { font-size: 13.5px; line-height: 1.62; color: ${C.paperDim}; margin: 8px 0 0; max-width: 520px; }
+
+/* flow rule — fills as it scrolls through the viewport */
+.ds-flow-sec { background: ${C.ink2}; clip-path: polygon(0 2.2%, 100% 0, 100% 100%, 0 97.8%); margin: -1px 0; padding: 110px 0; }
+.ds-rule { position: relative; display: grid; gap: 8px; padding-top: 26px; }
 .ds-rule-line { position: absolute; top: 26px; left: 0; right: 0; height: 2px; background: ${C.line}; }
+.ds-rule-fill { position: absolute; top: 26px; left: 0; right: 0; height: 2px; transform-origin: left;
+  background: linear-gradient(90deg, ${C.blue}, ${C.violet}, ${C.coral}); }
 .ds-rule-stop { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
 .ds-rule-tick { width: 2px; height: 16px; background: ${C.blue}; margin-top: -7px; }
 .ds-rule-n { font-family: ${MONO}; font-size: 12px; font-weight: 700; color: ${C.blue}; }
@@ -728,10 +998,12 @@ const CSS = `
 
 /* pricing */
 .ds-price { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-.ds-plan { border-radius: 10px; background: ${C.ink2}; border: 1.5px solid ${C.line}; }
+.ds-plan { border-radius: 10px; background: ${C.ink2}; border: 1.5px solid ${C.line}; transition: transform .25s cubic-bezier(0.16,0.9,0.35,1), box-shadow .25s ease; }
+.ds-plan:hover { transform: translateY(-5px); box-shadow: 0 34px 60px -34px rgba(0,0,0,0.8); }
 .ds-plan .ds-tilt-inner { padding: 26px 24px; display: flex; flex-direction: column; height: 100%; position: relative; }
 .ds-plan-feat { background: linear-gradient(160deg, ${C.ink3}, ${C.ink2}); border-color: ${C.violet}55; box-shadow: 0 30px 60px -34px rgba(169,140,245,0.5); }
-.ds-plan-flag { position: absolute; top: -12px; left: 0; font-family: ${MONO}; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; background: ${C.violet}; color: ${C.ink}; padding: 4px 10px; border-radius: 3px; box-shadow: 0 4px 18px -4px ${C.violet}aa; }
+.ds-plan-feat:hover { box-shadow: 0 38px 70px -34px rgba(169,140,245,0.65); }
+.ds-plan-flag { position: absolute; top: -12px; left: 0; font-family: ${MONO}; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; background: ${C.violet}; color: ${C.ink}; padding: 4px 10px; border-radius: 3px; box-shadow: 0 4px 18px -4px ${C.violet}aa; z-index: 2; }
 .ds-plan-name { font-family: ${DISPLAY}; font-weight: 800; font-size: 18px; text-transform: uppercase; letter-spacing: -0.01em; color: ${C.paper}; }
 .ds-plan-tag { font-size: 12.5px; color: ${C.paperFaint}; margin-top: 4px; }
 .ds-plan-price { display: flex; align-items: baseline; gap: 5px; margin: 18px 0; }
@@ -743,47 +1015,55 @@ const CSS = `
 .ds-plan-list svg { margin-top: 1px; flex-shrink: 0; }
 
 /* final cta */
-.ds-final { position: relative; background: ${C.ink2}; border: 1.5px solid ${C.line}; border-radius: 10px; padding: 60px 40px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; overflow: hidden; }
+.ds-final { position: relative; background: ${C.ink2}; border: 1.5px solid ${C.line}; border-radius: 10px; padding: 64px 40px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; overflow: hidden; }
 .ds-final::before { content: ''; position: absolute; inset: -40%; background: radial-gradient(55% 55% at 28% 15%, ${C.violet}, transparent 70%); opacity: 0.16; filter: blur(60px); }
-.ds-final-h { position: relative; font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(24px, 3.4vw, 36px); text-transform: uppercase; letter-spacing: -0.02em; line-height: 1.08; margin: 4px 0 0; max-width: 560px; color: ${C.paper}; }
+.ds-final-h { position: relative; font-family: ${DISPLAY}; font-weight: 800; font-size: clamp(24px, 3.4vw, 38px); text-transform: uppercase; letter-spacing: -0.02em; line-height: 1.08; margin: 4px 0 0; max-width: 580px; color: ${C.paper}; }
 .ds-final-p { position: relative; font-size: 14.5px; color: ${C.paperDim}; max-width: 460px; margin: 0 0 8px; line-height: 1.6; }
 
-/* footer */
-.ds-foot { border-top: 1.5px solid ${C.line}; padding: 26px 0 40px; }
+/* footer — the giant outlined lockup closes the page */
+.ds-foot { border-top: 1.5px solid ${C.line}; padding: 30px 0 44px; overflow: hidden; }
+.ds-foot-mark { font-family: ${DISPLAY}; font-weight: 900; font-size: clamp(64px, 12.5vw, 185px); line-height: 0.9; letter-spacing: -0.04em;
+  text-align: center; color: transparent; -webkit-text-stroke: 1.5px rgba(244,242,236,0.22); user-select: none;
+  display: flex; align-items: flex-end; justify-content: center; gap: 0.08em; margin-bottom: 34px; }
+.ds-foot-mark-labs { font-family: ${MONO}; font-weight: 400; font-size: clamp(13px, 1.6vw, 22px); letter-spacing: 0.5em; text-transform: lowercase;
+  color: ${C.violet}; -webkit-text-stroke: 0; padding-bottom: 0.35em; }
 .ds-foot-in { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
 .ds-foot-meta { font-family: ${MONO}; font-size: 11.5px; color: ${C.paperFaint}; letter-spacing: 0.03em; }
 .ds-foot-links { display: flex; gap: 20px; }
 .ds-foot-links a { font-family: ${MONO}; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: ${C.paperDim}; text-decoration: none; }
 .ds-foot-links a:hover { color: ${C.blue}; }
 
-/* responsive — the 3D scene (pieces + floor + compass) is a desktop pointer
-   interaction by nature (parallax and hover-tilt need a mouse), so below
-   900px it steps aside for a plain, fully-readable static hero instead of
-   an approximation that can't really be "interactive" on a touchscreen. */
+/* responsive — the 3D scene is a pointer interaction by nature; below 900px
+   it steps aside for a plain, fully-readable hero. */
 @media (max-width: 900px) {
-  .ds-hero3d { height: auto; min-height: 0; padding: 36px 0 32px; overflow: visible; }
-  .ds-stage, .ds-compass-dock, .ds-glow, .ds-floor { display: none; }
-  .ds-headline-3d { position: static; width: 100%; padding: 0 18px; }
-  .ds-index { grid-template-columns: repeat(2, 1fr); }
-  .ds-rule { grid-template-columns: repeat(4, 1fr); row-gap: 22px; }
-  .ds-rule-line { display: none; }
+  .ds-hero3d { min-height: 0; padding: 44px 0 40px; overflow: visible; }
+  .ds-stage, .ds-compass-dock, .ds-glow, .ds-floor, .ds-beams, .ds-dust, .ds-liquid, .ds-thread-front { display: none; }
+  .ds-h1 { font-size: clamp(38px, 10.5vw, 64px); }
+  .ds-hero-row { margin-top: 26px; }
+  .ds-ledger { grid-template-columns: 1fr; gap: 0; }
+  .ds-ledger-rail { display: none; }
+  .ds-rule { grid-template-columns: repeat(4, 1fr) !important; row-gap: 22px; }
+  .ds-rule-line, .ds-rule-fill { display: none; }
   .ds-price { grid-template-columns: 1fr; }
   .ds-nav .ds-nav-link { display: none; }
+  .ds-marquee-item { gap: 26px; padding-left: 26px; }
 }
 @media (max-width: 640px) {
-  .ds-brand-sub { display: none; }
-  .ds-bar-in { padding: 11px 18px; }
+  .ds-bar-in { padding: 10px 18px; }
   .ds-nav { gap: 12px; }
-  .ds-wrap { padding-left: 18px; padding-right: 18px; }
+  .ds-wrap, .ds-hero-in { padding-left: 18px; padding-right: 18px; }
+  .ds-row { grid-template-columns: 44px 1fr; padding-left: 14px; }
 }
 @media (max-width: 520px) {
-  .ds-index { grid-template-columns: 1fr; }
-  .ds-rule { grid-template-columns: repeat(2, 1fr); }
+  .ds-rule { grid-template-columns: repeat(2, 1fr) !important; }
   .ds-mission { padding: 68px 0; }
   .ds-section { padding: 64px 0; }
+  .ds-flow-sec { padding: 80px 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ds-btn, .ds-btn-arrow, .ds-tilt-inner { transition: none; }
+  .ds-btn, .ds-btn-arrow, .ds-tilt-inner, .ds-plan, .ds-sheen::after { transition: none; }
   .ds-piece { transform: none !important; }
+  .ds-h1-ghost-a, .ds-h1-ghost-b { animation: none; }
+  .ds-floor, .ds-beams, .ds-lb, .ds-dust, .ds-thread-front, .ds-aurora { animation: none; }
 }
 `;
