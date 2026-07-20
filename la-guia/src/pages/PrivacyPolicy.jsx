@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const APP_NAME = 'Atelier';
-const CONTACT_EMAIL = 'support@atelier.com'; // Change this when you have a custom domain
+const CONTACT_EMAIL = 'founder@atelierlabs.app'; // Change this when you have a custom domain
 
 export default function PrivacyPolicy() {
   const navigate = useNavigate();
