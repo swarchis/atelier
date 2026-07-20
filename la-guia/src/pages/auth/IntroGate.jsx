@@ -53,14 +53,12 @@ export function NeedleA({ size = 26, color = '#F4F2EC', className, style, preser
 export default function IntroGate({ onDone }) {
   const overlayRef = useRef(null);
   const canvasRef = useRef(null);
-  const flatLogoRef = useRef(null);
   const leavingRef = useRef(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const overlay = overlayRef.current;
     const canvas = canvasRef.current;
-    const flatLogo = flatLogoRef.current;
     if (!overlay || !canvas) return undefined;
 
     document.body.style.overflow = 'hidden';
@@ -75,6 +73,7 @@ export default function IntroGate({ onDone }) {
       return undefined;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 0);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.92;
 
@@ -168,6 +167,13 @@ export default function IntroGate({ onDone }) {
         void main() {
           vec3 warped = position;
           vec4 wPos = modelMatrix * vec4(warped, 1.0);
+          // constant, all-over warble so the whole letter keeps breathing;
+          // amplitude kept well under the cursor push below so the pointer
+          // still visibly leads the surface.
+          float warble = sin(position.x * 5.5 + uRippleTime * 1.7)
+                       + sin(position.y * 6.3 - uRippleTime * 1.4)
+                       + sin(position.z * 7.1 + uRippleTime * 2.1);
+          warped += normal * warble * 0.02;
           float d = distance(wPos.xy, uCursorWorld.xy);
           float mask = smoothstep(0.62, 0.0, d) * uCursorStrength;
           float wave = sin(d * 25.0 - uRippleTime * 8.0);
@@ -212,6 +218,11 @@ export default function IntroGate({ onDone }) {
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
+          // constant all-over warble (matches the shell so they stay aligned)
+          float warble = sin(position.x * 5.5 + uRippleTime * 1.7)
+                       + sin(position.y * 6.3 - uRippleTime * 1.4)
+                       + sin(position.z * 7.1 + uRippleTime * 2.1);
+          transformed += normal * warble * 0.02;
           vec4 rippleWorld = modelMatrix * vec4(transformed, 1.0);
           float rippleDist = distance(rippleWorld.xy, uCursorWorld.xy);
           float rippleMask = smoothstep(0.58, 0.0, rippleDist) * uCursorStrength;
@@ -221,13 +232,11 @@ export default function IntroGate({ onDone }) {
     };
 
     let disposed = false;
-    let logoModel = null;
     new GLTFLoader().load(
       '/intro/logo.glb',
       (gltf) => {
         if (disposed) return;
         const model = gltf.scene;
-        logoModel = model;
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
         const center = box.getCenter(new THREE.Vector3());
@@ -257,7 +266,9 @@ export default function IntroGate({ onDone }) {
 
     // ── Post-processing: bloom for the bright colorful glow ───────────────
     const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
+    const renderPass = new RenderPass(scene, camera);
+    renderPass.clearAlpha = 0;
+    composer.addPass(renderPass);
     const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.736, 0.7, 0.3);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
@@ -289,7 +300,7 @@ export default function IntroGate({ onDone }) {
     let popIn = 0, energy = 0, prevRotY = FACE_ROT, prevRotX = 0;
 
     // click exit: quick spin, reveal the site under the same letter, then fly.
-    const exit = { active: false, start: 0, spinDuration: 0.62, flyStarted: false };
+    const exit = { active: false, start: 0, spinDuration: 0.62, flyDelay: 0.8, flyStarted: false };
 
     // fly-to-corner state (filled after the click spin)
     const fly = {
@@ -299,6 +310,7 @@ export default function IntroGate({ onDone }) {
       to: new THREE.Vector3(),
       scaleFrom: 1,
       scaleTo: 0.12,
+      duration: 1.7,
       rotFrom: new THREE.Euler(),
       rotTo: new THREE.Euler(0, FACE_ROT, 0),
     };
@@ -311,69 +323,6 @@ export default function IntroGate({ onDone }) {
         -((sy / window.innerHeight) * 2 - 1) * halfH,
         0,
       );
-    };
-
-    const screenRectForObject = (obj) => {
-      obj.updateWorldMatrix(true, true);
-      camera.updateMatrixWorld();
-      const box = new THREE.Box3().setFromObject(obj);
-      if (box.isEmpty()) return null;
-      const min = box.min, max = box.max;
-      const corners = [
-        new THREE.Vector3(min.x, min.y, min.z),
-        new THREE.Vector3(min.x, min.y, max.z),
-        new THREE.Vector3(min.x, max.y, min.z),
-        new THREE.Vector3(min.x, max.y, max.z),
-        new THREE.Vector3(max.x, min.y, min.z),
-        new THREE.Vector3(max.x, min.y, max.z),
-        new THREE.Vector3(max.x, max.y, min.z),
-        new THREE.Vector3(max.x, max.y, max.z),
-      ].map((v) => v.project(camera));
-      const xs = corners.map((v) => (v.x * 0.5 + 0.5) * window.innerWidth);
-      const ys = corners.map((v) => (-v.y * 0.5 + 0.5) * window.innerHeight);
-      const left = Math.min(...xs), right = Math.max(...xs);
-      const top = Math.min(...ys), bottom = Math.max(...ys);
-      return { left, top, width: right - left, height: bottom - top };
-    };
-
-    const visibleSvgRect = (svg) => {
-      if (!svg) return null;
-      try {
-        const box = svg.getBBox();
-        const rect = svg.getBoundingClientRect();
-        const viewBox = svg.viewBox?.baseVal;
-        if (!box.width || !box.height || !rect.width || !rect.height || !viewBox?.width || !viewBox?.height) return null;
-        const scaleX = rect.width / viewBox.width;
-        const scaleY = rect.height / viewBox.height;
-        return {
-          left: rect.left + (box.x - viewBox.x) * scaleX,
-          top: rect.top + (box.y - viewBox.y) * scaleY,
-          width: box.width * scaleX,
-          height: box.height * scaleY,
-          box,
-          viewBox,
-        };
-      } catch {
-        return null;
-      }
-    };
-
-    const svgFit = (svg, targetRect) => {
-      try {
-        const box = svg?.getBBox();
-        const viewBox = svg?.viewBox?.baseVal;
-        if (!box?.width || !box?.height || !viewBox?.width || !viewBox?.height || !targetRect?.width || !targetRect?.height) return null;
-        const width = targetRect.width * (viewBox.width / box.width);
-        const height = targetRect.height * (viewBox.height / box.height);
-        return {
-          left: targetRect.left - (box.x - viewBox.x) * (width / viewBox.width),
-          top: targetRect.top - (box.y - viewBox.y) * (height / viewBox.height),
-          width,
-          height,
-        };
-      } catch {
-        return null;
-      }
     };
 
     const animate = () => {
@@ -405,9 +354,15 @@ export default function IntroGate({ onDone }) {
             group.position.set(0, Math.sin(t * 0.9) * 0.07, 0);
           }
         } else {
-          fly.prog = Math.min(1, fly.prog + dt / 1.0);
-          const e = 1 - Math.pow(1 - fly.prog, 3);
+          fly.prog = Math.min(1, fly.prog + dt / fly.duration);
+          // one easeInOutCubic drives position, scale and settle together, so
+          // the letter recedes smoothly into the corner instead of crossing
+          // the screen at full size and snapping small at the end.
+          const e = fly.prog < 0.5
+            ? 4 * fly.prog * fly.prog * fly.prog
+            : 1 - Math.pow(-2 * fly.prog + 2, 3) / 2;
           group.position.lerpVectors(fly.from, fly.to, e);
+          group.position.y += Math.sin(fly.prog * Math.PI) * 0.14; // gentle arc
           group.scale.setScalar(THREE.MathUtils.lerp(fly.scaleFrom, fly.scaleTo, e));
           holder.rotation.x = THREE.MathUtils.lerp(fly.rotFrom.x, fly.rotTo.x, e);
           holder.rotation.y = THREE.MathUtils.lerp(fly.rotFrom.y, fly.rotTo.y, e);
@@ -429,8 +384,9 @@ export default function IntroGate({ onDone }) {
         const fadeProg = Math.min(1, age / 0.7);
         bgUniforms.uFade.value = 1 - (1 - Math.pow(1 - fadeProg, 3));
 
-        if (!exit.flyStarted && age >= exit.spinDuration) {
+        if (!exit.flyStarted && age >= exit.flyDelay) {
           exit.flyStarted = true;
+          bg.visible = false;
           const mark = document.querySelector('.ds-brand-a');
           const m = mark ? mark.getBoundingClientRect() : { left: 40, top: 20, width: 30, height: 30 };
           fly.from.copy(group.position);
@@ -438,7 +394,11 @@ export default function IntroGate({ onDone }) {
           const halfH = Math.tan((camera.fov * Math.PI) / 360) * camera.position.z;
           const targetWorldH = (m.height / window.innerHeight) * 2 * halfH;
           fly.scaleFrom = group.scale.x;
-          fly.scaleTo = Math.max(0.06, (targetWorldH / 2.6) * 1.4);
+          fly.scaleTo = Math.max(0.12, (targetWorldH / 2.6) * 2.3);
+          // the spin has parked the letter face-forward but with 4π wound onto
+          // rotation.y; land it flush at FACE_ROT so the fly is a clean glide
+          // to the corner (matching the flat 2D mark) with no extra spins.
+          holder.rotation.set(0, FACE_ROT, 0);
           fly.rotFrom.copy(holder.rotation);
           fly.active = true;
         }
@@ -476,54 +436,12 @@ export default function IntroGate({ onDone }) {
       exit.active = true;
       exit.start = clock.getElapsedTime();
       overlay.classList.add('ds-gate-leave');
-      window.setTimeout(() => {
-        if (!flatLogo) return;
-        const mark = document.querySelector('.ds-brand-a');
-        const m = mark ? mark.getBoundingClientRect() : { left: 40, top: 20, width: 30, height: 30 };
-        const flatSvg = flatLogo.querySelector('svg');
-        const letterRect = screenRectForObject(logoModel || holder);
-        const startRect = letterRect || {
-          left: window.innerWidth * 0.19,
-          top: window.innerHeight * 0.19,
-          width: Math.min(window.innerWidth, window.innerHeight) * 0.62,
-          height: Math.min(window.innerWidth, window.innerHeight) * 0.62,
-        };
-        const startFit = svgFit(flatSvg, startRect) || {
-          left: startRect.left,
-          top: startRect.top,
-          width: startRect.width,
-          height: startRect.height,
-        };
-        flatLogo.style.setProperty('--gate-logo-width', `${startFit.width}px`);
-        flatLogo.style.setProperty('--gate-logo-height', `${startFit.height}px`);
-        flatLogo.style.setProperty('--gate-logo-left', `${startFit.left}px`);
-        flatLogo.style.setProperty('--gate-logo-top', `${startFit.top}px`);
-        flatLogo.style.setProperty('--gate-logo-x', '0px');
-        flatLogo.style.setProperty('--gate-logo-y', '0px');
-        flatLogo.style.setProperty('--gate-logo-scale-x', '1');
-        flatLogo.style.setProperty('--gate-logo-scale-y', '1');
-        overlay.classList.add('ds-gate-flat-ready');
-        window.requestAnimationFrame(() => {
-          const startVisible = visibleSvgRect(flatSvg) || startRect;
-          const targetVisible = visibleSvgRect(mark) || m;
-          const scaleX = Math.max(0.02, targetVisible.width / startVisible.width);
-          const scaleY = Math.max(0.02, targetVisible.height / startVisible.height);
-          const finalContainerLeft = targetVisible.left - (startVisible.left - startFit.left) * scaleX;
-          const finalContainerTop = targetVisible.top - (startVisible.top - startFit.top) * scaleY;
-          flatLogo.style.setProperty('--gate-logo-x', `${finalContainerLeft - startFit.left}px`);
-          flatLogo.style.setProperty('--gate-logo-y', `${finalContainerTop - startFit.top}px`);
-          flatLogo.style.setProperty('--gate-logo-scale-x', String(scaleX));
-          flatLogo.style.setProperty('--gate-logo-scale-y', String(scaleY));
-        });
-      }, 620);
-      window.setTimeout(() => {
-        overlay.classList.add('ds-gate-flat-fly');
-      }, 1250);
+      // fly lands at flyDelay + duration = 2.5s; reveal the real mark then, so
+      // the flat 2D logo fades in under the letter exactly as it settles.
       window.setTimeout(() => {
         document.body.classList.add('ds-gate-logo-landed');
-        overlay.classList.add('ds-gate-flat-landed');
       }, 2500);
-      setTimeout(finish, 2900);
+      setTimeout(finish, 3050);
     };
     overlay.addEventListener('click', onClick);
 
@@ -546,9 +464,6 @@ export default function IntroGate({ onDone }) {
     <div className="ds-gate" ref={overlayRef} role="button" aria-label="Enter Atelier">
       <style>{GATE_CSS}</style>
       <canvas ref={canvasRef} className="ds-gate-canvas" />
-      <div ref={flatLogoRef} className="ds-gate-flat" aria-hidden>
-        <NeedleA size={100} color="#F4F2EC" preserveAspectRatio="none" />
-      </div>
       <div className={`ds-gate-hint${ready ? ' on' : ''}`}>
         {ready ? 'click to enter' : 'pouring the letterform…'}
       </div>
@@ -562,52 +477,11 @@ const GATE_CSS = `
 .ds-gate.ds-gate-leave { background: transparent; }
 .ds-gate.ds-gate-leave { pointer-events: none; }
 .ds-gate-canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important;
-  transition: opacity 0.58s ease 0.68s; }
+  transition: opacity 0.3s ease 2.5s; }
 .ds-gate-leave .ds-gate-canvas { opacity: 0; }
 
 body.ds-gate-morphing:not(.ds-gate-logo-landed) .ds-brand-a { opacity: 0; }
 body.ds-gate-logo-landed .ds-brand-a { opacity: 1; transition: opacity 0.18s ease; }
-
-.ds-gate-flat {
-  --gate-logo-width: 62vmin;
-  --gate-logo-height: 62vmin;
-  --gate-logo-left: calc(50vw - var(--gate-logo-width) / 2);
-  --gate-logo-top: calc(50vh - var(--gate-logo-height) / 2);
-  --gate-logo-x: 0px;
-  --gate-logo-y: 0px;
-  --gate-logo-scale-x: 0.08;
-  --gate-logo-scale-y: 0.08;
-  position: fixed;
-  left: var(--gate-logo-left);
-  top: var(--gate-logo-top);
-  width: var(--gate-logo-width);
-  height: var(--gate-logo-height);
-  opacity: 0;
-  pointer-events: none;
-  z-index: 3;
-  transform: translate3d(0, 0, 0) scale(0.985, 0.985);
-  transform-origin: top left;
-  filter:
-    drop-shadow(0 0 16px rgba(107,168,222,0.5))
-    drop-shadow(0 0 34px rgba(169,140,245,0.32));
-  transition:
-    opacity 0.58s ease,
-    filter 0.58s ease,
-    transform 1.22s cubic-bezier(.17,.89,.18,1);
-}
-.ds-gate-flat svg { width: 100%; height: 100%; }
-.ds-gate-flat-ready .ds-gate-flat {
-  opacity: 1;
-  transform: translate3d(0, 0, 0) scale(1, 1);
-  filter:
-    drop-shadow(0 0 10px rgba(107,168,222,0.34))
-    drop-shadow(0 0 22px rgba(169,140,245,0.22));
-}
-.ds-gate-flat-fly .ds-gate-flat {
-  opacity: 1;
-  transform: translate3d(var(--gate-logo-x), var(--gate-logo-y), 0) scale(var(--gate-logo-scale-x), var(--gate-logo-scale-y));
-}
-.ds-gate-flat-landed .ds-gate-flat { opacity: 0; transition: opacity 0.18s ease, transform 1.22s cubic-bezier(.17,.89,.18,1); }
 
 .ds-gate-hint { position: absolute; bottom: 7vh; left: 50%; transform: translateX(-50%);
   font-family: ${MONO}; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase;
