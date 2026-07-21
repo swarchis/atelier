@@ -27,18 +27,43 @@ export function AuthProvider({ children }) {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
     
-    if (data.user) {
-      // Auto-create their first brand
-      const { error: brandError } = await supabase
+    if (data.user && brandName) {
+      // Check if a default brand was already created by the DB trigger
+      const { data: existingBrands } = await supabase
         .from('brands')
-        .insert([{ user_id: data.user.id, name: brandName }]);
-      if (brandError) throw brandError;
+        .select('id')
+        .eq('user_id', data.user.id);
+
+      if (existingBrands && existingBrands.length > 0) {
+        // Update the default brand's name to match what the user typed
+        await supabase
+          .from('brands')
+          .update({ name: brandName })
+          .eq('id', existingBrands[0].id);
+      } else {
+        // Fallback: create the brand if the DB trigger didn't run
+        const { error: brandError } = await supabase
+          .from('brands')
+          .insert([{ user_id: data.user.id, name: brandName }]);
+        if (brandError) throw brandError;
+      }
     }
     return data;
   };
 
   const logIn = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return data;
+  };
+
+  const signInWithGoogle = async () => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/`,
+      },
+    });
     if (error) throw error;
     return data;
   };
@@ -65,7 +90,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, signUp, logIn, logOut, resetPassword, updatePassword, loading }}>
+    <AuthContext.Provider value={{ user, signUp, logIn, signInWithGoogle, logOut, resetPassword, updatePassword, loading }}>
       {!loading && children}
     </AuthContext.Provider>
   );
