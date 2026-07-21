@@ -2,6 +2,8 @@
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 const { Resend } = require('resend');
 const sharp = require('sharp');
@@ -14,9 +16,103 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config({ path: path.join(__dirname, '..', 'la-guia', '.env.local') });
 
 const app = express();
-app.use(cors());
+
+// Behind Railway's proxy: trust the first hop so req.ip reflects the real
+// client (from X-Forwarded-For) — required for correct per-client rate
+// limiting — and stop advertising the framework.
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+// Security headers. CSP / cross-origin isolation headers are disabled because
+// this is a pure JSON API consumed cross-origin (Cloudflare Pages frontend →
+// Railway API) and used for redirect-based OAuth; the rest of helmet's
+// defaults (HSTS, noSniff, frameguard, referrer-policy, …) still apply.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginOpenerPolicy: false,
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+
+// CORS allowlist. Set ALLOWED_ORIGINS (comma-separated, e.g.
+// "https://atelier.pages.dev,https://app.atelier.com") in the API env to lock
+// this to your own frontend. Left unset it stays permissive (previous
+// behavior) but logs a warning so nothing breaks before it's configured.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+if (allowedOrigins.length === 0) {
+  console.warn('⚠️  ALLOWED_ORIGINS not set — CORS is open to all origins. Set it in the API env to restrict to your frontend.');
+}
+app.use(cors({
+  origin(origin, cb) {
+    // No Origin header = same-origin, curl, or server-to-server (webhooks) → allow.
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.length === 0) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
+
+// ── Rate limiting ─────────────────────────────────────────────────────────
+// Note: CORS only stops browser cross-site calls; scripts/curl ignore it.
+// These limiters are the real abuse/DoS/cost protection. Webhooks are exempt
+// (Stripe/Shopify send server-to-server bursts that must not be dropped).
+const isWebhookOrHealth = (req) =>
+  req.path === '/health' ||
+  req.path === '/api/stripe/webhook' ||
+  req.path.startsWith('/api/shopify/webhooks/');
+
+// Broad limiter across the whole API — catches blunt flooding.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: isWebhookOrHealth,
+});
+
+// Strict limiter for the expensive AI/generation endpoints — these each cost
+// real money (Gemini/Tavily), so cap them tightly per client.
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many AI requests — please slow down and try again shortly.' },
+});
+
+// Tight limiter for outbound email endpoints — abuse here means spam sent
+// from your domain.
+const emailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many email requests — please wait a few minutes.' },
+});
+
+app.use(apiLimiter);
+app.use([
+  '/api/analyze-design',
+  '/api/generate-tech-pack',   // also covers /generate-tech-pack-full (prefix)
+  '/api/parse-vendor',
+  '/api/draft-vendor-email',
+  '/api/search-vendors',
+  '/api/analyze-vendor-fit',
+  '/api/dashboard-suggestions',
+  '/api/design/ai-image',
+  '/api/design/generate-element',
+  '/api/design/color-palette',
+  '/api/design/trend-inspiration',
+  '/api/chat-reply',
+  '/api/quote-economics',
+  '/api/cost-simulator',
+], aiLimiter);
+app.use(['/api/send-invite', '/api/send-campaign'], emailLimiter);
+
 // Captures the raw buffer body. Required to verify Shopify's SHA-256 HMAC signatures
-app.use(express.json({ 
+app.use(express.json({
   limit: '50mb',
   verify: (req, res, buf) => {
     req.rawBody = buf;
@@ -1859,6 +1955,21 @@ app.post('/api/shopify/webhooks/shop/redact', (req, res) => {
 });
 
 
+
+// Unknown route → generic 404 (no framework/route details leaked).
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Last-resort error handler: log the real error server-side, return a generic
+// message to the client so stack traces / internal details never leak.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  if (res.headersSent) return next(err);
+  const status = err && err.status ? err.status : 500;
+  res.status(status).json({ error: status === 500 ? 'Internal server error' : (err.message || 'Error') });
+});
 
 const PORT = process.env.PORT || 3001;
 // Explicitly bind to '0.0.0.0' so Railway's proxy can route traffic to it
