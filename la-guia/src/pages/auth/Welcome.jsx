@@ -1,9 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, useMotionValue, useSpring, useTransform, useScroll, useReducedMotion } from 'framer-motion';
 import { STAGES } from '../../data/mockData.js';
 import { PLANS } from '../../data/plans.js';
-import IntroGate, { NeedleA } from './IntroGate.jsx';
+import { NeedleA } from './NeedleA.jsx';
+
+// The WebGL gate (with all of three.js) is the single heaviest thing on the
+// landing page. Lazy-load it so the hero paints immediately and three.js
+// downloads as its own chunk instead of blocking first render.
+const IntroGate = lazy(() => import('./IntroGate.jsx'));
 
 /* ───────────────────────────────────────────────────────────────────────────
    "The Cutting Table" — Rev 3.
@@ -633,7 +638,11 @@ export default function Welcome() {
   return (
     <div className="ds-root">
       <style>{CSS}</style>
-      {!introDone && <IntroGate onDone={() => setIntroDone(true)} />}
+      {!introDone && (
+        <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#0A0C11' }} />}>
+          <IntroGate onDone={() => setIntroDone(true)} />
+        </Suspense>
+      )}
       <Atmosphere />
       <GrainlineThread />
       <CursorLight />
