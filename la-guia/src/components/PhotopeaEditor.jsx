@@ -26,7 +26,13 @@ function rasterizeSvgToPng(svgMarkup, width, height) {
 const PhotopeaEditor = forwardRef(function PhotopeaEditor({ svgMarkup, file, onStatusChange }, ref) {
   const iframeRef = useRef(null);
   const [status, setStatus] = useState('loading');
+  const [loadTick, setLoadTick] = useState(0); // bumped on each iframe (re)load
   const pendingCapture = useRef(null);
+  // Content already pushed into the CURRENT iframe document. Loading used to
+  // happen once inside onLoad, which silently dropped content that arrived
+  // after the iframe finished loading (e.g. a saved design image fetched from
+  // storage) — leaving Photopea stuck on its start screen.
+  const lastLoadedRef = useRef(null);
 
   useEffect(() => { onStatusChange?.(status); }, [status]);
 
@@ -87,23 +93,39 @@ const PhotopeaEditor = forwardRef(function PhotopeaEditor({ svgMarkup, file, onS
   }));
 
   const handleLoad = async () => {
-    const win = iframeRef.current?.contentWindow;
-    if (!win) return;
+    // Give Photopea a beat to boot its runtime, then mark this (fresh) iframe
+    // document as empty so the content effect below (re)loads into it.
     await new Promise(r => setTimeout(r, 2200));
-    try {
-      if (file) {
-        const buf = await file.arrayBuffer();
-        win.postMessage(buf, '*');
-      } else if (svgMarkup) {
-        const png = await rasterizeSvgToPng(svgMarkup, 900, 1080);
-        if (png) win.postMessage(`app.open("${png}")`, '*');
-      }
-    } catch (e) {
-      console.error("Canvas load error:", e);
-    } finally {
-      setStatus('ready');
-    }
+    lastLoadedRef.current = null;
+    setStatus('ready');
+    setLoadTick(t => t + 1);
   };
+
+  // Push the canvas content whenever BOTH are true: Photopea is ready and we
+  // have something to show — regardless of which happened first. Runs at most
+  // once per iframe document (lastLoadedRef), so a fullscreen toggle or prop
+  // identity change can't open duplicate documents over the user's work.
+  useEffect(() => {
+    if (status !== 'ready') return;
+    if (lastLoadedRef.current) return; // this document already has content
+    const win = iframeRef.current?.contentWindow;
+    const content = file || svgMarkup;
+    if (!win || !content) return;
+    lastLoadedRef.current = content;
+    (async () => {
+      try {
+        if (file) {
+          const buf = await file.arrayBuffer();
+          win.postMessage(buf, '*');
+        } else {
+          const png = await rasterizeSvgToPng(svgMarkup, 900, 1080);
+          if (png) win.postMessage(`app.open("${png}")`, '*');
+        }
+      } catch (e) {
+        console.error('Canvas load error:', e);
+      }
+    })();
+  }, [file, svgMarkup, status, loadTick]);
 
   return (
     <iframe

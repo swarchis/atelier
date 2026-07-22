@@ -79,6 +79,36 @@ export default function DesignDetail() {
   const product = products.find(p => p.id === id);
   const design = designs[id];
   const uploadedFile = getUploadedFile(id);
+
+  // Uploaded designs keep their working file only in ProductsContext's
+  // in-memory map for the session — after a reload it's gone, and Photopea
+  // used to come up on its blank start screen. Fall back to the newest saved
+  // snapshot in design_versions (creation writes an 'Initial design' row).
+  const [persistedFile, setPersistedFile] = useState(null);
+  useEffect(() => {
+    setPersistedFile(null);
+    if (!design || design.baseType !== 'upload' || uploadedFile) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('design_versions')
+          .select('image_url')
+          .eq('product_id', id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        const url = data?.[0]?.image_url;
+        if (!url || cancelled) return;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`image fetch failed (${res.status})`);
+        const blob = await res.blob();
+        if (!cancelled) setPersistedFile(new File([blob], 'design.png', { type: blob.type || 'image/png' }));
+      } catch (err) {
+        console.error('Could not restore saved design image:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id, design?.baseType, uploadedFile]);
   // Canvas + AI Studio used to be mutually-exclusive tabs — this is the one
   // place a real side-by-side split exists between them.
   const showSplitStudio = splitView && (tab === 'canvas' || tab === 'ai-studio');
@@ -508,8 +538,8 @@ export default function DesignDetail() {
                 </div>
                 <PhotopeaEditor 
                   ref={photopeaRef} 
-                  svgMarkup={restoreFile ? null : svgFallback} 
-                  file={restoreFile || uploadedFile || templateFile} 
+                  svgMarkup={restoreFile ? null : svgFallback}
+                  file={restoreFile || uploadedFile || templateFile || persistedFile}
                   onStatusChange={setCanvasStatus} 
                 />
               </div>

@@ -222,7 +222,11 @@ export default function Home() {
   const totalBudget = products.reduce((s, p) => s + p.budget, 0);
   const gateFlags = products.filter(p => p.readiness < 80 && p.stage === 'sourcing').length;
 
-  const featured = products.find(p => !['concept', 'launched'].includes(p.stage)) || products[0];
+  // The hero card always features the most recent design — products load
+  // newest-first, so take the head regardless of stage. (Concept-stage
+  // products used to be skipped, so a freshly created design never surfaced
+  // here until generating a tech pack advanced its stage to 'techpack'.)
+  const featured = products[0];
   const featuredStageIdx = featured ? STAGES.findIndex(s => s.key === featured.stage) : -1;
   const nextStage = featuredStageIdx >= 0 && featuredStageIdx < STAGES.length - 1 ? STAGES[featuredStageIdx + 1] : null;
 
