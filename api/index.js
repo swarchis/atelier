@@ -1644,16 +1644,30 @@ Return 2 to 4 suggestions, ordered most important first. Use "warning" only for 
 // Stable Diffusion endpoints below are text-to-image only, so they handle
 // the opposite kind of tool — generating a brand new, isolated element to
 // *add* to the design rather than editing the design itself. See "7." below.
+// Hard rules appended to EVERY design-image prompt. In real use the two
+// biggest failure modes were (a) the model returning a contact sheet of
+// several variations on one canvas and (b) the rendering style drifting run
+// to run — so every mode pins: one subject, one panel, consistent
+// presentation, no stray text.
+const IMAGE_OUTPUT_RULES = `
+
+STRICT OUTPUT RULES (always apply):
+- Produce exactly ONE image showing exactly ONE version of the garment. Never a grid, collage, contact sheet, storyboard, or multiple variations/angles side by side. No split panels.
+- One garment, centered, filling most of the frame, fully in view.
+- Plain solid white background unless the instruction above explicitly describes a different setting.
+- No text, labels, captions, annotations, arrows, watermarks, borders, or color swatches anywhere in the image.
+- Match the rendering style, lighting, and level of realism of the reference image unless the instruction is specifically about changing the rendering style.`;
+
 const IMAGE_MODE_PROMPTS = {
-  'sketch-to-design': (p) => `You are a fashion technical illustrator. Take this rough sketch and render it as a clean, professional garment design image — polished linework, realistic fabric drape and shading, on a plain white background, single garment only, no model.${p ? ` Style direction: ${p}.` : ''} Keep the same silhouette and proportions as the sketch — you're rendering it, not redesigning it.`,
-  'ai-edit': (p) => `You are editing this garment design image. Apply exactly this change, keeping everything else about the garment identical: ${p || 'make a small refinement'}. Keep the same camera angle, background, and overall composition.`,
+  'sketch-to-design': (p) => `You are a fashion technical illustrator. Take this rough sketch and render it as ONE clean, professional garment design image — polished linework, realistic fabric drape and shading, single garment only, no model.${p ? ` Style direction: ${p}.` : ''} Keep the same silhouette and proportions as the sketch — you are rendering it, not redesigning it.`,
+  'ai-edit': (p) => `You are editing this garment design image. Apply exactly this one change and nothing else: ${p || 'a small refinement'}. Everything else about the garment — silhouette, color, fabric, details, camera angle, background, and composition — must remain identical to the reference.`,
   'bg-remove': () => `Remove the background from this image completely, replacing it with a plain solid white background. Keep the garment itself pixel-identical — do not alter its color, shape, or details.`,
-  'recolor': (p) => `Recolor the garment in this image to ${p || 'a different color'}, preserving all fabric texture, shading, folds, and construction details exactly as they are — only the color changes.`,
-  'fabric-swap': (p) => `Change the fabric of the garment in this image to ${p || 'a different fabric'}, updating texture and drape to realistically reflect that fabric while keeping the exact same garment silhouette, cut, and design details.`,
-  'mockup': (p) => `Create a professional product photography mockup of this garment design: ${p || 'worn by a model in a studio setting with clean, even lighting'}. Keep the garment's design, color, and details exactly as shown in the reference image.`,
-  'flat-sketch': () => `Convert this garment image into a clean technical flat sketch — precise black linework on a white background, no shading or color, front view, the kind used in a professional tech pack.`,
-  'view': (p) => `Generate the ${p || 'back'} view of this exact same garment — same color, fabric, and design details as the reference image, just shown from a different angle.`,
-  'variant': (p) => `Create a design variation of this garment: ${p || 'a stylistic variation'}. Keep it recognizably related to the original but with this specific change applied.`,
+  'recolor': (p) => `Recolor the garment in this image to ${p || 'a different color'}. Change ONLY the color: fabric texture, shading, folds, construction details, silhouette, camera angle, and background stay exactly as they are.`,
+  'fabric-swap': (p) => `Change the fabric of the garment in this image to ${p || 'a different fabric'}, updating texture and drape to realistically reflect that fabric while keeping the exact same garment silhouette, cut, color palette, design details, camera angle, and background.`,
+  'mockup': (p) => `Create ONE professional product photograph of this garment: ${p || 'worn by a single model in a studio setting with clean, even lighting'}. The garment's design, color, and details must match the reference image exactly. One photo, at most one model, one angle.`,
+  'flat-sketch': () => `Convert this garment image into ONE clean technical flat sketch — precise black linework on a white background, no shading or color, front view only, the kind used in a professional tech pack.`,
+  'view': (p) => `Generate ONE image of this exact same garment seen from the ${p || 'back'} — same color, fabric, construction, and design details as the reference, same rendering style, just rotated to that single viewpoint. Do not show the original view alongside it.`,
+  'variant': (p) => `Create ONE design variation of this garment: ${p || 'a stylistic variation'}. Apply the change once, to a single garment, and show only the result — not the original, not multiple options. It must stay recognizably the same garment with only this change; match the reference's rendering style, angle, and composition.`,
 };
 
 app.post('/api/design/ai-image', metered('design-ai-image'), async (req, res) => {
@@ -1665,7 +1679,7 @@ app.post('/api/design/ai-image', metered('design-ai-image'), async (req, res) =>
     if (!images || images.length === 0) {
       return res.status(400).json({ ok: false, error: 'No reference image provided' });
     }
-    const fullPrompt = builder(prompt);
+    const fullPrompt = builder(prompt) + IMAGE_OUTPUT_RULES;
     const result = await callGeminiImage(fullPrompt, images || []);
     console.log("✅ AI image successful:", mode);
     res.json({ ok: true, imageBase64: result.base64, mimeType: result.mimeType });
@@ -1686,7 +1700,7 @@ app.post('/api/design/ai-image', metered('design-ai-image'), async (req, res) =>
 // capability (isolated-asset generation vs. whole-image editing), not just
 // another prompt template.
 const ELEMENT_MODE_PROMPTS = {
-  'add-element': (p) => p || 'a simple minimalist icon',
+  'add-element': (p) => `exactly one single graphic, centered: ${p || 'a simple minimalist icon'}. One design only — no alternates, no variations, no sheet of options`,
   'pattern': (p) => `a seamless, tileable, repeating textile pattern: ${p || 'an abstract pattern'}`,
   // Used for Design.jsx's "Generate silhouette" (custom garment types outside
   // the 9 hand-drawn presets). An earlier version had Gemini guess raw SVG
@@ -1694,11 +1708,17 @@ const ELEMENT_MODE_PROMPTS = {
   // are bad at blind — results were unrecognizable for anything but the
   // simplest shapes. An actual image model reasons in pixel space, so it's
   // structurally better suited to rendering a coherent garment outline.
-  'silhouette': (p) => `a technical fashion flat sketch of a ${p || 'garment'}, laid flat, front view, symmetric, black ink line drawing only, thin uniform line weight, spec-sheet CAD illustration style`,
+  'silhouette': (p) => `a technical fashion flat sketch of a ${p || 'garment'}, laid flat, front view, symmetric, black ink line drawing only, thin uniform line weight, spec-sheet CAD illustration style, exactly one garment, a single centered drawing`,
 };
 
+// SDXL's favorite failure here is a sheet of several options on one canvas —
+// ban it outright. 'pattern' deliberately gets no anti-grid terms: a tile is
+// SUPPOSED to repeat, and negating "grid" degrades legitimate patterns.
+const ANTI_GRID_NEGATIVE = 'multiple designs, multiple variations, grid of options, collage, contact sheet, side-by-side versions, several drawings';
+
 const ELEMENT_MODE_EXTRA_NEGATIVE = {
-  'silhouette': 'color, fabric texture, painting, 3d render, photorealistic render, model, mannequin, shading, gradient, sketch shading, cross-hatching',
+  'add-element': ANTI_GRID_NEGATIVE,
+  'silhouette': `${ANTI_GRID_NEGATIVE}, color, fabric texture, painting, 3d render, photorealistic render, model, mannequin, shading, gradient, sketch shading, cross-hatching`,
 };
 
 app.post('/api/design/generate-element', metered('design-generate-element'), async (req, res) => {
