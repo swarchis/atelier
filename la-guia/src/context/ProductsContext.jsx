@@ -382,14 +382,14 @@ export function ProductsProvider({ children }) {
     return withRole;
   };
 
-  const createDesign = async ({ garmentType, baseType, silhouette, colorway, file, collectionId, aiPaths }) => {
+  const createDesign = async ({ garmentType, baseType, silhouette, colorway, file, collectionId, aiPaths, name }) => {
     if (!activeBrand) throw new Error("No active brand found");
 
     const { data: productData, error: prodError } = await supabase
       .from('products')
       .insert([{
         brand_id: activeBrand.id,
-        name: `New ${garmentType}`,
+        name: (name && name.trim()) || `New ${garmentType}`,
         category: garmentType,
         stage: 'concept',
         risk: 'Balanced',

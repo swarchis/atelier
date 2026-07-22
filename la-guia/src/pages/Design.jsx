@@ -43,6 +43,7 @@ export default function Design() {
   const [bulkArchiving, setBulkArchiving] = useState(false);
   const [collectionPicker, setCollectionPicker] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(null); // collection id mid-assign
+  const [newName, setNewName] = useState(''); // optional name for the next created design
   const fileRef = useRef(null);
   const designProducts = products.filter(p => p.stage === 'concept' || p.stage === 'design');
   const multiSelect = useMultiSelect(designProducts);
@@ -121,7 +122,17 @@ export default function Design() {
     if (atProductLimit) { navigate('/settings'); return; }
     setLoading(true);
     try {
-      const id = await createDesign({ garmentType: type.label, baseType: 'silhouette', silhouette: type.key });
+      // Fetch the template photo so creation persists an initial snapshot to
+      // design_versions — this path used to pass no file, so template designs
+      // had no image anywhere and the dashboard hero card stayed a placeholder
+      // until a tech pack existed.
+      let file = null;
+      try {
+        const res = await fetch(`/silhouettes/${type.key}.jpeg`);
+        if (res.ok) file = new File([await res.blob()], `${type.key}.jpeg`, { type: 'image/jpeg' });
+      } catch { /* vector-only template — create without a snapshot */ }
+      const id = await createDesign({ garmentType: type.label, baseType: 'silhouette', silhouette: type.key, file, name: newName });
+      setNewName('');
       navigate(`/design/${id}`);
     } catch (err) {
       alert(err.message);
@@ -136,7 +147,8 @@ export default function Design() {
     if (atProductLimit) { navigate('/settings'); return; }
     setLoading(true);
     try {
-      const id = await createDesign({ garmentType: 'Uploaded mockup', baseType: 'upload', colorway: file.name, file });
+      const id = await createDesign({ garmentType: 'Uploaded mockup', baseType: 'upload', colorway: file.name, file, name: newName });
+      setNewName('');
       navigate(`/design/${id}`);
     } catch (err) {
       alert(err.message);
@@ -160,7 +172,8 @@ export default function Design() {
 
       const blob = await base64ToBlob(data.imageBase64, data.mimeType);
       const file = new File([blob], `${garmentType}-silhouette.png`, { type: data.mimeType || 'image/png' });
-      const id = await createDesign({ garmentType, baseType: 'ai-silhouette', file });
+      const id = await createDesign({ garmentType, baseType: 'ai-silhouette', file, name: newName });
+      setNewName('');
       navigate(`/design/${id}`);
     } catch (err) {
       setGenerateError(err.message || 'Could not generate a silhouette for that garment type.');
@@ -214,6 +227,15 @@ export default function Design() {
                   <span style={{ textDecoration: 'underline', cursor: 'pointer' }} onClick={() => navigate('/settings')}>Upgrade to add more</span>.
                 </div>
               )}
+              <div className="form-group" style={{ marginBottom: 18, maxWidth: 360 }}>
+                <label className="form-label">Design name <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>(optional — you can rename it any time)</span></label>
+                <input
+                  className="form-input"
+                  placeholder={'e.g. "Boxy heavyweight hoodie"'}
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                />
+              </div>
               <div className="section-label" style={{ marginBottom: 12 }}>Start from a preset silhouette</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 10, marginBottom: 22 }}>
                 {GARMENT_TYPES.map(t => (

@@ -60,6 +60,9 @@ export default function DesignDetail() {
   const [snapshot, setSnapshot] = useState(null);
   const [captureError, setCaptureError] = useState(null);
   const [restoreFile, setRestoreFile] = useState(null);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
   const [tagType, setTagType] = useState('composition');
@@ -109,6 +112,20 @@ export default function DesignDetail() {
     })();
     return () => { cancelled = true; };
   }, [id, design?.baseType, uploadedFile]);
+
+  const saveRename = async () => {
+    const name = nameDraft.trim();
+    if (!name || name === product?.name) { setRenaming(false); return; }
+    setSavingName(true);
+    try {
+      await updateProduct(id, { name });
+      setRenaming(false);
+    } catch (err) {
+      setCaptureError(`Couldn't rename: ${err.message}`);
+    } finally {
+      setSavingName(false);
+    }
+  };
   // Canvas + AI Studio used to be mutually-exclusive tabs — this is the one
   // place a real side-by-side split exists between them.
   const showSplitStudio = splitView && (tab === 'canvas' || tab === 'ai-studio');
@@ -431,7 +448,34 @@ export default function DesignDetail() {
           <div>
             <Breadcrumbs items={[{ label: 'Home', path: '/' }, { label: 'Design Studio', path: '/design' }, { label: product.name }]} />
             <div className="page-eyebrow" style={{ color: 'var(--c-design)' }}>Design Studio</div>
-            <h1 className="page-title">{product.name}</h1>
+            {renaming ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  className="form-input"
+                  autoFocus
+                  value={nameDraft}
+                  onChange={e => setNameDraft(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') setRenaming(false); }}
+                  style={{ fontSize: 18, fontWeight: 600, maxWidth: 340 }}
+                />
+                <button className="btn btn-sm btn-primary" onClick={saveRename} disabled={savingName || !nameDraft.trim()}>
+                  {savingName ? 'Saving…' : 'Save'}
+                </button>
+                <button className="btn btn-sm" onClick={() => setRenaming(false)} disabled={savingName}>Cancel</button>
+              </div>
+            ) : (
+              <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {product.name}
+                <button
+                  className="canvas-icon-btn"
+                  title="Rename design"
+                  onClick={() => { setNameDraft(product.name); setRenaming(true); }}
+                  style={{ color: 'var(--ink-3)' }}
+                >
+                  <i className="ph ph-pencil-simple" />
+                </button>
+              </h1>
+            )}
           </div>
           <div className="page-sub">{product.category}</div>
         </div>
