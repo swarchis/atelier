@@ -15,7 +15,28 @@ import { base64ToBlob } from '../lib/designImages.js';
 import { aiPost } from '../lib/aiApi.js';
 import { toast } from '../lib/toast.js';
 
+// AFTER:
 const STATUS_COLOR = { Sketching: 'var(--ink-3)', Refining: 'var(--c-design)', Ready: 'var(--green)' };
+
+const STAGE_LABELS = {
+  concept: 'Design',
+  design: 'Design',
+  techpack: 'Tech Pack',
+  sourcing: 'Sourcing',
+  sampling: 'Sampling',
+  production: 'Production',
+  launched: 'Launched'
+};
+
+const STAGE_COLORS = {
+  concept: 'var(--c-design)',
+  design: 'var(--c-design)',
+  techpack: 'var(--c-techpack)',
+  sourcing: 'var(--c-vendors)',
+  sampling: 'var(--c-finalcheck)',
+  production: 'var(--c-materials)',
+  launched: 'var(--green)'
+};
 const DESIGN_STATUSES = ['Sketching', 'Refining', 'Ready'];
 const VIEWS = [
   { key: 'cards', label: 'Cards', icon: 'ph-squares-four' },
@@ -366,8 +387,8 @@ const startFromUpload = async (e) => {
                     </button>
                     <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center', marginTop: 6 }}>
                       <div style={{ width: 44, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-3)', borderRadius: 8, color: 'var(--ink-3)', flexShrink: 0, overflow: 'hidden' }}>
-                        {d?.previewUrl
-                          ? <img src={d.previewUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        {(d?.previewUrl || d?.imageUrl || p?.image_url)
+                          ? <img src={d?.previewUrl || d?.imageUrl || p?.image_url} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           : d?.baseType === 'ai-silhouette' && d?.aiPaths?.paths?.length
                             ? <CustomSilhouette paths={d.aiPaths.paths} accents={d.aiPaths.accents} size={30} />
                             : <GarmentSilhouette type={d?.silhouette || 'tee'} size={30} />}
@@ -377,9 +398,15 @@ const startFromUpload = async (e) => {
                         <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{p.category}</div>
                       </div>
                     </div>
-                    <span className="tag" style={{ background: 'transparent', borderColor: STATUS_COLOR[d?.status] || 'var(--border-2)', color: STATUS_COLOR[d?.status] || 'var(--ink-3)' }}>
-                      {d ? d.status : 'Not started'}
-                    </span>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span className="tag" style={{ background: 'transparent', borderColor: STATUS_COLOR[d?.status] || 'var(--border-2)', color: STATUS_COLOR[d?.status] || 'var(--ink-3)' }}>
+                        {d ? d.status : 'Not started'}
+                      </span>
+                      <span className="tag" style={{ background: 'var(--bg-3)', borderColor: STAGE_COLORS[p.stage] || 'var(--border)', color: STAGE_COLORS[p.stage] || 'var(--ink-2)', fontWeight: 600 }}>
+                        <i className="ph ph-compass" style={{ marginRight: 4 }} />
+                        {STAGE_LABELS[p.stage] || 'Design'}
+                      </span>
+                    </div>
                   </div>
                 </ContextMenuTarget>
               );
