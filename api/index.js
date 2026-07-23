@@ -823,13 +823,16 @@ function requireStripe(res) {
   return true;
 }
 
-app.post('/api/create-checkout-session', async (req, res) => {
+app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   if (!requireStripe(res)) return;
   try {
     const { plan, brandId, brandEmail } = req.body;
     const priceId = PRICE_IDS[plan];
     if (!priceId) return res.status(400).json({ ok: false, error: `Unknown or unconfigured plan: ${plan}` });
     if (!brandId) return res.status(400).json({ ok: false, error: 'No brand provided' });
+    if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
+      return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
+    }
 
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -847,7 +850,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-app.post('/api/confirm-checkout', async (req, res) => {
+app.post('/api/confirm-checkout', requireAuth, async (req, res) => {
   if (!requireStripe(res)) return;
   try {
     const { sessionId } = req.body;
@@ -856,6 +859,10 @@ app.post('/api/confirm-checkout', async (req, res) => {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (session.payment_status !== 'paid' && session.status !== 'complete') {
       return res.status(400).json({ ok: false, error: 'Checkout has not completed yet.' });
+    }
+    const confirmBrandId = session.client_reference_id || (session.metadata && session.metadata.brandId);
+    if (!(await verifyBrandAccess(req.user && req.user.id, confirmBrandId))) {
+      return res.status(403).json({ ok: false, error: 'You do not have access to this checkout.' });
     }
     res.json({
       ok: true,
@@ -907,11 +914,19 @@ app.post('/api/create-topup-session', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/create-portal-session', async (req, res) => {
+app.post('/api/create-portal-session', requireAuth, async (req, res) => {
   if (!requireStripe(res)) return;
   try {
     const { customerId } = req.body;
     if (!customerId) return res.status(400).json({ ok: false, error: 'No Stripe customer on file for this brand yet.' });
+    let portalBrand = null;
+    if (supabase) {
+      const { data } = await supabase.from('brands').select('id').eq('stripe_customer_id', customerId).maybeSingle();
+      portalBrand = data;
+    }
+    if (!portalBrand || !(await verifyBrandAccess(req.user && req.user.id, portalBrand.id))) {
+      return res.status(403).json({ ok: false, error: 'You do not have access to this billing account.' });
+    }
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
@@ -924,11 +939,19 @@ app.post('/api/create-portal-session', async (req, res) => {
   }
 });
 
-app.post('/api/subscription-status', async (req, res) => {
+app.post('/api/subscription-status', requireAuth, async (req, res) => {
   if (!requireStripe(res)) return;
   try {
     const { subscriptionId } = req.body;
     if (!subscriptionId) return res.status(400).json({ ok: false, error: 'No subscription id provided' });
+    let subBrand = null;
+    if (supabase) {
+      const { data } = await supabase.from('brands').select('id').eq('stripe_subscription_id', subscriptionId).maybeSingle();
+      subBrand = data;
+    }
+    if (!subBrand || !(await verifyBrandAccess(req.user && req.user.id, subBrand.id))) {
+      return res.status(403).json({ ok: false, error: 'You do not have access to this subscription.' });
+    }
 
     const sub = await stripe.subscriptions.retrieve(subscriptionId);
     const isActive = sub.status === 'active' || sub.status === 'trialing';
@@ -1600,7 +1623,7 @@ const SUGGESTION_CATEGORIES = ['readiness', 'deadline', 'vendor', 'budget', 'tea
 app.post('/api/dashboard-suggestions', metered('dashboard-suggestions'), async (req, res) => {
   console.log("📥 Received dashboard suggestions request...");
   try {
-    const { brand, products, upcomingDeadlines, gateFlags, aiUsage, seats } = req.body;
+    const { brand, products, upcomingDeadlines, gateFlags, aiUsage, aiCredits, seats } = req.body;
 
     const prompt = `You are a production-operations advisor for an independent clothing brand founder, reviewing their dashboard for anything worth flagging today. Be specific and reference real product names when relevant — never invent products, vendors, or numbers that weren't given to you. If the data below looks genuinely healthy with nothing urgent, say so plainly instead of inventing a concern.
 
@@ -1614,7 +1637,7 @@ Products below the 80% readiness gate while in sourcing: ${gateFlags ?? 0}
 Upcoming production due dates:
 ${upcomingDeadlines && upcomingDeadlines.length ? upcomingDeadlines.map(d => `- ${d.product}: due ${d.due_date} (${d.stage})`).join('\n') : 'None scheduled.'}
 
-AI usage this month: ${aiUsage?.used ?? 0} / ${aiUsage?.limit ?? 0}
+AI credits: ${aiCredits ? `${aiCredits.remaining} remaining of ${aiCredits.monthlyAllowance} monthly` : `${aiUsage?.used ?? 0} / ${aiUsage?.limit ?? 0} used`}
 Team seats used: ${seats?.used ?? 0} / ${seats?.limit ?? 0}
 
 Return a JSON object with exactly this structure:
