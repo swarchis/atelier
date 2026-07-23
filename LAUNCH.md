@@ -84,7 +84,7 @@ your production domain.
 atelierlabs.app.
 
 ### 5. Resend domain verification (~30 min, mostly DNS waiting)
-Invites/campaigns currently send from `onboarding@resend.dev` — a test sender
+Invites/campaigns currently send from `invites@atelierlabs.app` — a test sender
 that only delivers to YOUR OWN email address. **Team invites to anyone else
 silently fail today.**
 
@@ -94,7 +94,7 @@ silently fail today.**
    **DNS only** (grey cloud).
 3. Wait for Resend to show **Verified** (minutes to an hour).
 4. **[ask Claude]** — update the two `from:` addresses in `api/index.js`
-   from `onboarding@resend.dev` to e.g. `Atelier <invites@atelierlabs.app>`.
+   from `invites@atelierlabs.app` to e.g. `Atelier <invites@atelierlabs.app>`.
 
 **Verify:** invite a teammate on a different email provider (Gmail if you're
 on Outlook, etc.) → invite arrives in inbox.

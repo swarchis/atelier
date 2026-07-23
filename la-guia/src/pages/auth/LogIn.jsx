@@ -24,8 +24,13 @@ export default function LogIn() {
       await logIn(email, password);
       navigate(from, { replace: true });
     } catch (err) {
+    if (err.message.includes('Email not confirmed')) {
+      setError('Your email has not been verified yet. Please check your inbox for the confirmation link.');
+    } else {
       setError(err.message);
-    } finally {
+    }
+  }
+     finally {
       setLoading(false);
     }
   };

@@ -123,7 +123,7 @@ const AI_PATHS = [
 
 app.use(apiLimiter);
 app.use(AI_PATHS, aiLimiter);
-app.use(['/api/send-invite', '/api/send-campaign'], emailLimiter);
+app.use(['/api/send-invite', '/api/send-campaign', '/api/send-vendor-email'], emailLimiter);
 
 // Captures the raw buffer body. Required to verify Shopify's SHA-256 HMAC signatures
 app.use(express.json({
@@ -1597,7 +1597,7 @@ app.post('/api/send-invite', async (req, res) => {
     `;
 
     const data = await resend.emails.send({
-      from: 'Atelier <onboarding@resend.dev>',
+      from: 'Atelier <invites@atelierlabs.app>',
       to: email, 
       subject: `Join ${brandName} on Atelier`,
       html: htmlBody,
@@ -1630,7 +1630,7 @@ app.post('/api/send-campaign', async (req, res) => {
     const failures = [];
     for (const email of recipients) {
       try {
-        await resend.emails.send({ from: 'Atelier <onboarding@resend.dev>', to: email, subject, html: body });
+        await resend.emails.send({ from: 'Atelier <invites@atelierlabs.app>', to: email, subject, html: body });
         sent++;
       } catch (err) {
         failures.push({ email, error: err.message });
@@ -1641,6 +1641,39 @@ app.post('/api/send-campaign', async (req, res) => {
     res.json({ ok: true, sent, failed: failures.length, failures });
   } catch (error) {
     console.error('❌ Campaign Send Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/api/send-vendor-email', requireAuth, async (req, res) => {
+  console.log("📥 Received vendor email send request...");
+  if (!resend) {
+    return res.status(400).json({ ok: false, error: 'RESEND_API_KEY is missing from api/.env — cannot send email.' });
+  }
+  try {
+    const { to, subject, body, vendorName } = req.body;
+    if (!to || !subject || !body) {
+      return res.status(400).json({ ok: false, error: 'Missing recipient email (to), subject, or body.' });
+    }
+
+    // Format plain text line breaks into HTML for clean rendering in email clients
+    const htmlBody = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 20px; color: #16181D; line-height: 1.6; font-size: 15px;">
+        ${body.replace(/\n/g, '<br/>')}
+      </div>
+    `;
+
+    const data = await resend.emails.send({
+      from: 'Atelier Outreach <invites@atelierlabs.app>',
+      to: [to],
+      subject: subject,
+      html: htmlBody,
+    });
+
+    console.log(`✅ RFQ email sent to vendor: ${vendorName || to}`);
+    res.json({ ok: true, data });
+  } catch (error) {
+    console.error('❌ Vendor Email Send Error:', error.message);
     res.status(500).json({ ok: false, error: error.message });
   }
 });

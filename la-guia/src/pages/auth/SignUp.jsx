@@ -12,6 +12,7 @@ export default function SignUp() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
   const [isInvite, setIsInvite] = useState(false);
 
   // Catch the URL parameter if they clicked an invite email link
@@ -32,14 +33,34 @@ export default function SignUp() {
     setLoading(true);
     setError('');
     try {
-      await signUp(form.email, form.password, form.brandName || 'Workspace');
+    const data = await signUp(form.email, form.password, form.brandName || 'Workspace');
+    if (data?.user && !data?.session) {
+      setEmailSent(true);
+    } else {
       navigate('/');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
     }
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
   };
+
+  {emailSent ? (
+        <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border-2)', padding: '20px', borderRadius: 'var(--r-sm)', textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--ink-1)' }}>✉️ Check your email</div>
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5, marginBottom: 16 }}>
+            We've sent a verification link to <strong>{form.email}</strong>. Please confirm your email address to activate your account and log in.
+          </div>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/login')} style={{ width: '100%', justifyContent: 'center' }}>
+            Go to Sign In
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Keep your existing Google Button, Divider, and Form here */}
+        </>
+      )}
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);

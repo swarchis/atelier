@@ -4,6 +4,7 @@ import { useVendors } from '../context/VendorsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { trustTagClass } from '../lib/format.js';
 import { toast } from '../lib/toast.js';
+import { supabase } from '../lib/supabase.js';
 
 const STATUSES = ['All', 'Requested', 'Received', 'Accepted', 'Declined'];
 const TECHPACK_STAGES = ['techpack', 'sourcing', 'sampling', 'production', 'launched'];
@@ -86,6 +87,34 @@ export default function QuoteTracker() {
     setRfqError(null);
     try {
       await createRFQ(rfqForm);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+      const selectedVendors = vendors.filter(v => rfqForm.vendorIds.includes(v.id));
+
+      for (const vendor of selectedVendors) {
+        if (vendor.email) {
+          try {
+            await fetch(`${API_URL}/api/send-vendor-email`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                to: vendor.email,
+                subject: `Request for Quote: ${rfqProduct?.name || 'New Design'}`,
+                body: `Hello ${vendor.name},\n\nWe would like to request a formal quote for our product: ${rfqProduct?.name || 'Garment Design'}.\n\nDetails:\n- Target Quantity: ${rfqForm.quantity || 'Standard MOQ'}\n- Target Unit Cost: ${rfqForm.targetUnitCost ? '$' + rfqForm.targetUnitCost : 'Open for negotiation'}\n- Target Deadline: ${rfqForm.deadline || 'Standard lead time'}\n\nAdditional Notes:\n${rfqForm.message || 'None'}\n\nPlease reply with your pricing and availability.\n\nBest regards,\nAtelier Studio`,
+                vendorName: vendor.name
+              })
+            });
+          } catch (emailErr) {
+            console.error(`Failed to dispatch email to ${vendor.name}:`, emailErr);
+          }
+        }
+      }
+      toast.success('RFQ created and emails dispatched!');
       setShowNewRFQ(false);
       setRfqForm(EMPTY_RFQ);
       setRfqOverrideGate(false);
@@ -95,6 +124,7 @@ export default function QuoteTracker() {
       setRfqSending(false);
     }
   };
+  
 
   // Extract unique products that actually have quotes
   const quotedProducts = useMemo(() => {
