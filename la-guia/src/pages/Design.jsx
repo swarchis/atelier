@@ -46,7 +46,7 @@ export default function Design() {
   const [addingToCollection, setAddingToCollection] = useState(null); // collection id mid-assign
   const [newName, setNewName] = useState(''); // optional name for the next created design
   const fileRef = useRef(null);
-  const designProducts = products.filter(p => p.stage === 'concept' || p.stage === 'design');
+  const designProducts = products.filter(p => p.status !== 'archived');
   const multiSelect = useMultiSelect(designProducts);
   const dnd = useDragAndDrop();
 
@@ -142,21 +142,31 @@ export default function Design() {
     }
   };
 
-  const startFromUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (atProductLimit) { navigate('/settings'); return; }
-    setLoading(true);
-    try {
-      const id = await createDesign({ garmentType: 'Uploaded mockup', baseType: 'upload', colorway: file.name, file, name: newName });
-      setNewName('');
-      navigate(`/design/${id}`);
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+const startFromUpload = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  if (atProductLimit) { navigate('/settings'); return; }
+  setLoading(true);
+  try {
+    // Strips file extensions like ".png" or ".jpg" so "Jacket.png" becomes "Jacket"
+    const cleanedFileName = file.name.replace(/\.[^/.]+$/, "");
+    const designName = newName.trim() || cleanedFileName;
+
+    const id = await createDesign({
+      garmentType: designName,
+      baseType: 'upload',
+      colorway: file.name,
+      file,
+      name: designName
+    });
+    setNewName('');
+    navigate(`/design/${id}`);
+  } catch (err) {
+    toast.error(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const startFromAI = async () => {
     const garmentType = customType.trim();

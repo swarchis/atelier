@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useVendors } from '../context/VendorsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { trustTagClass } from '../lib/format.js';
 import { toast } from '../lib/toast.js';
 import { supabase } from '../lib/supabase.js';
+import FlowStepper from '../components/FlowStepper.jsx';
 
 const STATUSES = ['All', 'Requested', 'Received', 'Accepted', 'Declined'];
 const TECHPACK_STAGES = ['techpack', 'sourcing', 'sampling', 'production', 'launched'];
@@ -60,6 +61,9 @@ const EMPTY_RFQ = { productId: '', vendorIds: [], quantity: '', targetUnitCost: 
 
 export default function QuoteTracker() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const urlProductId = searchParams.get('productId');
+
   const { vendors, quotes, loading, updateQuote, createRFQ } = useVendors();
   const { products } = useProducts();
   const [filter, setFilter] = useState('All');
@@ -78,6 +82,15 @@ export default function QuoteTracker() {
   const rfqBlocked = rfqBelowThreshold && !rfqOverrideGate;
   const availableVendors = vendors.filter(v => !v.blocked);
 
+  // If a productId was passed in the URL (e.g. from TechPackDetail stepper), focus on it
+  useEffect(() => {
+    if (urlProductId) {
+      setCompareProductId(urlProductId);
+      setViewMode('compare');
+      setRfqForm(f => ({ ...f, productId: urlProductId }));
+    }
+  }, [urlProductId]);
+
   const toggleRfqVendor = vendorId => setRfqForm(f => ({ ...f, vendorIds: f.vendorIds.includes(vendorId) ? f.vendorIds.filter(x => x !== vendorId) : [...f.vendorIds, vendorId] }));
 
   const submitRFQ = async e => {
@@ -87,10 +100,11 @@ export default function QuoteTracker() {
     setRfqError(null);
     try {
       await createRFQ(rfqForm);
+
+      // Dispatch emails to selected vendors if they have email addresses
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
       const selectedVendors = vendors.filter(v => rfqForm.vendorIds.includes(v.id));
 
       for (const vendor of selectedVendors) {
@@ -114,6 +128,7 @@ export default function QuoteTracker() {
           }
         }
       }
+
       toast.success('RFQ created and emails dispatched!');
       setShowNewRFQ(false);
       setRfqForm(EMPTY_RFQ);
@@ -124,7 +139,6 @@ export default function QuoteTracker() {
       setRfqSending(false);
     }
   };
-  
 
   // Extract unique products that actually have quotes
   const quotedProducts = useMemo(() => {
@@ -137,7 +151,7 @@ export default function QuoteTracker() {
     return Array.from(map.values());
   }, [quotes]);
 
-  // Auto-select the first available product when switching to compare view
+  // Auto-select the first available product when switching to compare view if none selected
   useEffect(() => {
     if (viewMode === 'compare' && !compareProductId && quotedProducts.length > 0) {
       setCompareProductId(quotedProducts[0].id);
@@ -169,6 +183,12 @@ export default function QuoteTracker() {
       </div>
 
       <div className="content">
+        {urlProductId && (
+          <div style={{ marginBottom: 20 }}>
+            <FlowStepper productId={urlProductId} current="vendors" />
+          </div>
+        )}
+
         {showNewRFQ && (
           <form className="card-raised enter" style={{ marginBottom: 24 }} onSubmit={submitRFQ}>
             <div className="corner-fold" style={{ '--fold-color': 'var(--c-vendors)' }} />
@@ -272,15 +292,21 @@ export default function QuoteTracker() {
               {filtered.map(q => <QuoteRow key={q.id} q={q} onUpdate={updateQuote} onOpen={() => navigate(`/quotes/${q.id}`)} />)}
             </div>
           ) : (
-            <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>
-              No quotes match this status.
+            <div className="card-raised" style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+              <div>No quotes match this status.</div>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/vendors')}>
+                <i className="ph ph-magnifying-glass" /> Search & Find Vendors
+              </button>
             </div>
           )
         ) : (
           /* --- COMPARE MATRIX VIEW --- */
           compareQuotes.length === 0 ? (
-            <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>
-              Select a product from the dropdown above to compare its vendor quotes.
+            <div className="card-raised" style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+              <div>No quotes available to compare for this product yet.</div>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/vendors')}>
+                <i className="ph ph-magnifying-glass" /> Search & Find Vendors
+              </button>
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 16 }}>
