@@ -16,6 +16,15 @@ const { creditCost, tierCredits, getPack } = require('./config/aiCredits');
 dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config({ path: path.join(__dirname, '..', 'la-guia', '.env.local') });
 
+// Production error monitoring — active only when SENTRY_DSN is set (Railway).
+// Captures unhandled route errors via setupExpressErrorHandler below; errors
+// that handlers catch and convert to 500 responses themselves are NOT
+// reported here (they're part of each handler's own contract).
+const Sentry = process.env.SENTRY_DSN ? require('@sentry/node') : null;
+if (Sentry) {
+  Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV || 'production' });
+}
+
 const app = express();
 
 // Behind Railway's proxy: trust the first hop so req.ip reflects the real
@@ -2201,6 +2210,17 @@ app.post('/api/shopify/webhooks/shop/redact', (req, res) => {
 });
 
 
+
+// Deploy verification for error monitoring: throws on purpose so you can
+// confirm events arrive in Sentry. Covered by the global rate limiter, and
+// only meaningful when SENTRY_DSN is configured.
+app.get('/api/debug-sentry', () => {
+  throw new Error('Sentry backend test event — wiring works.');
+});
+
+// Sentry must see errors before the last-resort handler converts them into
+// generic 500 responses.
+if (Sentry) Sentry.setupExpressErrorHandler(app);
 
 // Unknown route → generic 404 (no framework/route details leaked).
 app.use((req, res) => {
