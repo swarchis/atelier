@@ -8,6 +8,7 @@ import { useMaterials } from '../context/MaterialsContext.jsx';
 import { ContextMenuTarget } from '../components/ContextMenu.jsx';
 import { SkeletonCard } from '../components/Skeleton.jsx';
 import HoverPreview from '../components/HoverPreview.jsx';
+import { toast } from '../lib/toast.js';
 
 const SWATCH_TONES = ['clay', 'gold', 'sage', 'ink'];
 const TYPES = ['All', 'Fabric', 'Trim', 'Notion'];
@@ -51,7 +52,7 @@ export default function MaterialLibrary() {
       setForm(EMPTY_FORM);
       setShowAdd(false);
     } catch (err) {
-      alert('Could not add material: ' + err.message);
+      toast.error('Could not add material: ' + err.message);
     } finally {
       setSaving(false);
     }

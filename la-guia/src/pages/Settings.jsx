@@ -8,6 +8,7 @@ import { useTheme } from '../lib/useTheme.js';
 import BillingTab from '../components/BillingTab.jsx';
 import { getPlan } from '../data/plans.js';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal.jsx';
+import { toast } from '../lib/toast.js';
 
 const TABS = [
   { key: 'profile', label: 'Profile', icon: 'ph-user-circle' },
@@ -259,9 +260,9 @@ export default function Settings() {
     setSaving(true);
     try {
       await updateBrand(form);
-      alert("✓ Brand settings successfully updated.");
+      toast.success('Brand settings updated.');
     } catch (err) {
-      alert("Failed to save settings: " + err.message);
+      toast.error("Failed to save settings: " + err.message);
     } finally {
       setSaving(false);
     }

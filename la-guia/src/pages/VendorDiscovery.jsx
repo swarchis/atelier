@@ -10,6 +10,7 @@ import { getPlan } from '../data/plans.js';
 import HoverPreview from '../components/HoverPreview.jsx';
 import { SkeletonRow } from '../components/Skeleton.jsx';
 import { aiPost } from '../lib/aiApi.js';
+import { toast } from '../lib/toast.js';
 
 const SORTS = {
   Name: (a, b) => a.name.localeCompare(b.name),
@@ -316,7 +317,7 @@ export default function VendorDiscovery() {
       setPasteText('');
       navigate(`/vendors/${vendor.id}`);
     } catch (err) {
-      alert('Could not add vendor: ' + err.message);
+      toast.error('Could not add vendor: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -363,7 +364,7 @@ export default function VendorDiscovery() {
       });
       setAddedUrls(prev => [...prev, result.sourceUrl]);
     } catch (err) {
-      alert('Could not add vendor: ' + err.message);
+      toast.error('Could not add vendor: ' + err.message);
     } finally {
       setAddingKey(null);
     }

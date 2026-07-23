@@ -6,6 +6,7 @@ import { useVendors } from '../context/VendorsContext.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import GanttChart from '../components/GanttChart.jsx';
 import { SkeletonRow } from '../components/Skeleton.jsx';
+import { toast } from '../lib/toast.js';
 
 const STAGE_TAG = {
   Sampling: 'tag-blue',
@@ -56,7 +57,7 @@ export default function ProductionOrders() {
       setForm({ productId: '', vendorId: '', units: '', dueDate: '', poNumber: '' });
       setOverrideGate(false);
     } catch (err) {
-      alert("Failed to create order: " + err.message);
+      toast.error("Failed to create order: " + err.message);
     } finally {
       setSaving(false);
     }

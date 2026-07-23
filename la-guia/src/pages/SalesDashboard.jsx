@@ -12,6 +12,7 @@ import { platformAdapters } from '../lib/ecommerceSync.js';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import RevenueChart from '../components/RevenueChart.jsx';
+import { toast } from '../lib/toast.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: 'ph-chart-line-up' },
@@ -78,7 +79,7 @@ export default function SalesDashboard() {
           });
       }
     } else if (shopifyError === 'true') {
-      alert("Failed to connect Shopify store.");
+      toast.error("Failed to connect Shopify store.");
       window.history.replaceState({}, '', '/sales');
     } else if (etsySuccess === 'true' && activeBrand) {
       const handoffCode = params.get('handoff');
@@ -105,7 +106,7 @@ export default function SalesDashboard() {
           });
       }
     } else if (etsyError === 'true') {
-      alert("Failed to connect Etsy shop.");
+      toast.error("Failed to connect Etsy shop.");
       window.history.replaceState({}, '', '/sales');
     }
   }, [location.search, activeBrand]);

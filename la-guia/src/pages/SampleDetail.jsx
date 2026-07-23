@@ -6,6 +6,7 @@ import { useVendors } from '../context/VendorsContext.jsx';
 import { useTeam } from '../context/TeamContext.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import FlowStepper from '../components/FlowStepper.jsx';
+import { toast } from '../lib/toast.js';
 
 const STATUSES = ['Requested', 'In Production', 'Shipped', 'Received', 'Under Review', 'Revision Requested', 'Approved', 'Rejected'];
 const STATUS_TAG = {
@@ -37,7 +38,7 @@ function AnnotatableImage({ image, annotations, onAddAnnotation, onToggleResolve
       setPending(null);
       setNote('');
     } catch (err) {
-      alert('Could not pin that note: ' + err.message);
+      toast.error('Could not pin that note: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -142,7 +143,7 @@ export default function SampleDetail() {
       setRoundForm({ vendorId: '', requestNotes: '', expectedDate: '' });
       setActiveId(created.id);
     } catch (err) {
-      alert('Could not start a new round: ' + err.message);
+      toast.error('Could not start a new round: ' + err.message);
     } finally {
       setRoundSaving(false);
     }
@@ -170,7 +171,7 @@ export default function SampleDetail() {
       await addFitFeedback(active.id, fitForm);
       setFitForm({ area: FIT_AREAS[0], rating: FIT_RATINGS[2], note: '' });
     } catch (err) {
-      alert('Could not log that feedback: ' + err.message);
+      toast.error('Could not log that feedback: ' + err.message);
     } finally {
       setFitSaving(false);
     }
@@ -327,7 +328,7 @@ export default function SampleDetail() {
               key={img.id} image={img} annotations={activeAnnotations}
               onAddAnnotation={a => addAnnotation(active.id, a)}
               onToggleResolved={toggleAnnotationResolved}
-              onDeleteImage={id => deleteImage(id).catch(err => alert('Could not remove photo: ' + err.message))}
+              onDeleteImage={id => deleteImage(id).catch(err => toast.error('Could not remove photo: ' + err.message))}
             />
           ))}
           <label style={{ border: '1.5px dashed var(--border-2)', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 160, cursor: 'pointer', color: 'var(--ink-3)', fontSize: 12.5 }}>

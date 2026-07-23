@@ -7,6 +7,7 @@ import EmptyState from '../components/EmptyState.jsx';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal.jsx';
 import { ContextMenuTarget } from '../components/ContextMenu.jsx';
 import { SkeletonCard } from '../components/Skeleton.jsx';
+import { toast } from '../lib/toast.js';
 
 const COVER_TONES = ['gold', 'sage', 'clay', 'ink'];
 const VIEWS = [
@@ -43,7 +44,7 @@ export default function Collections() {
       setShowNew(false);
       setForm({ name: '', launchWindow: '' });
     } catch (err) {
-      alert("Failed to create collection: " + err.message);
+      toast.error("Failed to create collection: " + err.message);
     } finally {
       setSaving(false);
     }

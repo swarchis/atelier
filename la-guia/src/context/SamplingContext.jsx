@@ -14,10 +14,14 @@ export function SamplingProvider({ children }) {
   const [annotations, setAnnotations] = useState([]);
   const [fitFeedback, setFitFeedback] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Surfaced by the Sampling page — a failed load (e.g. the samples migration
+  // not applied yet) used to be swallowed into a misleading "No samples yet".
+  const [loadError, setLoadError] = useState(null);
 
   const loadData = async () => {
     if (!activeBrand) { setSamples([]); setImages([]); setAnnotations([]); setFitFeedback([]); setLoading(false); return; }
     setLoading(true);
+    setLoadError(null);
     try {
       const { data: sampleData, error } = await supabase
         .from('samples')
@@ -42,6 +46,7 @@ export function SamplingProvider({ children }) {
       }
     } catch (err) {
       console.error('Error loading samples:', err);
+      setLoadError(err.message || 'Could not load samples.');
     } finally {
       setLoading(false);
     }
@@ -169,7 +174,7 @@ export function SamplingProvider({ children }) {
 
   return (
     <SamplingContext.Provider value={{
-      samples, images, annotations, fitFeedback, loading,
+      samples, images, annotations, fitFeedback, loading, loadError,
       createSampleRequest, updateSample, deleteSample, requestRevision,
       addImage, deleteImage, addAnnotation, toggleAnnotationResolved, addFitFeedback,
       refresh: loadData,

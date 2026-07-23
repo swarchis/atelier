@@ -13,7 +13,7 @@ const STATUS_TAG = {
 
 export default function Sampling() {
   const navigate = useNavigate();
-  const { samples, loading, createSampleRequest } = useSampling();
+  const { samples, loading, loadError, createSampleRequest } = useSampling();
   const { products } = useProducts();
   const { vendors } = useVendors();
 
@@ -111,6 +111,8 @@ export default function Sampling() {
 
         {loading ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-3)' }}><i className="ph ph-circle-notch ph-spin" /> Loading…</div>
+        ) : loadError ? (
+          <EmptyState icon="ph-warning" color="var(--red)" title="Couldn't load samples" sub={loadError} />
         ) : rows.length === 0 ? (
           <EmptyState icon="ph-t-shirt" color="var(--c-finalcheck)" title="No samples yet" sub="Request your first sample once a product has a tech pack." cta="Request sample" onCta={() => setShowNew(true)} />
         ) : (

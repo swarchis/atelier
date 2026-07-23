@@ -15,6 +15,7 @@ import EditableSectionTable from '../components/EditableSectionTable.jsx';
 import TechPackQuestionnaire from '../components/TechPackQuestionnaire.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import { exportTechPackExcel } from '../lib/techPackExcel.js';
+import { toast } from '../lib/toast.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: 'ph-squares-four' },
@@ -237,9 +238,9 @@ export default function TechPackDetail() {
       if (tpError) throw tpError;
       await updateProduct(id, { readiness: newReadiness });
       setHasTechPack(true);
-      alert("✓ Tech Pack saved successfully!");
+      toast.success('Tech pack saved.');
     } catch (err) {
-      alert("Error saving tech pack: " + err.message);
+      toast.error("Error saving tech pack: " + err.message);
     } finally {
       setSaving(false);
     }
@@ -272,7 +273,7 @@ export default function TechPackDetail() {
       approved_at: status === 'approved' ? new Date().toISOString() : null,
       approval_comment: comment ?? approvalComment,
     }).eq('product_id', id);
-    if (error) { alert('Could not update approval status: ' + error.message); return; }
+    if (error) { toast.error('Could not update approval status: ' + error.message); return; }
     setApprovalStatus(status);
     setApprovedAt(status === 'approved' ? new Date().toISOString() : null);
     setApprovedByName(status === 'approved' ? (preferences?.full_name || user?.email) : null);

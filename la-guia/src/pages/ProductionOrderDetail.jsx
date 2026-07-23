@@ -5,6 +5,7 @@ import { currency } from '../lib/format.js';
 import FlowStepper from '../components/FlowStepper.jsx';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import { toast } from '../lib/toast.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: 'ph-squares-four' },
@@ -79,7 +80,7 @@ export default function ProductionOrderDetail() {
     try {
       await updateOrder(order.id, { checkpoints: next });
     } catch (err) {
-      alert('Could not update checklist: ' + err.message);
+      toast.error('Could not update checklist: ' + err.message);
     } finally {
       setUpdating(false);
     }
@@ -107,7 +108,7 @@ export default function ProductionOrderDetail() {
       await addIssue(order.id, issueForm);
       setIssueForm({ severity: 'Medium', description: '' });
     } catch (err) {
-      alert('Could not log that issue: ' + err.message);
+      toast.error('Could not log that issue: ' + err.message);
     } finally {
       setIssueSaving(false);
     }
@@ -121,7 +122,7 @@ export default function ProductionOrderDetail() {
       await addUpdate(order.id, updateNote.trim());
       setUpdateNote('');
     } catch (err) {
-      alert('Could not log that update: ' + err.message);
+      toast.error('Could not log that update: ' + err.message);
     } finally {
       setUpdateSaving(false);
     }
@@ -135,7 +136,7 @@ export default function ProductionOrderDetail() {
       await addPayment(order.id, paymentForm);
       setPaymentForm({ amount: '', paid_at: new Date().toISOString().slice(0,10), note: '' });
     } catch (err) {
-      alert('Could not log payment: ' + err.message);
+      toast.error('Could not log payment: ' + err.message);
     } finally {
       setPaymentSaving(false);
     }
@@ -152,7 +153,7 @@ export default function ProductionOrderDetail() {
       });
       setShipmentDraft(null);
     } catch (err) {
-      alert('Could not save shipment details: ' + err.message);
+      toast.error('Could not save shipment details: ' + err.message);
     }
   };
 
@@ -162,7 +163,7 @@ export default function ProductionOrderDetail() {
       await updateOrder(order.id, { received_units: receivedUnits === '' ? null : Number(receivedUnits) });
       setReceivedDraft(null);
     } catch (err) {
-      alert('Could not save received units: ' + err.message);
+      toast.error('Could not save received units: ' + err.message);
     }
   };
 

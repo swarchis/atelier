@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useVendors } from '../context/VendorsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { trustTagClass } from '../lib/format.js';
+import { toast } from '../lib/toast.js';
 
 const STATUSES = ['All', 'Requested', 'Received', 'Accepted', 'Declined'];
 const TECHPACK_STAGES = ['techpack', 'sourcing', 'sampling', 'production', 'launched'];
@@ -13,7 +14,7 @@ function QuoteRow({ q, onUpdate, onOpen }) {
 
   const run = async (updates) => {
     setBusy(true);
-    try { await onUpdate(q.id, updates); } catch (err) { alert('Could not update quote: ' + err.message); }
+    try { await onUpdate(q.id, updates); } catch (err) { toast.error('Could not update quote: ' + err.message); }
     finally { setBusy(false); }
   };
 
@@ -117,7 +118,7 @@ export default function QuoteTracker() {
   const compareQuotes = quotes.filter(q => q.product_id === compareProductId);
 
   const handleMatrixAction = async (id, updates) => {
-    try { await updateQuote(id, updates); } catch (err) { alert('Could not update quote: ' + err.message); }
+    try { await updateQuote(id, updates); } catch (err) { toast.error('Could not update quote: ' + err.message); }
   };
 
   return (

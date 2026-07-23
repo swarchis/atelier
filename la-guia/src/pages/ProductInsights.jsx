@@ -10,6 +10,7 @@ import FlowStepper from '../components/FlowStepper.jsx';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
+import { toast } from '../lib/toast.js';
 
 const TABS = [
   { key: 'financial', label: 'Financial Model', icon: 'ph-calculator' },
@@ -89,7 +90,7 @@ export default function ProductInsights() {
     try {
       await updateProduct(id, { financials: form });
     } catch (err) {
-      alert("Failed to save financial model: " + err.message);
+      toast.error("Failed to save financial model: " + err.message);
     } finally {
       setSaving(false);
     }

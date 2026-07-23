@@ -13,6 +13,7 @@ import EmptyState from '../components/EmptyState.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import { aiPost } from '../lib/aiApi.js';
+import { toast } from '../lib/toast.js';
 
 const TECHPACK_STAGES = ['techpack', 'sourcing', 'sampling', 'production', 'launched'];
 const SEVERITY_ICON = { amber: 'ph-warning', blue: 'ph-info', green: 'ph-check-circle', red: 'ph-x-circle' };
@@ -112,7 +113,7 @@ export default function VendorDetail() {
       setShowRequest(false);
       setSelectedProduct(''); setQuantity(''); setTargetCost(''); setDeadline(''); setMessage(''); setOverrideGate(false);
     } catch (err) {
-      alert('Could not send request: ' + err.message);
+      toast.error('Could not send request: ' + err.message);
     } finally {
       setSending(false);
     }
@@ -123,7 +124,7 @@ export default function VendorDetail() {
     try {
       await updateVendor(vendor.id, { notes });
     } catch (err) {
-      alert('Could not save notes: ' + err.message);
+      toast.error('Could not save notes: ' + err.message);
     } finally {
       setSavingNotes(false);
     }
@@ -133,7 +134,7 @@ export default function VendorDetail() {
     try {
       await updateVendor(vendor.id, { price_range: priceDraft.trim() || null });
     } catch (err) {
-      alert('Could not save price range: ' + err.message);
+      toast.error('Could not save price range: ' + err.message);
     }
   };
 
@@ -141,7 +142,7 @@ export default function VendorDetail() {
     try {
       await updateVendor(vendor.id, { [field]: [...(vendor[field] || []), value] });
     } catch (err) {
-      alert(`Could not update ${field}: ` + err.message);
+      toast.error(`Could not update ${field}: ` + err.message);
     }
   };
 
@@ -149,7 +150,7 @@ export default function VendorDetail() {
     try {
       await updateVendor(vendor.id, { [field]: (vendor[field] || []).filter(v => v !== value) });
     } catch (err) {
-      alert(`Could not update ${field}: ` + err.message);
+      toast.error(`Could not update ${field}: ` + err.message);
     }
   };
 
@@ -159,7 +160,7 @@ export default function VendorDetail() {
       setVerifying(false);
       setVerifyNotes('');
     } catch (err) {
-      alert('Could not update vendor: ' + err.message);
+      toast.error('Could not update vendor: ' + err.message);
     }
   };
 
@@ -167,7 +168,7 @@ export default function VendorDetail() {
     try {
       await updateVendor(vendor.id, { verified: false });
     } catch (err) {
-      alert('Could not update vendor: ' + err.message);
+      toast.error('Could not update vendor: ' + err.message);
     }
   };
 
@@ -176,7 +177,7 @@ export default function VendorDetail() {
       await toggleBlock(vendor);
       if (!vendor.blocked) navigate('/vendors');
     } catch (err) {
-      alert('Could not update vendor: ' + err.message);
+      toast.error('Could not update vendor: ' + err.message);
     }
   };
 
@@ -306,7 +307,7 @@ export default function VendorDetail() {
               <select
                 className="form-select"
                 value={vendor.onboarding_stage || 'prospect'}
-                onChange={e => updateVendor(vendor.id, { onboarding_stage: e.target.value }).catch(err => alert('Could not update vendor: ' + err.message))}
+                onChange={e => updateVendor(vendor.id, { onboarding_stage: e.target.value }).catch(err => toast.error('Could not update vendor: ' + err.message))}
               >
                 {ONBOARDING_STAGES.map(s => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
               </select>

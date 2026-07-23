@@ -92,9 +92,16 @@ export default function DesignDetail() {
   // 'Initial design' row, manual saves write 'Saved canvas' rows, and the
   // rolling 'Autosave' row keeps this within two minutes of live work.
   const [persistedFile, setPersistedFile] = useState(null);
+  // Tracks whether the saved-snapshot lookup has finished. The canvas must not
+  // load the blank template/vector fallback until then: the template is a
+  // local asset that always wins the race against this async fetch, and the
+  // editor's once-per-document guard would then ignore the real saved work
+  // when it arrived — reverting the canvas to a blank template.
+  const [persistedChecked, setPersistedChecked] = useState(false);
   useEffect(() => {
     setPersistedFile(null);
-    if (!design || uploadedFile) return undefined;
+    setPersistedChecked(false);
+    if (!design || uploadedFile) { setPersistedChecked(true); return undefined; }
     let cancelled = false;
     (async () => {
       try {
@@ -120,6 +127,8 @@ export default function DesignDetail() {
         }
       } catch (err) {
         console.error('Could not restore saved design image:', err);
+      } finally {
+        if (!cancelled) setPersistedChecked(true);
       }
     })();
     return () => { cancelled = true; };
@@ -693,8 +702,8 @@ export default function DesignDetail() {
                 </div>
                 <PhotopeaEditor 
                   ref={photopeaRef} 
-                  svgMarkup={restoreFile ? null : svgFallback}
-                  file={restoreFile || uploadedFile || persistedFile || templateFile}
+                  svgMarkup={(restoreFile || !persistedChecked) ? null : svgFallback}
+                  file={restoreFile || uploadedFile || persistedFile || (persistedChecked ? templateFile : null)}
                   onStatusChange={setCanvasStatus} 
                 />
               </div>

@@ -12,6 +12,7 @@ import PriceHistoryChart from '../components/PriceHistoryChart.jsx';
 import { useAutosave, AutosaveIndicator } from '../lib/useAutosave.jsx';
 import { usePinned } from '../context/PinnedContext.jsx';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
+import { toast } from '../lib/toast.js';
 
 const TONE_BY_RISK = { green: 'sage', amber: 'gold', red: 'clay' };
 const TABS = [
@@ -85,7 +86,7 @@ export default function MaterialDetail() {
   }
 
   const saveField = async (field, value) => {
-    try { await updateMaterial(material.id, { [field]: value }); } catch (err) { alert('Could not save: ' + err.message); }
+    try { await updateMaterial(material.id, { [field]: value }); } catch (err) { toast.error('Could not save: ' + err.message); }
   };
 
   const submitCostLog = async e => {
@@ -96,7 +97,7 @@ export default function MaterialDetail() {
       await addCostLogEntry(material.id, costForm);
       setCostForm({ unitCost: '', note: '' });
     } catch (err) {
-      alert('Could not log that price: ' + err.message);
+      toast.error('Could not log that price: ' + err.message);
     } finally {
       setCostSaving(false);
     }
@@ -110,7 +111,7 @@ export default function MaterialDetail() {
       await linkVendor(material.id, linkVendorId);
       setLinkVendorId('');
     } catch (err) {
-      alert('Could not link that vendor: ' + err.message);
+      toast.error('Could not link that vendor: ' + err.message);
     } finally {
       setLinking(false);
     }

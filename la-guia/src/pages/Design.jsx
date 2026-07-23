@@ -13,6 +13,7 @@ import { ContextMenuTarget } from '../components/ContextMenu.jsx';
 import { SkeletonCard } from '../components/Skeleton.jsx';
 import { base64ToBlob } from '../lib/designImages.js';
 import { aiPost } from '../lib/aiApi.js';
+import { toast } from '../lib/toast.js';
 
 const STATUS_COLOR = { Sketching: 'var(--ink-3)', Refining: 'var(--c-design)', Ready: 'var(--green)' };
 const DESIGN_STATUSES = ['Sketching', 'Refining', 'Ready'];
@@ -135,7 +136,7 @@ export default function Design() {
       setNewName('');
       navigate(`/design/${id}`);
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
@@ -151,7 +152,7 @@ export default function Design() {
       setNewName('');
       navigate(`/design/${id}`);
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }

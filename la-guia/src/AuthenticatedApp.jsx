@@ -21,6 +21,7 @@ import OnboardingOverlay from './components/OnboardingOverlay.jsx';
 import ShortcutsHelpModal from './components/ShortcutsHelpModal.jsx';
 import FloatingChat from './components/FloatingChat.jsx';
 import OutOfCreditsModal from './components/OutOfCreditsModal.jsx';
+import ToastHost from './components/ToastHost.jsx';
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts.js';
 
 import Home from './pages/Home.jsx';
@@ -96,6 +97,7 @@ function AppShellInner() {
         <ShortcutsHelpModal open={helpOpen} onClose={closeHelp} />
         <FloatingChat />
         <OutOfCreditsModal />
+        <ToastHost />
       </div>
     </OnboardingProvider>
   );

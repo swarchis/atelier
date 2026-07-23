@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase.js';
 import EmptyState from '../components/EmptyState.jsx';
 import CostBreakdownWheel from '../components/CostBreakdownWheel.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
+import { toast } from '../lib/toast.js';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -137,18 +138,18 @@ export default function QuoteDetail() {
 
   const saveInputs = async (next) => {
     setLandedInputs(next);
-    try { await updateQuote(quote.id, { landed_cost_inputs: next }); } catch (err) { alert('Could not save: ' + err.message); }
+    try { await updateQuote(quote.id, { landed_cost_inputs: next }); } catch (err) { toast.error('Could not save: ' + err.message); }
   };
 
   const markReceived = async () => {
     if (!receivedAmount) return;
     setBusy(true);
-    try { await updateQuote(quote.id, { status: 'Received', amount: parseFloat(receivedAmount) }); } catch (err) { alert('Could not update quote: ' + err.message); } finally { setBusy(false); }
+    try { await updateQuote(quote.id, { status: 'Received', amount: parseFloat(receivedAmount) }); } catch (err) { toast.error('Could not update quote: ' + err.message); } finally { setBusy(false); }
   };
 
   const setStatus = async (status) => {
     setBusy(true);
-    try { await updateQuote(quote.id, { status }); } catch (err) { alert('Could not update quote: ' + err.message); } finally { setBusy(false); }
+    try { await updateQuote(quote.id, { status }); } catch (err) { toast.error('Could not update quote: ' + err.message); } finally { setBusy(false); }
   };
 
   const submitNegotiation = async e => {
@@ -159,7 +160,7 @@ export default function QuoteDetail() {
       await addNegotiation(quote.id, { direction: negDirection, amount: negAmount || null, note: negNote.trim() || null });
       setNegAmount(''); setNegNote('');
     } catch (err) {
-      alert('Could not log that: ' + err.message);
+      toast.error('Could not log that: ' + err.message);
     } finally {
       setNegSaving(false);
     }

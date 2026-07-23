@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { toast } from '../lib/toast.js';
 
 // A generic comment thread against the new `comments` table (entity_type +
 // entity_id), reused across Vendors/Quotes/Tech Packs instead of one-off
@@ -30,7 +31,7 @@ export default function CommentsPanel({ brandId, entityType, entityId }) {
       setComments(prev => [...prev, data]);
       setBody('');
     } catch (err) {
-      alert('Could not post comment: ' + err.message);
+      toast.error('Could not post comment: ' + err.message);
     } finally {
       setSaving(false);
     }

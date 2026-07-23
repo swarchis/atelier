@@ -10,6 +10,7 @@ import { useTheme } from '../lib/useTheme.js';
 import { WaxSeal } from './decor.jsx';
 import SidebarSearch from './SidebarSearch.jsx';
 import { NAV_GROUPS } from '../data/navPages.js';
+import { toast } from '../lib/toast.js';
 
 function GrainlineMark({ size = 22 }) {
   return (
@@ -60,7 +61,7 @@ export default function Sidebar() {
       setAddingBrand(false);
       setBrandOpen(false);
     } catch (err) {
-      alert('Could not create brand: ' + err.message);
+      toast.error('Could not create brand: ' + err.message);
     }
   };
 

@@ -11,6 +11,7 @@ import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { PhotoPanel } from '../components/decor.jsx';
 import CalendarGrid from '../components/CalendarGrid.jsx';
+import { toast } from '../lib/toast.js';
 
 const TABS = [
   { key: 'hub', label: 'Grid Preview', icon: 'ph-squares-four' },
@@ -76,12 +77,12 @@ export default function ContentHub() {
             setTab('accounts');
           })
           .catch(err => {
-            alert(`Failed to connect social account: ${err.message}`);
+            toast.error(`Failed to connect social account: ${err.message}`);
             window.history.replaceState({}, '', '/content');
           });
       }
     } else if (error) {
-      alert(`Failed to connect social account. Reason: ${error}`);
+      toast.error(`Failed to connect social account. Reason: ${error}`);
       window.history.replaceState({}, '', '/content');
     }
   }, [location.search, activeBrand]);
@@ -137,7 +138,7 @@ export default function ContentHub() {
       setFile(null); setPreviewUrl(null);
       setShowComposer(false);
     } catch (err) {
-      alert('Could not schedule post: ' + err.message);
+      toast.error('Could not schedule post: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -145,7 +146,7 @@ export default function ContentHub() {
 
   const toggleStatus = async (id, currentStatus) => {
     const nextStatus = currentStatus === 'Scheduled' ? 'Posted' : currentStatus === 'Posted' ? 'Draft' : 'Scheduled';
-    try { await updatePostStatus(id, nextStatus); } catch (err) { alert(err.message); }
+    try { await updatePostStatus(id, nextStatus); } catch (err) { toast.error(err.message); }
   };
 
   const [publishingId, setPublishingId] = useState(null);
@@ -467,7 +468,7 @@ function LaunchPlannerTab({ products, updateProduct }) {
       const plan = LAUNCH_TEMPLATE.map((t, i) => ({ id: `task-${i}`, label: t.label, offset: t.offset, status: 'pending' }));
       await updateProduct(product.id, { launch_date: launchDate, launch_plan: plan });
     } catch (err) {
-      alert('Could not save launch plan: ' + err.message);
+      toast.error('Could not save launch plan: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -475,7 +476,7 @@ function LaunchPlannerTab({ products, updateProduct }) {
 
   const toggleTask = async (taskId) => {
     const next = (product.launch_plan || []).map(t => t.id === taskId ? { ...t, status: t.status === 'done' ? 'pending' : 'done' } : t);
-    try { await updateProduct(product.id, { launch_plan: next }); } catch (err) { alert(err.message); }
+    try { await updateProduct(product.id, { launch_plan: next }); } catch (err) { toast.error(err.message); }
   };
 
   const plan = product?.launch_plan || [];
@@ -554,7 +555,7 @@ function InfluencersTab({ influencers, loading, createInfluencer, updateInfluenc
       setForm({ name: '', handle: '', platform: 'instagram', followers: '', contact_info: '', rate: '', notes: '' });
       setShowAdd(false);
     } catch (err) {
-      alert('Could not add influencer: ' + err.message);
+      toast.error('Could not add influencer: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -576,7 +577,7 @@ function InfluencersTab({ influencers, loading, createInfluencer, updateInfluenc
       });
       setDealForm({ productId: '', deliverables: '', amount: '', deal_date: '' });
     } catch (err) {
-      alert('Could not add deal: ' + err.message);
+      toast.error('Could not add deal: ' + err.message);
     } finally {
       setSavingDeal(false);
     }
