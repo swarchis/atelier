@@ -25,7 +25,7 @@ export default function SignUp() {
     }
   }, [location.search]);
 
-  const handleSubmit = async (e) => {
+const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.email || (!form.brandName && !isInvite) || !form.password) {
       return setError('All fields are required.');
@@ -33,17 +33,17 @@ export default function SignUp() {
     setLoading(true);
     setError('');
     try {
-    const data = await signUp(form.email, form.password, form.brandName || 'Workspace');
-    if (data?.user && !data?.session) {
-      setEmailSent(true);
-    } else {
-      navigate('/');
+      const data = await signUp(form.email, form.password, form.brandName || 'Workspace');
+      if (data?.user && !data?.session) {
+        setEmailSent(true); // Shows the "Check your email" banner
+      } else {
+        navigate('/');
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    setError(err.message);
-  } finally {
-    setLoading(false);
-  }
   };
 
   {emailSent ? (
