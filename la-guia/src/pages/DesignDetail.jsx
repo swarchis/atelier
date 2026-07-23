@@ -16,7 +16,7 @@ import InspirationTab from '../components/design-studio/InspirationTab.jsx';
 import VariantsTab from '../components/design-studio/VariantsTab.jsx';
 import HistoryTab from '../components/design-studio/HistoryTab.jsx';
 import SkuVariantsTab from '../components/design-studio/SkuVariantsTab.jsx';
-import { blobToBase64 } from '../lib/designImages.js';
+import { blobToBase64, uploadDesignImage } from '../lib/designImages.js';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import Splitter from '../components/Splitter.jsx';
 import AssetsTab from '../components/design-studio/AssetsTab.jsx';
@@ -63,6 +63,8 @@ export default function DesignDetail() {
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
+  const [savingCanvas, setSavingCanvas] = useState(false);
+  const autosaveBusy = useRef(false);
   const [toggling, setToggling] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
   const [tagType, setTagType] = useState('composition');
@@ -83,16 +85,16 @@ export default function DesignDetail() {
   const design = designs[id];
   const uploadedFile = getUploadedFile(id);
 
-  // Uploaded designs and AI-generated silhouettes keep their working file only
-  // in ProductsContext's in-memory map for the session — after a reload it's
-  // gone, and Photopea used to come up on its blank start screen. Fall back to
-  // the newest saved snapshot in design_versions (creation writes an
-  // 'Initial design' row for both). Template designs re-fetch their template
-  // asset instead, so they don't need this.
+  // The working canvas file lives only in ProductsContext's in-memory map for
+  // the session — after a reload it's gone, and Photopea used to come up on
+  // its blank start screen (or a blank template, losing saved work). Fall back
+  // to the newest saved snapshot in design_versions: creation writes an
+  // 'Initial design' row, manual saves write 'Saved canvas' rows, and the
+  // rolling 'Autosave' row keeps this within two minutes of live work.
   const [persistedFile, setPersistedFile] = useState(null);
   useEffect(() => {
     setPersistedFile(null);
-    if (!design || !['upload', 'ai-silhouette'].includes(design.baseType) || uploadedFile) return undefined;
+    if (!design || uploadedFile) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -128,6 +130,65 @@ export default function DesignDetail() {
       setSavingName(false);
     }
   };
+
+  // Capture the current Photopea canvas and persist it as a design_versions
+  // snapshot. Manual saves append a restorable 'Saved canvas' row; autosaves
+  // keep updating one rolling 'Autosave' row (bumping created_at so it sorts
+  // newest) rather than flooding history. Whatever is newest here is exactly
+  // what the canvas-restore fallback and every preview load, so saved work
+  // survives navigating away, reloads, and new sessions.
+  const persistCanvas = async (label) => {
+    const capturedUrl = await photopeaRef.current.capture();
+    const blob = await fetch(capturedUrl).then(r => r.blob());
+    const publicUrl = await uploadDesignImage(blob, id, label === 'Autosave' ? 'autosave' : 'save');
+    if (label === 'Autosave') {
+      const { data: existing } = await supabase
+        .from('design_versions').select('id')
+        .eq('product_id', id).eq('label', 'Autosave').maybeSingle();
+      if (existing) {
+        const { error } = await supabase
+          .from('design_versions')
+          .update({ image_url: publicUrl, created_at: new Date().toISOString() })
+          .eq('id', existing.id);
+        if (!error) { setHistoryRefreshKey(k => k + 1); return; }
+        // update blocked (e.g. missing RLS policy) — fall through to insert
+      }
+      await supabase.from('design_versions')
+        .insert([{ product_id: id, image_url: publicUrl, label: 'Autosave', source: 'autosave' }]);
+    } else {
+      const { error } = await supabase.from('design_versions')
+        .insert([{ product_id: id, image_url: publicUrl, label, source: 'manual-save' }]);
+      if (error) throw error;
+    }
+    setHistoryRefreshKey(k => k + 1);
+  };
+
+  const handleSaveCanvas = async () => {
+    setSavingCanvas(true);
+    setCaptureError(null);
+    try {
+      await persistCanvas('Saved canvas');
+    } catch (err) {
+      setCaptureError('Save failed: ' + err.message);
+    } finally {
+      setSavingCanvas(false);
+    }
+  };
+
+  // Autosave every 2 minutes while the canvas is live. Best-effort and quiet:
+  // an empty canvas (capture times out) or a transient failure just skips the
+  // cycle. Guarded so it never overlaps a manual save or another capture-based
+  // action (they share Photopea's single capture channel).
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      if (canvasStatus !== 'ready' || autosaveBusy.current || savingCanvas || analyzing || generatingTP || toggling) return;
+      autosaveBusy.current = true;
+      try { await persistCanvas('Autosave'); } catch { /* skip this cycle */ }
+      autosaveBusy.current = false;
+    }, 120000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, canvasStatus, savingCanvas, analyzing, generatingTP, toggling]);
   // Canvas + AI Studio used to be mutually-exclusive tabs — this is the one
   // place a real side-by-side split exists between them.
   const showSplitStudio = splitView && (tab === 'canvas' || tab === 'ai-studio');
@@ -568,6 +629,14 @@ export default function DesignDetail() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    className="btn btn-sm"
+                    onClick={handleSaveCanvas}
+                    disabled={savingCanvas || analyzing || generatingTP || toggling || canvasStatus !== 'ready'}
+                    title="Save the current canvas as a snapshot (it also autosaves every 2 minutes)"
+                  >
+                    {savingCanvas ? <><i className="ph ph-spinner ph-spin" /> Saving…</> : <><i className="ph ph-floppy-disk" /> Save</>}
+                  </button>
                   <button className="btn btn-sm btn-primary" onClick={captureAndAnalyze} disabled={analyzing || generatingTP}>
                     {analyzing ? 'Analyzing...' : 'Analyze Design'}
                     {!analyzing && <CreditCost feature="analyze-design" style={{ marginLeft: 6, color: 'inherit', opacity: 0.8 }} />}
@@ -585,7 +654,7 @@ export default function DesignDetail() {
                 <PhotopeaEditor 
                   ref={photopeaRef} 
                   svgMarkup={restoreFile ? null : svgFallback}
-                  file={restoreFile || uploadedFile || templateFile || persistedFile}
+                  file={restoreFile || uploadedFile || persistedFile || templateFile}
                   onStatusChange={setCanvasStatus} 
                 />
               </div>
