@@ -1,0 +1,103 @@
+ATELIER — hero intro clip, Runway image-to-video prompt
+=========================================================
+Upload: single starting frame (image-to-video). No end-frame control in
+Runway's manual UI, so the full 5-second arc has to be carried by this
+text prompt alone, landing on the new wordmark as the last beat.
+
+Model: Gen-4 (or Gen-3 Alpha Turbo)   Duration: 5s   Aspect: 16:9
+Brand palette to reference in the prompt: ink #0A0C11 (near-black),
+paper #F4F2EC (warm off-white), blue #6BA8DE, violet #A98CF5,
+coral #FF8A6B, gold #F0C56A.
+
+---------------------------------------------------------------
+FIRST FRAME (prepare/generate this before uploading to Runway)
+---------------------------------------------------------------
+Extreme macro shot of a single strand of white cotton thread suspended
+in near-total darkness. One narrow beam of hard key light crosses the
+frame diagonally from upper left, catching individual fibers along the
+thread's twist so each filament reads as a distinct silver highlight
+against the black. Shallow depth of field, the thread sharp only where
+the beam crosses it, falling into soft blur toward both ends. Fine
+suspended dust motes drifting through the beam, visible as tiny points
+of light. Cold, clinical color temperature (5600K) on the highlight,
+everything else crushed to true black. 85mm macro lens character, subtle
+film grain, no lens flare, no text, no logo, no camera motion — a still,
+tension-held frame, like the instant before a machine starts.
+
+---------------------------------------------------------------
+MOTION PROMPT (paste into Runway's prompt field)
+---------------------------------------------------------------
+A slow push-in on a single illuminated thread in total darkness holds
+for a beat, then the thread snaps taut and begins whipping through the
+frame at extreme speed, leaving faint motion-blurred afterimages of pale
+light. As it moves the thread starts drawing itself: thin glowing lines
+peel off its path and lock into place like a technical blueprint being
+plotted in real time, straight vector strokes and precise right-angle
+turns rather than organic curves, each line rendered in a distinct
+color that arrives in sequence — cool blue (#6BA8DE) first, violet
+(#A98CF5) layering over it a beat later, warm coral (#FF8A6B) tracing
+the final connecting strokes — with the barest wash of gold (#F0C56A)
+catching each intersection point like a soldered joint. The camera
+drifts in a slow diagonal arc around this forming diagram, treating it
+as a real object suspended in black space rather than a flat overlay,
+picking up subtle parallax between the layered lines. The construction
+accelerates, more lines appearing faster, the diagram growing dense and
+intricate — for a fraction of a second it reads as a fully realized
+technical schematic, tiny dimension ticks and hairline crosshatching
+visible at the joints. Then, on a hard rhythmic beat, the entire
+structure collapses inward toward its own center, every line retracting
+back into a single point of light with a soft concussive bloom, like a
+held breath releasing. Out of that point, one clean vertical thread
+draws itself downward through the frame in a single unbroken stroke,
+then sprouts two short diagonal strokes at its top and its base,
+forming a pair of matched chevron arrowheads — a minimal grainline
+mark, rendered in solid warm paper-white (#F4F2EC) with a soft outer
+glow in the same blue-violet-coral gradient that built the blueprint,
+now fully settled and static, centered in frame against pure black.
+The mark holds for a moment, then a clean sans-serif wordmark fades up
+directly beneath it: "ATELIER" in wide-tracked uppercase letterforms,
+medium weight, generous letter-spacing, warm paper-white, with a much
+smaller lowercase "labs" wordmark centered precisely under it at
+roughly a fifth of the height of "ATELIER," tighter tracking, dimmed
+to a soft grey-white — the two wordmarks reading as one lockup, not
+two separate elements. Soft ambient glow, no lens flare, no text
+glitching or morphing, no camera cuts, one continuous unbroken take,
+cinematic high-contrast grading throughout, deep blacks, controlled
+highlight rolloff, subtle film grain carried through the entire shot,
+8K photorealistic detail on the practical thread material at the
+start giving way to a cleaner, more graphic, less noisy look by the
+final logo card.
+
+---------------------------------------------------------------
+FALLBACK (if "ATELIER" / "labs" renders as garbled or illegible text)
+---------------------------------------------------------------
+Cut the wordmark sentence from the end of the motion prompt above and
+end the clip on the settled grainline mark instead — then overlay the
+real "ATELIER" + "labs" lockup as actual HTML/CSS text that fades in
+right as the video hands off into the site. Sharper than relying on
+the video model to render small type, and it's a cleaner seam into the
+live page anyway. Ask if you want that overlay/handoff built once you
+have a rendered clip.
+
+=================================================================
+SHORT VERSION — 1000-character limit (non-premium models)
+=================================================================
+Same first frame as above. Motion prompt (883 characters):
+
+Macro shot: a single white thread glows in a narrow beam of light in
+total darkness, drifting dust visible. It snaps taut and whips into
+motion at extreme speed, weaving into glowing blueprint lines in blue,
+violet, and coral that lock into place like a technical diagram being
+plotted live. Camera slowly arcs around the forming diagram as it
+grows dense and precise. On a hard beat the lines collapse inward into
+one point of light, then a clean vertical thread draws down and
+sprouts two diagonal chevrons, forming a warm white grainline mark
+with a soft blue-violet-coral glow, centered on black. ATELIER fades
+in beneath it in wide-tracked uppercase, with a small labs wordmark
+tightly centered under it. Cinematic high-contrast grading, deep
+blacks, film grain, one continuous take, no cuts, no text glitching,
+photorealistic thread detail giving way to a clean graphic finish.
+
+If ATELIER/labs renders garbled here too, drop the last two sentences
+("ATELIER fades in..." through "...tightly centered under it.") and
+end on the grainline mark — same fallback plan as above.

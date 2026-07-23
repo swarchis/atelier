@@ -1,0 +1,632 @@
+{
+  "api/index.js": {
+    "mtime": 1784112731.558086,
+    "ast_hash": "d228c0943e48a81a37d85a38277d6936",
+    "semantic_hash": "d228c0943e48a81a37d85a38277d6936"
+  },
+  "api/package.json": {
+    "mtime": 1783905893.8549082,
+    "ast_hash": "18d7119a92ccc81674f2b94533d7a04f",
+    "semantic_hash": "18d7119a92ccc81674f2b94533d7a04f"
+  },
+  "api/scripts/setup-stripe-products.js": {
+    "mtime": 1784025986.2424145,
+    "ast_hash": "d2233501b0a61cd39bc6da89eebca0d7",
+    "semantic_hash": "d2233501b0a61cd39bc6da89eebca0d7"
+  },
+  "la-guia/package.json": {
+    "mtime": 1784025986.2444139,
+    "ast_hash": "dbff21c98caf1a8a553f549f00a72f18",
+    "semantic_hash": "dbff21c98caf1a8a553f549f00a72f18"
+  },
+  "la-guia/src/App.jsx": {
+    "mtime": 1784095550.957565,
+    "ast_hash": "1456e380b3661d2c20d6b274a8d804c8",
+    "semantic_hash": "1456e380b3661d2c20d6b274a8d804c8"
+  },
+  "la-guia/src/components/BillingTab.jsx": {
+    "mtime": 1783905893.8559036,
+    "ast_hash": "4cc2037a0a0e820252c0484155902fa5",
+    "semantic_hash": "4cc2037a0a0e820252c0484155902fa5"
+  },
+  "la-guia/src/components/ConfirmDeleteModal.jsx": {
+    "mtime": 1783742263.7161736,
+    "ast_hash": "234ed9cd7710bbdb8227bf1c5a571fc7",
+    "semantic_hash": "234ed9cd7710bbdb8227bf1c5a571fc7"
+  },
+  "la-guia/src/components/CostBreakdownWheel.jsx": {
+    "mtime": 1783906902.6361406,
+    "ast_hash": "c9780783e8b2dd4dbfdca8b2ee82daba",
+    "semantic_hash": "c9780783e8b2dd4dbfdca8b2ee82daba"
+  },
+  "la-guia/src/components/EditableSectionTable.jsx": {
+    "mtime": 1783825704.5154963,
+    "ast_hash": "1104a2180ecba7b59cd5839e7feb56d5",
+    "semantic_hash": "1104a2180ecba7b59cd5839e7feb56d5"
+  },
+  "la-guia/src/components/EmptyState.jsx": {
+    "mtime": 1783547737.1090875,
+    "ast_hash": "bc7ebcebfc3ad40393a987b738ddd3cc",
+    "semantic_hash": "bc7ebcebfc3ad40393a987b738ddd3cc"
+  },
+  "la-guia/src/components/FloatingChat.jsx": {
+    "mtime": 1783929220.1369326,
+    "ast_hash": "0f961c384d237b95c433da57ced53165",
+    "semantic_hash": "0f961c384d237b95c433da57ced53165"
+  },
+  "la-guia/src/components/FlowStepper.jsx": {
+    "mtime": 1783929661.9571595,
+    "ast_hash": "4ac6b30db9be15a4bd3e4b09cb95cf0a",
+    "semantic_hash": "4ac6b30db9be15a4bd3e4b09cb95cf0a"
+  },
+  "la-guia/src/components/GarmentSilhouette.jsx": {
+    "mtime": 1783665023.59175,
+    "ast_hash": "b2b5532ea15d326338c02021a9578349",
+    "semantic_hash": "b2b5532ea15d326338c02021a9578349"
+  },
+  "la-guia/src/components/OnboardingOverlay.jsx": {
+    "mtime": 1783729332.7023723,
+    "ast_hash": "28dcb0f97634783ebb54018db15a9283",
+    "semantic_hash": "28dcb0f97634783ebb54018db15a9283"
+  },
+  "la-guia/src/components/PhotopeaEditor.jsx": {
+    "mtime": 1783745052.0005229,
+    "ast_hash": "8e5fc7eb7d3501912269e315880ef880",
+    "semantic_hash": "8e5fc7eb7d3501912269e315880ef880"
+  },
+  "la-guia/src/components/PriceHistoryChart.jsx": {
+    "mtime": 1783550502.3876987,
+    "ast_hash": "4bd96b1f182f249616ce12450e57641e",
+    "semantic_hash": "4bd96b1f182f249616ce12450e57641e"
+  },
+  "la-guia/src/components/RevenueChart.jsx": {
+    "mtime": 1783665403.3892722,
+    "ast_hash": "b73d96c18e557f76142338ce53f1bdb1",
+    "semantic_hash": "b73d96c18e557f76142338ce53f1bdb1"
+  },
+  "la-guia/src/components/ShortcutsHelpModal.jsx": {
+    "mtime": 1783666657.5772924,
+    "ast_hash": "876b3ed1b77215fe5e4908f95b9447a8",
+    "semantic_hash": "876b3ed1b77215fe5e4908f95b9447a8"
+  },
+  "la-guia/src/components/Sidebar.jsx": {
+    "mtime": 1784025986.2464142,
+    "ast_hash": "439d6f421d701d94ff1ac4c765272795",
+    "semantic_hash": "439d6f421d701d94ff1ac4c765272795"
+  },
+  "la-guia/src/components/SidebarSearch.jsx": {
+    "mtime": 1783727639.1353526,
+    "ast_hash": "70ddbfad6c2be27b2d13b9c291cdef44",
+    "semantic_hash": "70ddbfad6c2be27b2d13b9c291cdef44"
+  },
+  "la-guia/src/components/TabBar.jsx": {
+    "mtime": 1783667057.7008677,
+    "ast_hash": "e76b032c735c4724eb8b07f8b531dedb",
+    "semantic_hash": "e76b032c735c4724eb8b07f8b531dedb"
+  },
+  "la-guia/src/components/TechPackQuestionnaire.jsx": {
+    "mtime": 1783905893.8569026,
+    "ast_hash": "abe99d9508a077297b633f1630d99633",
+    "semantic_hash": "abe99d9508a077297b633f1630d99633"
+  },
+  "la-guia/src/components/dashboard/AISuggestions.jsx": {
+    "mtime": 1783905893.8569026,
+    "ast_hash": "89b4df51dad512715cde5da65858be64",
+    "semantic_hash": "89b4df51dad512715cde5da65858be64"
+  },
+  "la-guia/src/components/dashboard/CalendarTimeline.jsx": {
+    "mtime": 1783727512.705434,
+    "ast_hash": "38e5d26cb4c3bf27fdad3b7773e4ea31",
+    "semantic_hash": "38e5d26cb4c3bf27fdad3b7773e4ea31"
+  },
+  "la-guia/src/components/dashboard/ContinueWhereYouLeftOff.jsx": {
+    "mtime": 1783727418.2308462,
+    "ast_hash": "48989ef1ddc82e851a9901fc25d7277f",
+    "semantic_hash": "48989ef1ddc82e851a9901fc25d7277f"
+  },
+  "la-guia/src/components/dashboard/FavoriteProjects.jsx": {
+    "mtime": 1783727499.511133,
+    "ast_hash": "98b1d8699ed918f20c2bd9427d3f2c54",
+    "semantic_hash": "98b1d8699ed918f20c2bd9427d3f2c54"
+  },
+  "la-guia/src/components/dashboard/ProjectHealth.jsx": {
+    "mtime": 1783727484.867883,
+    "ast_hash": "895ca00e1d78069cb076920215bc1512",
+    "semantic_hash": "895ca00e1d78069cb076920215bc1512"
+  },
+  "la-guia/src/components/dashboard/StickyNotes.jsx": {
+    "mtime": 1783746321.5283158,
+    "ast_hash": "c4ba34acead664d237f8cc7cdd755729",
+    "semantic_hash": "c4ba34acead664d237f8cc7cdd755729"
+  },
+  "la-guia/src/components/dashboard/SuggestionInbox.jsx": {
+    "mtime": 1783743330.302782,
+    "ast_hash": "99c80f983a997bc341c29d42e78f3c73",
+    "semantic_hash": "99c80f983a997bc341c29d42e78f3c73"
+  },
+  "la-guia/src/components/decor.jsx": {
+    "mtime": 1783833789.07339,
+    "ast_hash": "4e8a9765b0668cb35d674cdd5629a6e4",
+    "semantic_hash": "4e8a9765b0668cb35d674cdd5629a6e4"
+  },
+  "la-guia/src/components/design-studio/AIStudioTab.jsx": {
+    "mtime": 1783905893.857903,
+    "ast_hash": "6b579e9701e7f7f3fc8cd46aa1f6d08a",
+    "semantic_hash": "6b579e9701e7f7f3fc8cd46aa1f6d08a"
+  },
+  "la-guia/src/components/design-studio/HistoryTab.jsx": {
+    "mtime": 1784025986.2475395,
+    "ast_hash": "4d0700c8a432973ddc0d14701f963979",
+    "semantic_hash": "4d0700c8a432973ddc0d14701f963979"
+  },
+  "la-guia/src/components/design-studio/InspirationTab.jsx": {
+    "mtime": 1784025986.2485445,
+    "ast_hash": "cf531d60b7549bab5a946bc10ec75216",
+    "semantic_hash": "cf531d60b7549bab5a946bc10ec75216"
+  },
+  "la-guia/src/components/design-studio/SkuVariantsTab.jsx": {
+    "mtime": 1783830213.7043378,
+    "ast_hash": "85144eebb4ab2e0029aaea1ad1c730b8",
+    "semantic_hash": "85144eebb4ab2e0029aaea1ad1c730b8"
+  },
+  "la-guia/src/components/design-studio/VariantsTab.jsx": {
+    "mtime": 1784025986.2490487,
+    "ast_hash": "cefb302c216f95a6861f984667cc0481",
+    "semantic_hash": "cefb302c216f95a6861f984667cc0481"
+  },
+  "la-guia/src/context/AIUsageContext.jsx": {
+    "mtime": 1783717103.3633008,
+    "ast_hash": "382259337164b3c0f1c8d8cd39a51c29",
+    "semantic_hash": "382259337164b3c0f1c8d8cd39a51c29"
+  },
+  "la-guia/src/context/AppUIContext.jsx": {
+    "mtime": 1783727365.1459975,
+    "ast_hash": "55dac5ec8f27ab7a7ce96a422a7bd9f0",
+    "semantic_hash": "55dac5ec8f27ab7a7ce96a422a7bd9f0"
+  },
+  "la-guia/src/context/AuthContext.jsx": {
+    "mtime": 1784025986.2510588,
+    "ast_hash": "89f4b729707bd196cc6cc41d714337bc",
+    "semantic_hash": "89f4b729707bd196cc6cc41d714337bc"
+  },
+  "la-guia/src/context/ChatContext.jsx": {
+    "mtime": 1784070549.7096503,
+    "ast_hash": "8f4e107f9dfa152810a5686d0c71b3d5",
+    "semantic_hash": "8f4e107f9dfa152810a5686d0c71b3d5"
+  },
+  "la-guia/src/context/ContentContext.jsx": {
+    "mtime": 1784112804.640169,
+    "ast_hash": "457ae5cac3222011fe6994badde8ea29",
+    "semantic_hash": "457ae5cac3222011fe6994badde8ea29"
+  },
+  "la-guia/src/context/MaterialsContext.jsx": {
+    "mtime": 1783930994.3083272,
+    "ast_hash": "058ac7c9ec9fc9f1e41b14487bbeb9a6",
+    "semantic_hash": "058ac7c9ec9fc9f1e41b14487bbeb9a6"
+  },
+  "la-guia/src/context/NotificationsContext.jsx": {
+    "mtime": 1783664286.6881602,
+    "ast_hash": "af2b5299036d2f6805149b739bb95ab8",
+    "semantic_hash": "af2b5299036d2f6805149b739bb95ab8"
+  },
+  "la-guia/src/context/OnboardingContext.jsx": {
+    "mtime": 1783668962.2767127,
+    "ast_hash": "1c394a8ae5148d4e0d2725754e87ed49",
+    "semantic_hash": "1c394a8ae5148d4e0d2725754e87ed49"
+  },
+  "la-guia/src/context/ProductionContext.jsx": {
+    "mtime": 1784095489.5788693,
+    "ast_hash": "c3dd378e2fa2237ad2860946effb3efe",
+    "semantic_hash": "c3dd378e2fa2237ad2860946effb3efe"
+  },
+  "la-guia/src/context/ProductsContext.jsx": {
+    "mtime": 1784025986.2530582,
+    "ast_hash": "a93a4e676929bd975b3540ffcdba9dec",
+    "semantic_hash": "a93a4e676929bd975b3540ffcdba9dec"
+  },
+  "la-guia/src/context/SalesContext.jsx": {
+    "mtime": 1784097986.396271,
+    "ast_hash": "b0203684c1aedc8a86a0a13d68c14612",
+    "semantic_hash": "b0203684c1aedc8a86a0a13d68c14612"
+  },
+  "la-guia/src/context/SamplingContext.jsx": {
+    "mtime": 1784025986.2540581,
+    "ast_hash": "b2d9e81470fb0d1bfd4352d5873f81a7",
+    "semantic_hash": "b2d9e81470fb0d1bfd4352d5873f81a7"
+  },
+  "la-guia/src/context/TeamContext.jsx": {
+    "mtime": 1783905893.8609097,
+    "ast_hash": "69a818ff2a3809d7eb4c17a72f1bf63d",
+    "semantic_hash": "69a818ff2a3809d7eb4c17a72f1bf63d"
+  },
+  "la-guia/src/context/UserPreferencesContext.jsx": {
+    "mtime": 1783666341.6491134,
+    "ast_hash": "e24c350da22e8e2aa3bfd8d7e3d5adee",
+    "semantic_hash": "e24c350da22e8e2aa3bfd8d7e3d5adee"
+  },
+  "la-guia/src/context/VendorsContext.jsx": {
+    "mtime": 1784025986.255059,
+    "ast_hash": "2ef0b743380363cff31182d3ddea6a86",
+    "semantic_hash": "2ef0b743380363cff31182d3ddea6a86"
+  },
+  "la-guia/src/data/mockData.js": {
+    "mtime": 1783547737.1585343,
+    "ast_hash": "7a9fcb8e039d88757669f608957b461f",
+    "semantic_hash": "7a9fcb8e039d88757669f608957b461f"
+  },
+  "la-guia/src/data/navPages.js": {
+    "mtime": 1784095528.1750126,
+    "ast_hash": "195c6c7742f35e6fea7c71cb7039935d",
+    "semantic_hash": "195c6c7742f35e6fea7c71cb7039935d"
+  },
+  "la-guia/src/data/onboardingSteps.js": {
+    "mtime": 1784025986.256058,
+    "ast_hash": "2d4caeeddd3233869d3d30fcb2d4b410",
+    "semantic_hash": "2d4caeeddd3233869d3d30fcb2d4b410"
+  },
+  "la-guia/src/data/plans.js": {
+    "mtime": 1783716965.7674115,
+    "ast_hash": "e363c8ee0be96082705edd83cf871bd5",
+    "semantic_hash": "e363c8ee0be96082705edd83cf871bd5"
+  },
+  "la-guia/src/lib/csvExport.js": {
+    "mtime": 1784095501.3489964,
+    "ast_hash": "c4759104848eec3305de79ac4be378d2",
+    "semantic_hash": "c4759104848eec3305de79ac4be378d2"
+  },
+  "la-guia/src/lib/designImages.js": {
+    "mtime": 1783741329.093251,
+    "ast_hash": "af56e3c6ad40df5cce93097884cb5949",
+    "semantic_hash": "af56e3c6ad40df5cce93097884cb5949"
+  },
+  "la-guia/src/lib/ecommerceSync.js": {
+    "mtime": 1784100944.9634542,
+    "ast_hash": "0f7ed2d29f6e52c79cd1554442783e89",
+    "semantic_hash": "0f7ed2d29f6e52c79cd1554442783e89"
+  },
+  "la-guia/src/lib/format.js": {
+    "mtime": 1784095820.6748803,
+    "ast_hash": "107aa9f2fde70bcd936f9ca27eb82db6",
+    "semantic_hash": "107aa9f2fde70bcd936f9ca27eb82db6"
+  },
+  "la-guia/src/lib/oauthHandoff.js": {
+    "mtime": 1784097552.5469353,
+    "ast_hash": "04592eabd33c7242484efe12b3405fd0",
+    "semantic_hash": "04592eabd33c7242484efe12b3405fd0"
+  },
+  "la-guia/src/lib/sku.js": {
+    "mtime": 1783829847.8408937,
+    "ast_hash": "a5fce5fa0e385318f4767294e3fa5003",
+    "semantic_hash": "a5fce5fa0e385318f4767294e3fa5003"
+  },
+  "la-guia/src/lib/supabase.js": {
+    "mtime": 1783547737.1675355,
+    "ast_hash": "7bfdafdc165503be09cd85369243e9d8",
+    "semantic_hash": "7bfdafdc165503be09cd85369243e9d8"
+  },
+  "la-guia/src/lib/techPackExcel.js": {
+    "mtime": 1783825907.5752478,
+    "ast_hash": "9c0258d4427650105e1d0757e6984cbf",
+    "semantic_hash": "9c0258d4427650105e1d0757e6984cbf"
+  },
+  "la-guia/src/lib/useKeyboardShortcuts.js": {
+    "mtime": 1783666643.371171,
+    "ast_hash": "301c518776a232852a076f85102ce3ec",
+    "semantic_hash": "301c518776a232852a076f85102ce3ec"
+  },
+  "la-guia/src/lib/useTheme.js": {
+    "mtime": 1783666784.118924,
+    "ast_hash": "c3f20be5853afb446b806044af937b39",
+    "semantic_hash": "c3f20be5853afb446b806044af937b39"
+  },
+  "la-guia/src/main.jsx": {
+    "mtime": 1783547737.1725342,
+    "ast_hash": "253d4db42a0b217629b29497cec5becb",
+    "semantic_hash": "253d4db42a0b217629b29497cec5becb"
+  },
+  "la-guia/src/pages/CollectionDetail.jsx": {
+    "mtime": 1783740155.872747,
+    "ast_hash": "5831106425473f23386157b66d8036f2",
+    "semantic_hash": "5831106425473f23386157b66d8036f2"
+  },
+  "la-guia/src/pages/Collections.jsx": {
+    "mtime": 1783740119.9583855,
+    "ast_hash": "bf07b2a28b24780d3289d09d8cbd0d7f",
+    "semantic_hash": "bf07b2a28b24780d3289d09d8cbd0d7f"
+  },
+  "la-guia/src/pages/ContentHub.jsx": {
+    "mtime": 1784112866.6852145,
+    "ast_hash": "a08ac57d620e861a051d4fd940f92094",
+    "semantic_hash": "a08ac57d620e861a051d4fd940f92094"
+  },
+  "la-guia/src/pages/Design.jsx": {
+    "mtime": 1783905893.8619096,
+    "ast_hash": "c5700203b4f7ae765cc5acf0303d7504",
+    "semantic_hash": "c5700203b4f7ae765cc5acf0303d7504"
+  },
+  "la-guia/src/pages/DesignDetail.jsx": {
+    "mtime": 1783905893.862909,
+    "ast_hash": "fd10d1f936151a99c4f0f75c9bf2fb5b",
+    "semantic_hash": "fd10d1f936151a99c4f0f75c9bf2fb5b"
+  },
+  "la-guia/src/pages/FinancialTools.jsx": {
+    "mtime": 1784095828.4842935,
+    "ast_hash": "b236b02f7bb54e2cfb3a10218c33ff69",
+    "semantic_hash": "b236b02f7bb54e2cfb3a10218c33ff69"
+  },
+  "la-guia/src/pages/Home.jsx": {
+    "mtime": 1783833824.8402777,
+    "ast_hash": "bc2387c9b1fec379055651baa5262c97",
+    "semantic_hash": "bc2387c9b1fec379055651baa5262c97"
+  },
+  "la-guia/src/pages/MaterialDetail.jsx": {
+    "mtime": 1783931099.0366342,
+    "ast_hash": "0beecf20bdd08c5c4ca248bd9ab4e8c6",
+    "semantic_hash": "0beecf20bdd08c5c4ca248bd9ab4e8c6"
+  },
+  "la-guia/src/pages/MaterialLibrary.jsx": {
+    "mtime": 1783931027.709726,
+    "ast_hash": "e265b94f3cc0ffa56e9eb25ecf238ed6",
+    "semantic_hash": "e265b94f3cc0ffa56e9eb25ecf238ed6"
+  },
+  "la-guia/src/pages/NotificationsInbox.jsx": {
+    "mtime": 1783905893.862909,
+    "ast_hash": "aeb60627263d2210577c72d781555599",
+    "semantic_hash": "aeb60627263d2210577c72d781555599"
+  },
+  "la-guia/src/pages/PrivacyPolicy.jsx": {
+    "mtime": 1784025986.2570624,
+    "ast_hash": "c3a6a195c4b4ddbf7a0930b6d0e6f6eb",
+    "semantic_hash": "c3a6a195c4b4ddbf7a0930b6d0e6f6eb"
+  },
+  "la-guia/src/pages/ProductInsights.jsx": {
+    "mtime": 1784025986.2570624,
+    "ast_hash": "ce52aecb7c164d355be68cd1baac96cd",
+    "semantic_hash": "ce52aecb7c164d355be68cd1baac96cd"
+  },
+  "la-guia/src/pages/ProductionOrderDetail.jsx": {
+    "mtime": 1784025986.2585728,
+    "ast_hash": "aef4a713d895e474a1d7d92b67371928",
+    "semantic_hash": "aef4a713d895e474a1d7d92b67371928"
+  },
+  "la-guia/src/pages/ProductionOrders.jsx": {
+    "mtime": 1783930903.2568102,
+    "ast_hash": "fe3b8c940b4472fd0a46ab507c2fbeab",
+    "semantic_hash": "fe3b8c940b4472fd0a46ab507c2fbeab"
+  },
+  "la-guia/src/pages/QuoteDetail.jsx": {
+    "mtime": 1784025986.259583,
+    "ast_hash": "f7b1cf8edb64e225d5d52abff7a0b6d4",
+    "semantic_hash": "f7b1cf8edb64e225d5d52abff7a0b6d4"
+  },
+  "la-guia/src/pages/QuoteTracker.jsx": {
+    "mtime": 1783907121.0415685,
+    "ast_hash": "4e22392a20f726b645d9879010bb0cf3",
+    "semantic_hash": "4e22392a20f726b645d9879010bb0cf3"
+  },
+  "la-guia/src/pages/ReadinessReview.jsx": {
+    "mtime": 1783668745.8876715,
+    "ast_hash": "f9e006f2e44f39e7e1a154a741012912",
+    "semantic_hash": "f9e006f2e44f39e7e1a154a741012912"
+  },
+  "la-guia/src/pages/SalesDashboard.jsx": {
+    "mtime": 1784101097.1228414,
+    "ast_hash": "d5bd5a6dfd2f059fed4004033bf93398",
+    "semantic_hash": "d5bd5a6dfd2f059fed4004033bf93398"
+  },
+  "la-guia/src/pages/SampleDetail.jsx": {
+    "mtime": 1783929721.7214005,
+    "ast_hash": "cc6d9211fea589549280af348fd4aef4",
+    "semantic_hash": "cc6d9211fea589549280af348fd4aef4"
+  },
+  "la-guia/src/pages/Sampling.jsx": {
+    "mtime": 1783929556.6092424,
+    "ast_hash": "204bc617255d0cd704aa52e28af42ffa",
+    "semantic_hash": "204bc617255d0cd704aa52e28af42ffa"
+  },
+  "la-guia/src/pages/Settings.jsx": {
+    "mtime": 1784025986.260581,
+    "ast_hash": "de53b4dcbc55f6d010880b452b2fe35e",
+    "semantic_hash": "de53b4dcbc55f6d010880b452b2fe35e"
+  },
+  "la-guia/src/pages/TechPackDetail.jsx": {
+    "mtime": 1784025986.2615817,
+    "ast_hash": "7a1bf7b0595046af1b928603eec89f12",
+    "semantic_hash": "7a1bf7b0595046af1b928603eec89f12"
+  },
+  "la-guia/src/pages/TechPackList.jsx": {
+    "mtime": 1783739912.557773,
+    "ast_hash": "aae92aa93c04be4034ee26e114f1353d",
+    "semantic_hash": "aae92aa93c04be4034ee26e114f1353d"
+  },
+  "la-guia/src/pages/TermsOfService.jsx": {
+    "mtime": 1784025986.262578,
+    "ast_hash": "7570b9af06ea50e8ffd0d72f494ee43d",
+    "semantic_hash": "7570b9af06ea50e8ffd0d72f494ee43d"
+  },
+  "la-guia/src/pages/VendorDetail.jsx": {
+    "mtime": 1784025986.2635772,
+    "ast_hash": "8d7a3f3f86de1c3e9e7544d43aab62c1",
+    "semantic_hash": "8d7a3f3f86de1c3e9e7544d43aab62c1"
+  },
+  "la-guia/src/pages/VendorDiscovery.jsx": {
+    "mtime": 1783907230.9541316,
+    "ast_hash": "d91a201935a84b1fe2d65fcb7d8eac81",
+    "semantic_hash": "d91a201935a84b1fe2d65fcb7d8eac81"
+  },
+  "la-guia/src/pages/auth/AuthLayout.jsx": {
+    "mtime": 1784066027.9025583,
+    "ast_hash": "62c38ce82c378da0b3004dfa28a2a0f5",
+    "semantic_hash": "62c38ce82c378da0b3004dfa28a2a0f5"
+  },
+  "la-guia/src/pages/auth/LogIn.jsx": {
+    "mtime": 1784066046.6104908,
+    "ast_hash": "5c00f3e1689acac84e2632b808578fea",
+    "semantic_hash": "5c00f3e1689acac84e2632b808578fea"
+  },
+  "la-guia/src/pages/auth/ResetPassword.jsx": {
+    "mtime": 1784066094.4984941,
+    "ast_hash": "0ae9515d5200e50c6b76c697b93da656",
+    "semantic_hash": "0ae9515d5200e50c6b76c697b93da656"
+  },
+  "la-guia/src/pages/auth/SignUp.jsx": {
+    "mtime": 1784066070.0407672,
+    "ast_hash": "c5acfd946caffdb3bf54847a441c4737",
+    "semantic_hash": "c5acfd946caffdb3bf54847a441c4737"
+  },
+  "la-guia/src/pages/auth/UpdatePassword.jsx": {
+    "mtime": 1784066111.684611,
+    "ast_hash": "5abe2381abf7eb941cdbf89b83deeab4",
+    "semantic_hash": "5abe2381abf7eb941cdbf89b83deeab4"
+  },
+  "la-guia/src/pages/auth/Welcome.jsx": {
+    "mtime": 1784065525.3308468,
+    "ast_hash": "eb06f3f57d510d7ea4172f5b5abf795a",
+    "semantic_hash": "eb06f3f57d510d7ea4172f5b5abf795a"
+  },
+  "la-guia/vite.config.js": {
+    "mtime": 1783547737.337558,
+    "ast_hash": "7142ef5b1dc47987d4c18851a72fae4e",
+    "semantic_hash": "7142ef5b1dc47987d4c18851a72fae4e"
+  },
+  "supabase/migrations/002_vendors_and_quotes.sql": {
+    "mtime": 1783548819.2684903,
+    "ast_hash": "e9a8ccf93724fdf18333f6bc5983efa6",
+    "semantic_hash": "e9a8ccf93724fdf18333f6bc5983efa6"
+  },
+  "supabase/migrations/003_vendor_enhancements.sql": {
+    "mtime": 1783550433.393854,
+    "ast_hash": "3e47fba6a189bcb19f6994194bd40df9",
+    "semantic_hash": "3e47fba6a189bcb19f6994194bd40df9"
+  },
+  "supabase/migrations/004_production_orders.sql": {
+    "mtime": 1783580523.2612624,
+    "ast_hash": "2efd13ca25e023a6555a03e7ead0499b",
+    "semantic_hash": "2efd13ca25e023a6555a03e7ead0499b"
+  },
+  "supabase/migrations/005_ai_silhouette.sql": {
+    "mtime": 1783664982.7690542,
+    "ast_hash": "d1147bd01f9c3111d84c4f7115f1609a",
+    "semantic_hash": "d1147bd01f9c3111d84c4f7115f1609a"
+  },
+  "supabase/migrations/006_user_preferences.sql": {
+    "mtime": 1783666329.8498414,
+    "ast_hash": "72c020556dadf92b35f85f2b484cf38c",
+    "semantic_hash": "72c020556dadf92b35f85f2b484cf38c"
+  },
+  "supabase/migrations/007_teams_and_rls.sql": {
+    "mtime": 1783666479.417909,
+    "ast_hash": "2ee49c5675f99be68c9f1c5ec4fdf2ec",
+    "semantic_hash": "2ee49c5675f99be68c9f1c5ec4fdf2ec"
+  },
+  "supabase/migrations/008_billing.sql": {
+    "mtime": 1783716911.43054,
+    "ast_hash": "9181f61737620d4a021f055aafbc3ce0",
+    "semantic_hash": "9181f61737620d4a021f055aafbc3ce0"
+  },
+  "supabase/migrations/009_shopify.sql": {
+    "mtime": 1783727046.7792692,
+    "ast_hash": "e0926cae7b4fe45ad0d4e81618690594",
+    "semantic_hash": "e0926cae7b4fe45ad0d4e81618690594"
+  },
+  "supabase/migrations/010_favorites.sql": {
+    "mtime": 1783727340.9600112,
+    "ast_hash": "411cc2f56aef31f5078d43f49e57b708",
+    "semantic_hash": "411cc2f56aef31f5078d43f49e57b708"
+  },
+  "supabase/migrations/011_design_studio.sql": {
+    "mtime": 1783741131.090874,
+    "ast_hash": "40ec051a2211a2e49ed41c4af8a9878c",
+    "semantic_hash": "40ec051a2211a2e49ed41c4af8a9878c"
+  },
+  "supabase/migrations/012_feedback.sql": {
+    "mtime": 1783743269.7246628,
+    "ast_hash": "e0820af9e27d71ecbdcd93f5b5271118",
+    "semantic_hash": "e0820af9e27d71ecbdcd93f5b5271118"
+  },
+  "supabase/migrations/013_tech_pack_builder.sql": {
+    "mtime": 1783825544.0859947,
+    "ast_hash": "6f2f9a07dea19ded72c85de208a50234",
+    "semantic_hash": "6f2f9a07dea19ded72c85de208a50234"
+  },
+  "supabase/migrations/014_product_management.sql": {
+    "mtime": 1783829835.7370386,
+    "ast_hash": "83aacbb9cabea1c632d7dffb65a9c967",
+    "semantic_hash": "83aacbb9cabea1c632d7dffb65a9c967"
+  },
+  "supabase/migrations/015_vendor_platform.sql": {
+    "mtime": 1783831941.593796,
+    "ast_hash": "9255c371e8a7fa4639d743c6a4f1af42",
+    "semantic_hash": "9255c371e8a7fa4639d743c6a4f1af42"
+  },
+  "supabase/migrations/016_chat.sql": {
+    "mtime": 1783833893.1103888,
+    "ast_hash": "3eca121ed112b2bc0d0365b35269fdef",
+    "semantic_hash": "3eca121ed112b2bc0d0365b35269fdef"
+  },
+  "supabase/migrations/017_rfq_and_quote_economics.sql": {
+    "mtime": 1784025986.2665818,
+    "ast_hash": "8f08d07a125ab1df0d06094df8448376",
+    "semantic_hash": "8f08d07a125ab1df0d06094df8448376"
+  },
+  "supabase/migrations/018_sampling.sql": {
+    "mtime": 1783929326.3110557,
+    "ast_hash": "1bf6df92a53ce07a5f9bf5cc9e24c195",
+    "semantic_hash": "1bf6df92a53ce07a5f9bf5cc9e24c195"
+  },
+  "supabase/migrations/019_production_tracking.sql": {
+    "mtime": 1783930653.7642272,
+    "ast_hash": "2434426f70f3d6f62bc717a515cdf61b",
+    "semantic_hash": "2434426f70f3d6f62bc717a515cdf61b"
+  },
+  "supabase/migrations/020_materials_library.sql": {
+    "mtime": 1783930946.5445518,
+    "ast_hash": "237f473976aafdd999d61e620c8ce1e7",
+    "semantic_hash": "237f473976aafdd999d61e620c8ce1e7"
+  },
+  "supabase/migrations/021_chat_ai_creation_rpc.sql": {
+    "mtime": 1784070374.1931858,
+    "ast_hash": "439edf33222b8e23820ae66c1554a772",
+    "semantic_hash": "439edf33222b8e23820ae66c1554a772"
+  },
+  "supabase/migrations/022_chat_rls_policy_repair.sql": {
+    "mtime": 1784070549.7086496,
+    "ast_hash": "0489862c3f18dd62ee965ca100dd99dd",
+    "semantic_hash": "0489862c3f18dd62ee965ca100dd99dd"
+  },
+  "supabase/migrations/023_production_payments.sql": {
+    "mtime": 1784095461.4241266,
+    "ast_hash": "1090349a74245ce26763d4d3c343ad32",
+    "semantic_hash": "1090349a74245ce26763d4d3c343ad32"
+  },
+  "supabase/migrations/024_ecommerce_platforms.sql": {
+    "mtime": 1784097604.9168508,
+    "ast_hash": "19c0e7622ce4657bbae07b90ae4b9b4f",
+    "semantic_hash": "19c0e7622ce4657bbae07b90ae4b9b4f"
+  },
+  "supabase/migrations/025_woocommerce_and_multiplatform_sales.sql": {
+    "mtime": 1784097897.80763,
+    "ast_hash": "2b50889cdbf49baeacaaa52eb8725179",
+    "semantic_hash": "2b50889cdbf49baeacaaa52eb8725179"
+  },
+  "supabase/migrations/026_marketing_foundation.sql": {
+    "mtime": 1784112772.0220084,
+    "ast_hash": "846bc4da760a02362740a3dcc5a53591",
+    "semantic_hash": "846bc4da760a02362740a3dcc5a53591"
+  },
+  "supabase/migrations/INITIAL_SCHEMA.sql": {
+    "mtime": 1784025986.2665818,
+    "ast_hash": "5bf4c8a79471986cacfb8b5b516211f2",
+    "semantic_hash": "5bf4c8a79471986cacfb8b5b516211f2"
+  },
+  "README.md": {
+    "mtime": 1784113094.4134798,
+    "ast_hash": "ea24216690133c8c04df23a435a4baea",
+    "semantic_hash": "ea24216690133c8c04df23a435a4baea"
+  },
+  "la-guia/index.html": {
+    "mtime": 1784065525.329847,
+    "ast_hash": "81d21f43be72756995c7f825ed09eda0",
+    "semantic_hash": "81d21f43be72756995c7f825ed09eda0"
+  }
+}
