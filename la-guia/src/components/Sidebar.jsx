@@ -11,14 +11,7 @@ import { WaxSeal } from './decor.jsx';
 import SidebarSearch from './SidebarSearch.jsx';
 import { NAV_GROUPS } from '../data/navPages.js';
 import { toast } from '../lib/toast.js';
-
-function GrainlineMark({ size = 22 }) {
-  return (
-    <svg width={size} height={size * 0.7} viewBox="0 0 24 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M1 8h9m4 0h9M14 8l-4-4m0 8 4-4M10 8l4-4m-4 4 4 4" stroke="var(--sb-accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
+import { NeedleA } from '../pages/auth/NeedleA.jsx';
 
 export default function Sidebar() {
   const { isDark, toggle } = useTheme();
@@ -86,7 +79,7 @@ export default function Sidebar() {
       <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid var(--sb-border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <GrainlineMark />
+            <NeedleA size={26} color="var(--sb-ink)" />
             <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 23, fontWeight: 500, color: 'var(--sb-ink)', letterSpacing: '-0.01em' }}>
               Atelier
             </span>
