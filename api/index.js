@@ -1794,7 +1794,7 @@ const ELEMENT_MODE_PROMPTS = {
   // are bad at blind — results were unrecognizable for anything but the
   // simplest shapes. An actual image model reasons in pixel space, so it's
   // structurally better suited to rendering a coherent garment outline.
-  'silhouette': (p) => `a professional technical fashion flat sketch of a ${p || 'garment'}: the EMPTY garment only, shown as if laid perfectly flat on white paper — no person, no body, no mannequin anywhere in the image. Front view, vertically symmetric, centered, the garment filling most of the frame. Clean black ink outline with thin uniform line weight, spec-sheet tech-pack CAD illustration style, exactly one garment, a single drawing`,
+  'silhouette': (p) => `ONE single ${p || 'garment'}, drawn once as a technical fashion flat sketch: the empty garment only — no person, no body, no mannequin. A SINGLE front view, centered and vertically symmetric, filling most of the frame. Clean black ink outline, thin uniform line weight, technical CAD line-art. Exactly one garment and exactly one view — this is NOT a spec sheet, NOT a turnaround, NOT a front-and-back layout, NOT a set of variations; render a single isolated garment outline and nothing else`,
 };
 
 // SDXL's favorite failure here is a sheet of several options on one canvas —
@@ -1804,7 +1804,7 @@ const ANTI_GRID_NEGATIVE = 'multiple designs, multiple variations, grid of optio
 
 const ELEMENT_MODE_EXTRA_NEGATIVE = {
   'add-element': ANTI_GRID_NEGATIVE,
-  'silhouette': `${ANTI_GRID_NEGATIVE}, person, human, people, man, woman, child, face, head, hair, neck, hands, fingers, arms, legs, feet, body, torso, skin, figure, character, model, mannequin, dress form, color, fabric texture, painting, 3d render, photorealistic render, shading, gradient, sketch shading, cross-hatching`,
+  'silhouette': `${ANTI_GRID_NEGATIVE}, multiple views, back view, front and back, turnaround, three-quarter view, side view, spec sheet, two garments, three garments, duplicate garment, tiled, split panel, panels, person, human, people, man, woman, child, face, head, hair, neck, hands, fingers, arms, legs, feet, body, torso, skin, figure, character, model, mannequin, dress form, color, fabric texture, painting, 3d render, photorealistic render, shading, gradient, sketch shading, cross-hatching`,
 };
 
 app.post('/api/design/generate-element', metered('design-generate-element'), async (req, res) => {
