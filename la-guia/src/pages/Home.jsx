@@ -335,7 +335,7 @@ export default function Home() {
             />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <span className="tag tag-accent">{featured.stage === 'launched' ? 'Launched' : 'In production'}</span>
+                <span className="tag tag-accent">{STAGES.find(s => s.key === featured.stage)?.label || 'In progress'}</span>
                 <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 24, color: 'var(--ink)', marginTop: 10, lineHeight: 1.2 }}>{featured.name}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 4 }}>{featured.category}{featured.collectionId ? ` · ${collections.find(c => c.id === featured.collectionId)?.name || ''}` : ''}</div>
               </div>

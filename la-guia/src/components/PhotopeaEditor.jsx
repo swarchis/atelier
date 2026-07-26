@@ -25,8 +25,9 @@ function rasterizeSvgToPng(svgMarkup, width, height) {
 
 const PhotopeaEditor = forwardRef(function PhotopeaEditor({ svgMarkup, file, onStatusChange }, ref) {
   const iframeRef = useRef(null);
-  const [status, setStatus] = useState('loading');
-  const [loadTick, setLoadTick] = useState(0); // bumped on each iframe (re)load
+  const [status, setStatus] = useState('loading'); // user-facing badge
+  const [booted, setBooted] = useState(false);     // iframe runtime is up
+  const [loadTick, setLoadTick] = useState(0);     // bumped on each iframe (re)load
   const pendingCapture = useRef(null);
   // Content already pushed into the CURRENT iframe document. Loading used to
   // happen once inside onLoad, which silently dropped content that arrived
@@ -36,11 +37,13 @@ const PhotopeaEditor = forwardRef(function PhotopeaEditor({ svgMarkup, file, onS
 
   useEffect(() => { onStatusChange?.(status); }, [status]);
 
-  // Fallback: forcefully set to ready after 3 seconds just in case onLoad misses
+  // Safety net only. Photopea's editor takes ~10-15s to boot and paint, so the
+  // old 3s timer flipped the badge to "Canvas ready" while the user was still
+  // staring at a blank white panel. Ready is now driven by the real load/
+  // content events below; this only rescues a stuck iframe whose onLoad never
+  // fires, so the canvas never appears permanently frozen.
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setStatus('ready');
-    }, 3000);
+    const timer = setTimeout(() => setStatus('ready'), 25000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -117,23 +120,26 @@ const PhotopeaEditor = forwardRef(function PhotopeaEditor({ svgMarkup, file, onS
 
   const handleLoad = async () => {
     // Give Photopea a beat to boot its runtime, then mark this (fresh) iframe
-    // document as empty so the content effect below (re)loads into it.
+    // document as empty so the content effect below (re)loads into it. Note
+    // this drives `booted`, not the user-facing status — the editor is not
+    // visually usable the instant its iframe fires onLoad.
     await new Promise(r => setTimeout(r, 2200));
     lastLoadedRef.current = null;
-    setStatus('ready');
+    setBooted(true);
     setLoadTick(t => t + 1);
   };
 
-  // Push the canvas content whenever BOTH are true: Photopea is ready and we
+  // Push the canvas content whenever BOTH are true: Photopea has booted and we
   // have something to show — regardless of which happened first. Runs at most
   // once per iframe document (lastLoadedRef), so a fullscreen toggle or prop
   // identity change can't open duplicate documents over the user's work.
   useEffect(() => {
-    if (status !== 'ready') return;
+    if (!booted) return;
     if (lastLoadedRef.current) return; // this document already has content
     const win = iframeRef.current?.contentWindow;
     const content = file || svgMarkup;
-    if (!win || !content) return;
+    if (!win) return;
+    if (!content) { setStatus('ready'); return; } // nothing to restore — blank canvas is usable
     lastLoadedRef.current = content;
     (async () => {
       try {
@@ -146,9 +152,12 @@ const PhotopeaEditor = forwardRef(function PhotopeaEditor({ svgMarkup, file, onS
         }
       } catch (e) {
         console.error('Canvas load error:', e);
+      } finally {
+        // Content handed to Photopea — the badge can honestly say "ready".
+        setStatus('ready');
       }
     })();
-  }, [file, svgMarkup, status, loadTick]);
+  }, [file, svgMarkup, booted, loadTick]);
 
   return (
     <iframe

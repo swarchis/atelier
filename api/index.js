@@ -354,7 +354,7 @@ async function callGeminiImage(prompt, imageInputsBase64 = []) {
 // insufficient-balance 403, while base SDXL succeeds with the same key.
 const PIXAZO_SDXL_URL = 'https://gateway.pixazo.ai/getImage/v1/getSDXLImage';
 
-async function callPixazoElement(prompt, extraNegative = '') {
+async function callPixazoElement(prompt, extraNegative = '', size = { width: 1024, height: 1024 }) {
   if (!process.env.PIXAZO_API_KEY) {
     throw new Error('PIXAZO_API_KEY is not set in api/.env — get one at api-console.pixazo.ai.');
   }
@@ -366,8 +366,8 @@ async function callPixazoElement(prompt, extraNegative = '') {
     body: JSON.stringify({
       prompt: fullPrompt,
       negativePrompt: `photo, photorealistic, background scene, shadow, gradient background, texture background, watermark, text, frame, border${extraNegative ? ', ' + extraNegative : ''}`,
-      height: 1024,
-      width: 1024,
+      height: size.height,
+      width: size.width,
     }),
   });
 
@@ -1802,6 +1802,16 @@ const ELEMENT_MODE_PROMPTS = {
 // SUPPOSED to repeat, and negating "grid" degrades legitimate patterns.
 const ANTI_GRID_NEGATIVE = 'multiple designs, multiple variations, grid of options, collage, contact sheet, side-by-side versions, several drawings';
 
+// Canvas shape per mode. Verified in production: on a SQUARE canvas the model
+// fills the spare width with a second copy of the garment (front+back pair) no
+// matter how firmly the prompt forbids it — the shape of the frame drives the
+// composition more than the wording does. A tall portrait frame matches a
+// single garment's proportions and leaves no room for a neighbour. Logos and
+// tileable patterns stay square.
+const ELEMENT_MODE_SIZE = {
+  'silhouette': { width: 768, height: 1024 },
+};
+
 const ELEMENT_MODE_EXTRA_NEGATIVE = {
   'add-element': ANTI_GRID_NEGATIVE,
   'silhouette': `${ANTI_GRID_NEGATIVE}, multiple views, back view, front and back, turnaround, three-quarter view, side view, spec sheet, two garments, three garments, duplicate garment, tiled, split panel, panels, person, human, people, man, woman, child, face, head, hair, neck, hands, fingers, arms, legs, feet, body, torso, skin, figure, character, model, mannequin, dress form, color, fabric texture, painting, 3d render, photorealistic render, shading, gradient, sketch shading, cross-hatching`,
@@ -1813,7 +1823,11 @@ app.post('/api/design/generate-element', metered('design-generate-element'), asy
     const { mode, prompt } = req.body;
     const builder = ELEMENT_MODE_PROMPTS[mode];
     if (!builder) return res.status(400).json({ ok: false, error: 'Unknown element mode: ' + mode });
-    const result = await callPixazoElement(builder(prompt), ELEMENT_MODE_EXTRA_NEGATIVE[mode] || '');
+    const result = await callPixazoElement(
+      builder(prompt),
+      ELEMENT_MODE_EXTRA_NEGATIVE[mode] || '',
+      ELEMENT_MODE_SIZE[mode] || { width: 1024, height: 1024 },
+    );
     console.log("✅ Element generation successful:", mode);
     res.json({ ok: true, imageBase64: result.base64, mimeType: result.mimeType });
   } catch (error) {
