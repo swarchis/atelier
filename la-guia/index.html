@@ -28,6 +28,46 @@
     <meta name="twitter:image" content="https://atelierlabs.app/og.png" />
 
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Structured data: tells Google this is a software product (by a named
+         org "Atelier Labs"), not one of the many art/fashion "ateliers". -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://atelierlabs.app/#organization",
+          "name": "Atelier Labs",
+          "alternateName": "Atelier",
+          "url": "https://atelierlabs.app/",
+          "logo": "https://atelierlabs.app/apple-touch-icon.png",
+          "description": "Maker of Atelier, the production OS for independent clothing brands."
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://atelierlabs.app/#website",
+          "url": "https://atelierlabs.app/",
+          "name": "Atelier",
+          "publisher": { "@id": "https://atelierlabs.app/#organization" }
+        },
+        {
+          "@type": "SoftwareApplication",
+          "name": "Atelier",
+          "url": "https://atelierlabs.app/",
+          "applicationCategory": "BusinessApplication",
+          "operatingSystem": "Web",
+          "publisher": { "@id": "https://atelierlabs.app/#organization" },
+          "description": "Atelier takes independent clothing brands from a rough sketch to a manufactured, sellable product — AI tech packs, vendor sourcing, quotes, sampling, production tracking and sales, in one tool.",
+          "offers": [
+            { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD" },
+            { "@type": "Offer", "name": "Basic", "price": "29", "priceCurrency": "USD" },
+            { "@type": "Offer", "name": "Premium", "price": "79", "priceCurrency": "USD" }
+          ]
+        }
+      ]
+    }
+    </script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M2 12h16m0 0-4-4m4 4-4 4M22 12l-4-4m4 4-4 4' stroke='%232F5D7C' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

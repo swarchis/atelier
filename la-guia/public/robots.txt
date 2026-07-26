@@ -1,0 +1,11 @@
+# https://atelierlabs.app
+User-agent: *
+Allow: /
+
+# Utility/auth routes — no SEO value, keep them out of the index
+Disallow: /login
+Disallow: /signup
+Disallow: /reset-password
+Disallow: /update-password
+
+Sitemap: https://atelierlabs.app/sitemap.xml
