@@ -7,6 +7,7 @@ import { useInfluencers } from '../context/InfluencersContext.jsx';
 import { currency } from '../lib/format.js';
 import { supabase } from '../lib/supabase.js';
 import { consumeOAuthHandoff } from '../lib/oauthHandoff.js';
+import { apiPost } from '../lib/aiApi.js';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { PhotoPanel } from '../components/decor.jsx';
@@ -170,10 +171,8 @@ export default function ContentHub() {
     }
     setPublishingId(post.id);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/social/publish/${post.platform}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken: account.access_token, caption: post.caption, imageUrl: post.image_url, boardId }),
+      const res = await apiPost(`/api/social/publish/${post.platform}`, {
+        accessToken: account.access_token, caption: post.caption, imageUrl: post.image_url, boardId,
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
@@ -777,10 +776,11 @@ function EmailCampaignsTab({ activeBrand }) {
     setSending(true);
     setError(null);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/send-campaign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject: campaignForm.subject, body: campaignForm.body, recipients: subscribedContacts.map(c => c.email) }),
+      const res = await apiPost('/api/send-campaign', {
+        brandId: activeBrand.id,
+        subject: campaignForm.subject,
+        body: campaignForm.body,
+        recipients: subscribedContacts.map(c => c.email),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);

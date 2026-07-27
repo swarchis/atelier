@@ -49,6 +49,12 @@ const PhotopeaEditor = forwardRef(function PhotopeaEditor({ svgMarkup, file, onS
 
   useEffect(() => {
     function handleMessage(e) {
+      // Only trust the canvas iframe. Without this, any window able to
+      // postMessage here (an opener, an embedder, another frame) could satisfy
+      // a pending capture with its own bytes — which then get uploaded and
+      // saved as the founder's design. Comparing the source window rather than
+      // the origin string keeps this correct even if Photopea moves domains.
+      if (e.source !== iframeRef.current?.contentWindow) return;
       if (e.data instanceof ArrayBuffer && pendingCapture.current) {
         const pending = pendingCapture.current;
         pendingCapture.current = null;

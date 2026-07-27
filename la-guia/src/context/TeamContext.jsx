@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { useProducts } from './ProductsContext.jsx';
 import { useAuth } from './AuthContext.jsx';
 import { useUserPreferences } from './UserPreferencesContext.jsx';
+import { apiPost } from '../lib/aiApi.js';
 
 const TeamContext = createContext(null);
 
@@ -94,17 +95,16 @@ export function TeamProvider({ children }) {
     
     setMembers(prev => [...prev, data]);
 
-    // 2. Dispatch the Email via our Backend
+    // 2. Dispatch the Email via our Backend. Authenticated + brand-scoped now:
+    // the endpoint sends from our own verified domain, so it checks the caller
+    // actually belongs to the brand named in the invite.
     try {
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/send-invite`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: targetEmail,
-          brandName: activeBrand.name,
-          inviterName: preferences?.full_name || user?.email,
-          role: role
-        })
+      await apiPost('/api/send-invite', {
+        email: targetEmail,
+        brandId: activeBrand.id,
+        brandName: activeBrand.name,
+        inviterName: preferences?.full_name || user?.email,
+        role: role,
       });
     } catch (err) {
       console.error("Failed to send invite email", err);

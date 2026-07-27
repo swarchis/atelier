@@ -5,16 +5,15 @@
 // the original Shopify-only sync), so every platform's raw order format
 // gets normalized in one place per adapter rather than leaking
 // platform-specific fields further into the app.
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { apiPost } from './aiApi.js';
 
+// These endpoints proxy a request to the connected storefront using the
+// founder's own store credentials, so the backend requires a signed-in caller
+// — apiPost attaches the Supabase JWT. Response handling is unchanged.
 async function postJSON(path, body) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Request failed');
+  const res = await apiPost(path, body);
+  const data = await res.json().catch(() => null);
+  if (!data || !data.ok) throw new Error((data && data.error) || 'Request failed');
   return data;
 }
 

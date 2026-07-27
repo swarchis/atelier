@@ -223,6 +223,83 @@ function metered(feature) {
 // rather than letting requests through unauthenticated.
 app.use(AI_PATHS, requireAuth);
 
+// ── Security helpers ─────────────────────────────────────────────────────────
+
+// Escapes untrusted values interpolated into an outbound HTML email. Invite
+// fields arrive from the client, so without this a crafted brand/inviter name
+// could inject markup (a fake link) into a mail sent from our verified domain.
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Hostnames that must never be reachable from a server-side fetch: an
+// attacker-supplied store URL would otherwise let this API read the cloud
+// metadata service or probe services on the private network behind it (SSRF),
+// with the response echoed back in the error message.
+const BLOCKED_HOST_PATTERNS = [
+  /^localhost$/i,
+  /\.local$/i,
+  /\.internal$/i,
+  /^metadata(\.google\.internal)?$/i,
+  /^\[?::1\]?$/,                                   // IPv6 loopback
+  /^\[?(fc|fd)[0-9a-f]{2}:/i,                      // IPv6 unique-local
+  /^\[?fe80:/i,                                    // IPv6 link-local
+  /^127\./,                                        // IPv4 loopback
+  /^10\./,                                         // RFC1918
+  /^192\.168\./,                                   // RFC1918
+  /^172\.(1[6-9]|2[0-9]|3[01])\./,                 // RFC1918
+  /^169\.254\./,                                   // link-local / cloud metadata
+  /^0\./,
+];
+
+// Validates a founder-supplied storefront URL before the server fetches it.
+// HTTPS is required on its own merits here — WooCommerce's key/secret auth is
+// Basic auth, so plain HTTP would put the store's credentials on the wire.
+// Note this checks the hostname as written: a name that resolves to a private
+// address (DNS rebinding) still gets through, which would need connection-time
+// IP pinning to close properly. This blocks the direct attack, not that one.
+function safeStoreUrl(rawUrl) {
+  const raw = String(rawUrl).trim();
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    // Tolerate a bare "your-store.com" (no scheme). Only when the value
+    // contains no ':' at all, so something like "javascript:..." still parses
+    // as its own scheme below and gets rejected by the https check.
+    if (raw.includes(':')) throw new Error('Store URL is not a valid URL — include https:// and the domain.');
+    try {
+      parsed = new URL(`https://${raw}`);
+    } catch {
+      throw new Error('Store URL is not a valid URL — include https:// and the domain.');
+    }
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Store URL must use https:// — your Consumer Key and Secret travel with every request.');
+  }
+  const host = parsed.hostname;
+  if (BLOCKED_HOST_PATTERNS.some((re) => re.test(host))) {
+    throw new Error('That store URL points at a private or local address, which this server will not contact.');
+  }
+  // Rebuild from parsed parts so query strings, credentials, ports and paths
+  // in the supplied value can't reshape the request path we append below.
+  return `https://${parsed.host}${parsed.pathname.replace(/\/+$/, '')}`;
+}
+
+// Shopify's admin API only ever lives on <store>.myshopify.com. Pinning to it
+// keeps `shop` from being used to point a server-side fetch (or the OAuth
+// redirect) anywhere else.
+const SHOPIFY_SHOP_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/;
+function safeShopifyShop(shop) {
+  const clean = String(shop || '').trim().toLowerCase();
+  if (!SHOPIFY_SHOP_RE.test(clean)) {
+    throw new Error('Shop must be your permanent domain, e.g. your-store.myshopify.com');
+  }
+  return clean;
+}
+
 const MODEL_NAME = "gemini-flash-lite-latest";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`;
 
@@ -253,11 +330,21 @@ ${known.join('\n')}`;
 
 function verifyShopifySignature(rawBody, hmacHeader) {
   if (!rawBody || !hmacHeader) return false;
+  // No secret configured = nothing can be verified. Fail closed rather than
+  // letting createHmac throw an unhandled 500 out of a webhook handler.
+  if (!process.env.SHOPIFY_CLIENT_SECRET) {
+    console.warn('⚠️  SHOPIFY_CLIENT_SECRET not set — rejecting Shopify webhook (cannot verify signature).');
+    return false;
+  }
   const hash = crypto
     .createHmac('sha256', process.env.SHOPIFY_CLIENT_SECRET)
     .update(rawBody)
     .digest('base64');
-  return hash === hmacHeader;
+  // Constant-time compare, matching verifyOAuthState — a plain === leaks how
+  // much of the digest matched through timing.
+  const a = Buffer.from(hash, 'base64');
+  const b = Buffer.from(String(hmacHeader), 'base64');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 async function callGemini(prompt, imageBase64 = null) {
@@ -915,11 +1002,22 @@ app.post('/api/subscription-status', requireAuth, async (req, res) => {
 const oauthHandoffStore = new Map(); // code -> { payload, expiresAt }
 const OAUTH_HANDOFF_TTL_MS = 2 * 60 * 1000;
 
+// The signing key for OAuth `state`. Unset, this used to fall back to a
+// constant published in this repo — which meant the signature protecting every
+// connect flow could be forged by anyone who had read the source. The fallback
+// is now random per boot instead: local dev still works with no configuration,
+// but nobody outside this process can mint a valid state. The cost is that
+// in-flight connect flows don't survive a restart (a 2-minute window, same as
+// the handoff TTL), so a real deployment should still set the env var.
+const OAUTH_STATE_SECRET = process.env.OAUTH_STATE_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.OAUTH_STATE_SECRET) {
+  console.warn('⚠️  OAUTH_STATE_SECRET not set — using a random per-boot secret. Connect flows started before a restart will fail; set it in the API env to make them durable.');
+}
+
 function signOAuthState(brandId) {
   const nonce = crypto.randomBytes(12).toString('hex');
   const payload = `${brandId}.${nonce}`;
-  const secret = process.env.OAUTH_STATE_SECRET || 'dev-only-insecure-oauth-state-secret';
-  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  const sig = crypto.createHmac('sha256', OAUTH_STATE_SECRET).update(payload).digest('hex');
   return `${payload}.${sig}`;
 }
 
@@ -928,8 +1026,7 @@ function verifyOAuthState(state) {
   const parts = state.split('.');
   if (parts.length !== 3) return null;
   const [brandId, nonce, sig] = parts;
-  const secret = process.env.OAUTH_STATE_SECRET || 'dev-only-insecure-oauth-state-secret';
-  const expected = crypto.createHmac('sha256', secret).update(`${brandId}.${nonce}`).digest('hex');
+  const expected = crypto.createHmac('sha256', OAUTH_STATE_SECRET).update(`${brandId}.${nonce}`).digest('hex');
   const sigBuf = Buffer.from(sig || '', 'hex');
   const expectedBuf = Buffer.from(expected, 'hex');
   if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
@@ -1065,10 +1162,19 @@ app.get('/api/shopify/auth', (req, res) => {
     return res.status(400).send('SHOPIFY_CLIENT_ID is missing from api/.env.');
   }
 
+  // Pinned to *.myshopify.com: `shop` lands in a redirect Location, so an
+  // unchecked value turns this into an open redirect from our own domain.
+  let shopDomain;
+  try {
+    shopDomain = safeShopifyShop(shop);
+  } catch (err) {
+    return res.status(400).send(err.message);
+  }
+
   const scopes = 'read_orders,read_products';
   const redirectUri = `${API_URL}/api/shopify/callback`;
   const state = signOAuthState(brandId);
-  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_CLIENT_ID}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
+  const installUrl = `https://${shopDomain}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_CLIENT_ID}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
 
   res.redirect(installUrl);
 });
@@ -1079,7 +1185,8 @@ app.get('/api/shopify/callback', async (req, res) => {
   if (!shop || !code || !brandId) return res.status(400).send('Missing or invalid parameters');
 
   try {
-    const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    const shopDomain = safeShopifyShop(shop);
+    const response = await fetch(`https://${shopDomain}/admin/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1092,7 +1199,7 @@ app.get('/api/shopify/callback', async (req, res) => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error_description || 'Failed to get token');
 
-    const handoffCode = createOAuthHandoff({ platform: 'shopify', shop, accessToken: data.access_token, brandId });
+    const handoffCode = createOAuthHandoff({ platform: 'shopify', shop: shopDomain, accessToken: data.access_token, brandId });
     res.redirect(`${APP_URL}/sales?shopify_success=true&handoff=${handoffCode}&brandId=${brandId}`);
   } catch (err) {
     console.error('Shopify OAuth Error:', err);
@@ -1100,12 +1207,12 @@ app.get('/api/shopify/callback', async (req, res) => {
   }
 });
 
-app.post('/api/shopify/fetch-orders', async (req, res) => {
+app.post('/api/shopify/fetch-orders', requireAuth, async (req, res) => {
   const { shop, token } = req.body;
   if (!shop || !token) return res.status(400).json({ ok: false, error: 'Missing shop or token' });
 
   try {
-    const response = await fetch(`https://${shop}/admin/api/2024-01/orders.json?status=any&limit=250`, {
+    const response = await fetch(`https://${safeShopifyShop(shop)}/admin/api/2024-01/orders.json?status=any&limit=250`, {
       headers: { 'X-Shopify-Access-Token': token }
     });
     const data = await response.json();
@@ -1171,11 +1278,11 @@ app.post('/api/shopify/webhooks/app_uninstalled', async (req, res) => {
 // read_products scope, no reconnect needed. Not the same as the README's
 // long-standing "no inventory endpoint" note, which was about a live
 // write-back sync; this only reads.
-app.post('/api/shopify/fetch-inventory', async (req, res) => {
+app.post('/api/shopify/fetch-inventory', requireAuth, async (req, res) => {
   const { shop, token } = req.body;
   if (!shop || !token) return res.status(400).json({ ok: false, error: 'Missing shop or token' });
   try {
-    const response = await fetch(`https://${shop}/admin/api/2024-01/products.json?limit=250`, {
+    const response = await fetch(`https://${safeShopifyShop(shop)}/admin/api/2024-01/products.json?limit=250`, {
       headers: { 'X-Shopify-Access-Token': token }
     });
     const data = await response.json();
@@ -1200,11 +1307,14 @@ function wooAuthHeader(consumerKey, consumerSecret) {
   return 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
 }
 
+// Validates and canonicalizes the founder-supplied store URL (https only, no
+// private/loopback hosts) — see safeStoreUrl. Throws on anything unsafe, which
+// each handler below converts into a 400.
 function normalizeStoreUrl(url) {
-  return url.replace(/\/+$/, '');
+  return safeStoreUrl(url);
 }
 
-app.post('/api/woocommerce/validate', async (req, res) => {
+app.post('/api/woocommerce/validate', requireAuth, async (req, res) => {
   const { storeUrl, consumerKey, consumerSecret } = req.body;
   if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
   try {
@@ -1213,8 +1323,12 @@ app.post('/api/woocommerce/validate', async (req, res) => {
       headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret) }
     });
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(response.status === 401 ? 'Invalid Consumer Key/Secret' : `Store responded with ${response.status}: ${text.slice(0, 200)}`);
+      // Deliberately not echoing the response body: this is a server-side
+      // fetch of a user-supplied URL, so reflecting what came back turns any
+      // reachable endpoint into a readable one.
+      throw new Error(response.status === 401
+        ? 'Invalid Consumer Key/Secret'
+        : `Store responded with ${response.status}. Check the URL points at your WooCommerce site and the REST API is enabled.`);
     }
     res.json({ ok: true });
   } catch (err) {
@@ -1222,7 +1336,7 @@ app.post('/api/woocommerce/validate', async (req, res) => {
   }
 });
 
-app.post('/api/woocommerce/fetch-orders', async (req, res) => {
+app.post('/api/woocommerce/fetch-orders', requireAuth, async (req, res) => {
   const { storeUrl, consumerKey, consumerSecret } = req.body;
   if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
   try {
@@ -1238,7 +1352,7 @@ app.post('/api/woocommerce/fetch-orders', async (req, res) => {
   }
 });
 
-app.post('/api/woocommerce/fetch-inventory', async (req, res) => {
+app.post('/api/woocommerce/fetch-inventory', requireAuth, async (req, res) => {
   const { storeUrl, consumerKey, consumerSecret } = req.body;
   if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
   try {
@@ -1258,7 +1372,7 @@ app.post('/api/woocommerce/fetch-inventory', async (req, res) => {
 // after the founder has explicitly confirmed a preview in the UI, never
 // automatically. Requires the connected Consumer Key to actually have
 // write access (WooCommerce keys are read-only by default).
-app.post('/api/woocommerce/publish-product', async (req, res) => {
+app.post('/api/woocommerce/publish-product', requireAuth, async (req, res) => {
   const { storeUrl, consumerKey, consumerSecret, name, description, price, sku, imageUrl } = req.body;
   if (!storeUrl || !consumerKey || !consumerSecret || !name || !price) return res.status(400).json({ ok: false, error: 'Missing required fields' });
   try {
@@ -1364,7 +1478,7 @@ app.get('/api/etsy/callback', async (req, res) => {
   }
 });
 
-app.post('/api/etsy/refresh-token', async (req, res) => {
+app.post('/api/etsy/refresh-token', requireAuth, async (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) return res.status(400).json({ ok: false, error: 'Missing refresh token' });
   try {
@@ -1390,7 +1504,7 @@ function etsyMoney(m) {
   return m ? m.amount / m.divisor : 0;
 }
 
-app.post('/api/etsy/fetch-orders', async (req, res) => {
+app.post('/api/etsy/fetch-orders', requireAuth, async (req, res) => {
   const { shopId, accessToken } = req.body;
   if (!shopId || !accessToken) return res.status(400).json({ ok: false, error: 'Missing shopId or accessToken' });
   try {
@@ -1410,7 +1524,7 @@ app.post('/api/etsy/fetch-orders', async (req, res) => {
   }
 });
 
-app.post('/api/etsy/fetch-inventory', async (req, res) => {
+app.post('/api/etsy/fetch-inventory', requireAuth, async (req, res) => {
   const { shopId, accessToken } = req.body;
   if (!shopId || !accessToken) return res.status(400).json({ ok: false, error: 'Missing shopId or accessToken' });
   try {
@@ -1433,7 +1547,7 @@ app.post('/api/etsy/fetch-inventory', async (req, res) => {
 // wrong and miscategorizing a real listing. Etsy image upload is a
 // separate multipart endpoint this doesn't call — the listing is created
 // text-only; photos get added directly in Etsy afterward.
-app.post('/api/etsy/publish-listing', async (req, res) => {
+app.post('/api/etsy/publish-listing', requireAuth, async (req, res) => {
   const { shopId, accessToken, title, description, price, quantity, taxonomyId, sku } = req.body;
   if (!shopId || !accessToken || !title || !price || !taxonomyId) return res.status(400).json({ ok: false, error: 'Missing required fields (title, price, and an Etsy taxonomy ID are all required)' });
   try {
@@ -1474,7 +1588,10 @@ app.get('/api/tiktokshop/auth', (req, res) => {
 // 5. EMAIL INTEGRATION (Resend)
 // ---------------------------------------------------------
 
-app.post('/api/send-invite', async (req, res) => {
+// Authenticated and brand-scoped: this sends from our own verified domain, so
+// an open version of it is a phishing relay wearing our SPF and DKIM. The
+// caller must be signed in AND belong to the brand they're inviting into.
+app.post('/api/send-invite', requireAuth, async (req, res) => {
   console.log("📥 Received invite email request...");
   if (!resend) {
     console.warn("⚠️ RESEND_API_KEY missing. Skipping email send.");
@@ -1482,13 +1599,20 @@ app.post('/api/send-invite', async (req, res) => {
   }
 
   try {
-    const { email, brandName, inviterName, role } = req.body;
+    const { email, brandName, inviterName, role, brandId } = req.body;
+    if (!email) return res.status(400).json({ ok: false, error: 'No recipient provided' });
+    if (!brandId) return res.status(400).json({ ok: false, error: 'brandId is required.' });
+    if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
+      return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
+    }
     const inviteLink = `${APP_URL}/signup?email=${encodeURIComponent(email)}`;
 
+    // Every interpolated value below is caller-supplied — escape it before it
+    // becomes markup, or a crafted brand/inviter name injects its own link.
     const htmlBody = `
       <div style="font-family: sans-serif; padding: 20px; color: #222;">
         <h2>You've been invited to Atelier!</h2>
-        <p><strong>${inviterName || 'A teammate'}</strong> has invited you to join the <strong>${brandName}</strong> workspace as an ${role}.</p>
+        <p><strong>${escapeHtml(inviterName || 'A teammate')}</strong> has invited you to join the <strong>${escapeHtml(brandName)}</strong> workspace as an ${escapeHtml(role)}.</p>
         <p>Atelier is a production operating system for fashion brands.</p>
         <a href="${inviteLink}" style="display: inline-block; padding: 12px 24px; background: #211D18; color: #fff; text-decoration: none; border-radius: 8px; margin-top: 10px;">
           Join Workspace
@@ -1515,15 +1639,29 @@ app.post('/api/send-invite', async (req, res) => {
 // with per-recipient error capture is the honest choice over pretending a
 // bulk-send guarantee this doesn't have). Only ever called after the founder
 // explicitly confirms in the UI — this can email real people.
-app.post('/api/send-campaign', async (req, res) => {
+// Authenticated and brand-scoped for the same reason as /api/send-invite —
+// arbitrary subject, arbitrary HTML body and an arbitrary recipient list is
+// exactly the shape of a phishing blast if anyone can call it.
+const CAMPAIGN_RECIPIENT_CAP = 500;
+
+app.post('/api/send-campaign', requireAuth, async (req, res) => {
   console.log("📥 Received campaign send request...");
   if (!resend) {
     return res.status(400).json({ ok: false, error: 'RESEND_API_KEY is missing from api/.env — no campaign can be sent without it.' });
   }
   try {
-    const { subject, body, recipients } = req.body;
+    const { subject, body, recipients, brandId } = req.body;
     if (!subject || !body || !Array.isArray(recipients) || recipients.length === 0) {
       return res.status(400).json({ ok: false, error: 'Missing subject, body, or recipients' });
+    }
+    if (!brandId) return res.status(400).json({ ok: false, error: 'brandId is required.' });
+    if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
+      return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
+    }
+    // The per-IP rate limit counts requests, not recipients — without a cap one
+    // allowed request is an unbounded send.
+    if (recipients.length > CAMPAIGN_RECIPIENT_CAP) {
+      return res.status(400).json({ ok: false, error: `A single campaign is capped at ${CAMPAIGN_RECIPIENT_CAP} recipients (this one has ${recipients.length}). Split it into smaller sends.` });
     }
 
     let sent = 0;
@@ -1981,7 +2119,7 @@ app.get('/api/social/callback/:platform', async (req, res) => {
 // a call guaranteed to fail, this says so plainly. YouTube did request an
 // upload scope, but content_posts only stores an image_url — there's no
 // video file to upload, so there's genuinely nothing to publish yet.
-app.post('/api/social/publish/:platform', async (req, res) => {
+app.post('/api/social/publish/:platform', requireAuth, async (req, res) => {
   const { platform } = req.params;
   const { accessToken, caption, imageUrl, boardId } = req.body;
 
@@ -2190,21 +2328,30 @@ app.get('/health', (req, res) => {
 // ---------------------------------------------------------
 // 10. SHOPIFY MANDATORY GDPR WEBHOOKS (Required for App Store Review)
 // ---------------------------------------------------------
-// These endpoints are legally mandated by Shopify. They do not need complex 
-// database logic for your app, but they MUST respond with a 200 OK to pass 
-// the automated Shopify App Store submission linter.
+// These endpoints are legally mandated by Shopify. They do not need complex
+// database logic for your app, but they MUST verify the HMAC and respond 401
+// to an unverified request — Shopify's automated review explicitly tests that,
+// and an endpoint that 200s for anyone is an unauthenticated endpoint whether
+// or not it currently does anything.
+function shopifyWebhookGuard(req, res, next) {
+  if (!verifyShopifySignature(req.rawBody, req.headers['x-shopify-hmac-sha256'])) {
+    console.warn('⚠️ Unauthorized Shopify GDPR webhook attempt');
+    return res.status(401).send('Unauthorized');
+  }
+  return next();
+}
 
-app.post('/api/shopify/webhooks/customers/data_request', (req, res) => {
+app.post('/api/shopify/webhooks/customers/data_request', shopifyWebhookGuard, (req, res) => {
   console.log("📥 Shopify GDPR Webhook: Customer Data Request");
   res.status(200).send('OK');
 });
 
-app.post('/api/shopify/webhooks/customers/redact', (req, res) => {
+app.post('/api/shopify/webhooks/customers/redact', shopifyWebhookGuard, (req, res) => {
   console.log("📥 Shopify GDPR Webhook: Customer Redact");
   res.status(200).send('OK');
 });
 
-app.post('/api/shopify/webhooks/shop/redact', (req, res) => {
+app.post('/api/shopify/webhooks/shop/redact', shopifyWebhookGuard, (req, res) => {
   console.log("📥 Shopify GDPR Webhook: Shop Redact");
   res.status(200).send('OK');
 });
