@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { base64ToDataUrl, base64ToBlob, uploadDesignImage } from '../../lib/designImages.js';
+import { base64ToDataUrl, base64ToBlob, blobToBase64, uploadDesignImage } from '../../lib/designImages.js';
 import { aiPost } from '../../lib/aiApi.js';
 import { useAIUsage } from '../../context/AIUsageContext.jsx';
 import CreditCost from '../CreditCost.jsx';
@@ -9,7 +9,8 @@ import CreditCost from '../CreditCost.jsx';
 // canvas outright, since changing a garment's color/fabric/angle IS a
 // whole-image change, there's no meaningful "layer" for that.
 const TRANSFORM_TOOLS = [
-  { mode: 'sketch-to-design', label: 'Sketch to Design', icon: 'ph-magic-wand', desc: 'Render the current sketch as a polished design.', promptPlaceholder: 'Style direction (e.g. "matte black nylon, oversized fit")' },
+  { mode: 'sketch-to-design', label: 'Sketch to Design', icon: 'ph-upload-simple', desc: 'Upload a hand-drawn sketch — get a clean mockup with every detail kept.', promptPlaceholder: 'Optional style direction (e.g. "matte black nylon")', needsUpload: true },
+  { mode: 'polish-design', label: 'Polish Design', icon: 'ph-magic-wand', desc: 'Render what\'s on the canvas now as a polished design.', promptPlaceholder: 'Style direction (e.g. "matte black nylon, oversized fit")' },
   { mode: 'ai-edit', label: 'AI Edit', icon: 'ph-pencil-simple', desc: 'Describe any change in plain English.', promptPlaceholder: 'e.g. "make the sleeves longer"', promptRequired: true },
   { mode: 'bg-remove', label: 'Background Remover', icon: 'ph-image', desc: 'Strip the background to plain white.' },
   { mode: 'recolor', label: 'Recolor', icon: 'ph-palette', desc: 'Change the garment color, keep everything else.', promptPlaceholder: 'Target color (e.g. "sage green")', promptRequired: true },
@@ -48,19 +49,40 @@ function ToolCard({ tool, kind, productId, onCapture, onApplyToCanvas, onAddLaye
   const { canAfford, openTopup } = useAIUsage();
   const feature = kind === 'addition' ? 'design-generate-element' : 'design-ai-image';
 
+  // Tools flagged needsUpload work from a file the founder picks (a photo or
+  // scan of a paper sketch) instead of the live canvas.
+  const uploadRef = useRef(null);
+  const uploadedBase64 = useRef(null);
+  const [uploadName, setUploadName] = useState(null);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    try {
+      uploadedBase64.current = await blobToBase64(file);
+      setUploadName(file.name);
+    } catch {
+      setError('Could not read that image — try a JPG or PNG.');
+    }
+  };
+
   const promptMissing = tool.promptRequired && !prompt.trim();
+  const uploadMissing = tool.needsUpload && !uploadName;
 
   const generate = async () => {
     if (!canAfford(feature)) { openTopup(); return; }
     if (promptMissing) { setError('This tool needs a short description first.'); return; }
+    if (uploadMissing) { setError('Upload a photo of your sketch first.'); return; }
     setLoading(true);
     setError(null);
     setResult(null);
     try {
       const endpoint = kind === 'addition' ? '/api/design/generate-element' : '/api/design/ai-image';
+      const sourceImage = tool.needsUpload ? uploadedBase64.current : await onCapture();
       const body = kind === 'addition'
         ? { mode: tool.mode, prompt: prompt.trim() || null }
-        : { mode: tool.mode, prompt: prompt.trim() || null, images: [await onCapture()] };
+        : { mode: tool.mode, prompt: prompt.trim() || null, images: [sourceImage] };
       const res = await aiPost(endpoint, body);
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
@@ -107,11 +129,25 @@ function ToolCard({ tool, kind, productId, onCapture, onApplyToCanvas, onAddLaye
 
       {open && (
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {tool.needsUpload && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <input ref={uploadRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleUpload} />
+              <button className="btn btn-sm" onClick={() => uploadRef.current?.click()}>
+                <i className="ph ph-upload-simple" /> {uploadName ? 'Choose a different sketch' : 'Upload sketch'}
+              </button>
+              {uploadName && (
+                <span style={{ fontSize: 11.5, color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+                  <i className="ph ph-check-circle" style={{ color: 'var(--green)', marginRight: 4 }} />{uploadName}
+                </span>
+              )}
+            </div>
+          )}
+
           {tool.promptPlaceholder && (
             <input className="form-input" placeholder={tool.promptPlaceholder} value={prompt} onChange={e => setPrompt(e.target.value)} />
           )}
 
-          <button className="btn btn-sm btn-primary" onClick={generate} disabled={loading || promptMissing} style={{ alignSelf: 'flex-start' }}>
+          <button className="btn btn-sm btn-primary" onClick={generate} disabled={loading || promptMissing || uploadMissing} style={{ alignSelf: 'flex-start' }}>
             {loading ? <><i className="ph ph-circle-notch ph-spin" /> Generating…</> : <><i className="ph ph-sparkle" /> Generate</>}
             {!loading && <CreditCost feature={feature} style={{ marginLeft: 6, color: 'inherit', opacity: 0.8 }} />}
           </button>

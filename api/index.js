@@ -295,54 +295,6 @@ async function callGemini(prompt, imageBase64 = null) {
   return JSON.parse(cleanAIJSON(rawText));
 }
 
-const IMAGE_MODEL_NAME = "gemini-2.5-flash-image";
-const GEMINI_IMAGE_URL = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL_NAME}:generateContent`;
-
-// Sends a text prompt plus zero or more reference images to Gemini's image
-// model and returns the generated/edited image as base64. Unlike callGemini
-// (which asks for structured JSON back), this model's native output IS an
-// image — no responseModalities config needed to get one back.
-async function callGeminiImage(prompt, imageInputsBase64 = []) {
-  const parts = [{ text: prompt }];
-  imageInputsBase64.forEach(b64 => {
-    if (b64) parts.push({ inline_data: { mime_type: "image/png", data: b64 } });
-  });
-
-  const payload = {
-    contents: [{ parts }],
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-    ]
-  };
-
-  const response = await fetch(`${GEMINI_IMAGE_URL}?key=${process.env.GEMINI_API_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    console.error("❌ Gemini Image API Error:", JSON.stringify(data, null, 2));
-    throw new Error(data.error?.message || `Gemini Image Error: ${response.status}`);
-  }
-
-  const responseParts = data.candidates?.[0]?.content?.parts || [];
-  const imagePart = responseParts.find(p => p.inline_data || p.inlineData);
-  if (!imagePart) {
-    if (data.candidates?.[0]?.finishReason === 'SAFETY') {
-      throw new Error("AI safety block — try a different prompt or image.");
-    }
-    const textPart = responseParts.find(p => p.text);
-    throw new Error(textPart?.text ? `AI didn't return an image: ${textPart.text}` : "The AI didn't return an image. Try rephrasing your request.");
-  }
-  const inline = imagePart.inline_data || imagePart.inlineData;
-  return { base64: inline.data, mimeType: inline.mime_type || inline.mimeType || 'image/png' };
-}
-
 // ── OpenAI image generation (gpt-image-1) ───────────────────────────────────
 // Replaced Stable Diffusion via Pixazo, which followed prompts too loosely
 // (duplicate garments, ignored composition instructions). gpt-image-1 adheres
@@ -1695,14 +1647,30 @@ STRICT OUTPUT RULES (always apply):
 - No text, labels, captions, annotations, arrows, watermarks, borders, or color swatches anywhere in the image.
 - Match the rendering style, lighting, and level of realism of the reference image unless the instruction is specifically about changing the rendering style.`;
 
+// Per-mode options for the image-to-image (edit) modes. `size: 'auto'` lets
+// gpt-image-1 keep the reference image's proportions instead of forcing a
+// square crop. Background removal finally returns REAL alpha rather than the
+// painted-white approximation the old model could only fake.
+const IMAGE_MODE_OPTIONS = {
+  'bg-remove': { size: 'auto', background: 'transparent' },
+  'flat-sketch': { size: 'auto', background: 'transparent' },
+};
+
 const IMAGE_MODE_PROMPTS = {
-  'sketch-to-design': (p) => `You are a fashion technical illustrator. Take this rough sketch and render it as ONE clean, professional garment design image — polished linework, realistic fabric drape and shading, single garment only, no model.${p ? ` Style direction: ${p}.` : ''} Keep the same silhouette and proportions as the sketch — you are rendering it, not redesigning it.`,
+  // Takes an UPLOADED photo/scan of a hand-drawn sketch (not the canvas) and
+  // turns it into a usable mockup. Detail preservation is the whole point —
+  // the founder's drawing is the spec, so the model tidies the linework
+  // without redesigning anything.
+  'sketch-to-design': (p) => `You are given a photo or scan of a hand-drawn garment sketch. Redraw it as ONE clean apparel mockup illustration. PRESERVE EVERY DESIGN DETAIL exactly as drawn — silhouette, proportions, seam lines, panels, pockets, closures, zips, drawcords, cuffs, collar, and any graphic or print placement. Do not invent details that are not in the sketch, and do not drop any that are. Clean up wobbly hand-drawn linework into crisp confident lines, ignore paper texture, smudges, shadows, ruled lines and any handwritten annotations, and add soft light-grey shading that describes the garment's volume. Present it as a blank garment mockup, front view, centered.${p ? ` Style direction: ${p}.` : ''}`,
+  // What "sketch-to-design" used to do: polish whatever is already on the
+  // canvas, in place.
+  'polish-design': (p) => `You are a fashion technical illustrator. Take this rough sketch and render it as ONE clean, professional garment design image — polished linework, soft fabric drape and shading, single garment only, no model.${p ? ` Style direction: ${p}.` : ''} Keep the same silhouette, proportions and every design detail from the sketch — you are rendering it, not redesigning it.`,
   'ai-edit': (p) => `You are editing this garment design image. Apply exactly this one change and nothing else: ${p || 'a small refinement'}. Everything else about the garment — silhouette, color, fabric, details, camera angle, background, and composition — must remain identical to the reference.`,
-  'bg-remove': () => `Remove the background from this image completely, replacing it with a plain solid white background. Keep the garment itself pixel-identical — do not alter its color, shape, or details.`,
+  'bg-remove': () => `Cut the garment out from its background completely, leaving a fully transparent background behind it. Keep the garment itself pixel-identical — do not alter its colour, shape, shading or details, and keep its edges clean and accurate.`,
   'recolor': (p) => `Recolor the garment in this image to ${p || 'a different color'}. Change ONLY the color: fabric texture, shading, folds, construction details, silhouette, camera angle, and background stay exactly as they are.`,
   'fabric-swap': (p) => `Change the fabric of the garment in this image to ${p || 'a different fabric'}, updating texture and drape to realistically reflect that fabric while keeping the exact same garment silhouette, cut, color palette, design details, camera angle, and background.`,
   'mockup': (p) => `Create ONE professional product photograph of this garment: ${p || 'worn by a single model in a studio setting with clean, even lighting'}. The garment's design, color, and details must match the reference image exactly. One photo, at most one model, one angle.`,
-  'flat-sketch': () => `Convert this garment image into ONE clean technical flat sketch — precise black linework on a white background, no shading or color, front view only, the kind used in a professional tech pack.`,
+  'flat-sketch': () => `Convert this garment image into ONE clean technical flat sketch — precise black linework on a fully transparent background, no shading or colour, front view only, the kind used in a professional tech pack.`,
   'view': (p) => `Generate ONE image of this exact same garment seen from the ${p || 'back'} — same color, fabric, construction, and design details as the reference, same rendering style, just rotated to that single viewpoint. Do not show the original view alongside it.`,
   'variant': (p) => `Create ONE design variation of this garment: ${p || 'a stylistic variation'}. Apply the change once, to a single garment, and show only the result — not the original, not multiple options. It must stay recognizably the same garment with only this change; match the reference's rendering style, angle, and composition.`,
 };
@@ -1717,7 +1685,10 @@ app.post('/api/design/ai-image', metered('design-ai-image'), async (req, res) =>
       return res.status(400).json({ ok: false, error: 'No reference image provided' });
     }
     const fullPrompt = builder(prompt) + IMAGE_OUTPUT_RULES;
-    const result = await callGeminiImage(fullPrompt, images || []);
+    const result = await callOpenAIImage(fullPrompt, {
+      images,
+      ...(IMAGE_MODE_OPTIONS[mode] || { size: 'auto', background: 'auto' }),
+    });
     console.log("✅ AI image successful:", mode);
     res.json({ ok: true, imageBase64: result.base64, mimeType: result.mimeType });
   } catch (error) {
@@ -1751,7 +1722,7 @@ const ELEMENT_MODE_PROMPTS = {
   // onto — NOT a flat CAD line drawing. Flat line-art came back as a bare
   // uniform outline that gave founders nothing to build on; a shaded blank
   // reads as an actual garment and is far more useful as a starting canvas.
-  'silhouette': (p) => `A blank ${p || 'garment'} product mockup template, front view, centered and vertically symmetric, filling most of the frame. Plain undyed off-white fabric with no branding, print, pattern, logo or text on it. Render it as if worn on an invisible mannequin so the garment holds its natural three-dimensional shape: soft even studio lighting, gentle grey shading and subtle fabric folds that describe its volume, visible seam and stitch detail, and darker shadow recessed inside any opening (face opening, hood, neckline, cuffs, sleeves). Crisp clean edges. Exactly one garment, exactly one view`,
+  'silhouette': (p) => `A blank ${p || 'garment'} apparel mockup drawn as a clean digital VECTOR ILLUSTRATION — not a photograph. Front view, centered, vertically symmetric, filling most of the frame. Plain off-white fabric with no branding, print, pattern, logo or text. Smooth flat shapes with crisp dark outlines and soft light-grey cel shading that suggests the garment's three-dimensional volume, plus thin seam lines and a darker fill recessed inside any opening (face opening, hood, neckline, cuffs). Illustrated apparel-template style — simplified and graphic, with just enough shading to read as a real garment rather than a bare outline. Exactly one garment, exactly one view`,
 };
 
 // Per-mode generation options for gpt-image-1.
@@ -1773,14 +1744,14 @@ const ELEMENT_MODE_OPTIONS = {
 const ELEMENT_STYLE_SUFFIX = {
   'add-element': 'Flat vector-style graphic, centered, on a fully transparent background. No scene, no mockup, no photograph, no shadow, no frame or border, no text or watermark — just the graphic itself.',
   'pattern': 'A flat, evenly lit repeating swatch that tiles seamlessly edge to edge and fills the entire frame. No garment, no mockup, no shadow, no text or watermark.',
-  'silhouette': 'Clean product-photography-quality blank apparel mockup, isolated on a fully transparent background — no backdrop, no surface, no ground shadow, no coloured background of any kind. Neutral white and light-grey palette only. No text, no watermark, no frame or border.',
+  'silhouette': 'Flat digital illustration style — clean vector artwork, NOT a photograph and not a 3D render. Isolated on a fully transparent background: no backdrop, no surface, no ground shadow, no coloured background of any kind. Neutral white and light-grey palette only. No text, no watermark, no frame or border.',
 };
 
 // gpt-image-1 has no negativePrompt parameter — exclusions go in the prompt as
 // plain language, which this model follows reliably (unlike SDXL).
 const ELEMENT_MODE_EXCLUSIONS = {
   'add-element': 'Draw only one design: no alternates, no variations, no grid or sheet of options.',
-  'silhouette': 'The garment must be empty: no person, face, skin, hair, eyes, hands, arms, legs, and no visible mannequin, dress form or hanger. Do not render a back view, side view, three-quarter view, turnaround, spec sheet or any second garment — exactly one garment, from the front, once. Do not produce a flat two-dimensional CAD line drawing or bare outline: the garment must look dimensional and softly shaded, like a real blank product photo.',
+  'silhouette': 'The garment must be empty: no person, face, skin, hair, eyes, hands, arms, legs, and no visible mannequin, dress form or hanger. Do not render a back view, side view, three-quarter view, turnaround, spec sheet or any second garment — exactly one garment, from the front, once. Aim between the two extremes: NOT a photorealistic photograph, no fabric weave texture, no realistic studio lighting; but also NOT a bare uniform-weight CAD outline with no shading. It should read as a clean illustrated apparel mockup template.',
 };
 
 app.post('/api/design/generate-element', metered('design-generate-element'), async (req, res) => {
