@@ -183,7 +183,7 @@ export default function BillingTab() {
                 {(isExpanded ? p.features : p.summary.map(text => ({ text }))).map((feat, i) => (
                   <li key={i} style={{ fontSize: 12.5, color: 'var(--ink-2)', display: 'flex', gap: 7 }}>
                     <i className="ph ph-check" style={{ color: 'var(--green)', marginTop: 2, flexShrink: 0 }} />
-                    <span>{feat.text}{feat.roadmap && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--amber)', border: '1px solid var(--amber-border)', borderRadius: 99, padding: '1px 6px' }}>Coming soon</span>}</span>
+                    <span>{feat.text}</span>
                   </li>
                 ))}
               </ul>
@@ -209,9 +209,6 @@ export default function BillingTab() {
             </div>
           );
         })}
-      </div>
-      <div className="form-hint">
-        <i className="ph ph-info" style={{ marginRight: 4 }} /> Some Premium features are marked "Coming soon" — they're on the roadmap but not built into the app yet.
       </div>
 
       <div className="section-label" style={{ marginTop: 24 }}>Buy AI credits</div>

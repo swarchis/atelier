@@ -4,15 +4,16 @@ import { aiPost } from '../../lib/aiApi.js';
 import { useAIUsage } from '../../context/AIUsageContext.jsx';
 import CreditCost from '../CreditCost.jsx';
 
-// "Transform" tools edit the founder's actual existing design (Gemini's
-// image model, which can take a reference image) — the result replaces the
-// canvas outright, since changing a garment's color/fabric/angle IS a
-// whole-image change, there's no meaningful "layer" for that.
+// "Transform" tools edit the founder's actual existing design via OpenAI
+// gpt-image-1's image-to-image endpoint. Most replace the canvas outright,
+// since changing a garment's colour or fabric IS a whole-image change — the
+// exception is "Generate a View", whose result becomes its own view tab so
+// the front view is never destroyed.
 const TRANSFORM_TOOLS = [
   { mode: 'sketch-to-design', label: 'Sketch to Design', icon: 'ph-upload-simple', desc: 'Upload a hand-drawn sketch — get a clean mockup with every detail kept.', promptPlaceholder: 'Optional style direction (e.g. "matte black nylon")', needsUpload: true },
   { mode: 'polish-design', label: 'Polish Design', icon: 'ph-magic-wand', desc: 'Render what\'s on the canvas now as a polished design.', promptPlaceholder: 'Style direction (e.g. "matte black nylon, oversized fit")' },
   { mode: 'ai-edit', label: 'AI Edit', icon: 'ph-pencil-simple', desc: 'Describe any change in plain English.', promptPlaceholder: 'e.g. "make the sleeves longer"', promptRequired: true },
-  { mode: 'bg-remove', label: 'Background Remover', icon: 'ph-image', desc: 'Strip the background to plain white.' },
+  { mode: 'bg-remove', label: 'Background Remover', icon: 'ph-image', desc: 'Cut the garment out onto a transparent background.' },
   { mode: 'recolor', label: 'Recolor', icon: 'ph-palette', desc: 'Change the garment color, keep everything else.', promptPlaceholder: 'Target color (e.g. "sage green")', promptRequired: true },
   { mode: 'fabric-swap', label: 'Fabric Swap', icon: 'ph-scissors', desc: 'Swap the fabric while keeping the silhouette.', promptPlaceholder: 'Target fabric (e.g. "ribbed cotton knit")', promptRequired: true },
   { mode: 'mockup', label: 'Mockup Generator', icon: 'ph-camera', desc: 'Turn the design into a product photo mockup.', promptPlaceholder: 'Style (e.g. "on a model, studio lighting")' },
@@ -21,9 +22,9 @@ const TRANSFORM_TOOLS = [
 ];
 
 // "Addition" tools generate a brand new, isolated element with nothing to
-// composite against (Stable Diffusion via Pixazo — free/fast SD XL
-// Lightning, since these are meant to be regenerated a few times before one
-// lands). Nothing here ever touches the founder's existing artwork — the
+// composite against (OpenAI gpt-image-1 text-to-image, which returns real
+// transparency so the result drops in as a usable layer). Nothing here ever
+// touches the founder's existing artwork — the
 // result is either added as its own new layer (Photopea) or downloaded as a
 // transparent PNG to drop into Photoshop/Illustrator/whatever they actually
 // use, never baked into a flattened replacement of the canvas.
@@ -39,7 +40,7 @@ function downloadPng(base64, mimeType, filename) {
   a.click();
 }
 
-function ToolCard({ tool, kind, productId, onCapture, onApplyToCanvas, onAddLayer, logUsage, onVersionSaved }) {
+function ToolCard({ tool, kind, productId, onCapture, onApplyToCanvas, onAddView, onAddLayer, logUsage, onVersionSaved }) {
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
@@ -167,7 +168,20 @@ function ToolCard({ tool, kind, productId, onCapture, onApplyToCanvas, onAddLaye
                     <button className="btn btn-sm" onClick={() => downloadPng(result.base64, result.mimeType, `${tool.mode}.png`)}><i className="ph ph-download-simple" /> Download PNG</button>
                   </>
                 ) : (
-                  <button className="btn btn-sm btn-primary" onClick={() => onApplyToCanvas(base64ToDataUrl(result.base64, result.mimeType))}><i className="ph ph-arrow-square-in" /> Apply to canvas</button>
+                  tool.mode === 'view' ? (
+                    // A generated angle becomes its own view tab rather than
+                    // replacing the front view on the canvas.
+                    <>
+                      <button className="btn btn-sm btn-primary" onClick={() => onAddView(base64ToDataUrl(result.base64, result.mimeType), prompt)}>
+                        <i className="ph ph-columns-plus-right" /> Add as new view
+                      </button>
+                      <button className="btn btn-sm" onClick={() => onApplyToCanvas(base64ToDataUrl(result.base64, result.mimeType))} title="Replace what's on the canvas instead">
+                        <i className="ph ph-arrow-square-in" /> Replace canvas
+                      </button>
+                    </>
+                  ) : (
+                    <button className="btn btn-sm btn-primary" onClick={() => onApplyToCanvas(base64ToDataUrl(result.base64, result.mimeType))}><i className="ph ph-arrow-square-in" /> Apply to canvas</button>
+                  )
                 )}
                 <button className="btn btn-sm" onClick={saveAsVersion} disabled={saving}>{saving ? 'Saving…' : <><i className="ph ph-clock-counter-clockwise" /> Save as version</>}</button>
               </div>
@@ -179,8 +193,8 @@ function ToolCard({ tool, kind, productId, onCapture, onApplyToCanvas, onAddLaye
   );
 }
 
-export default function AIStudioTab({ productId, onCapture, onApplyToCanvas, onAddLayer, logUsage, onVersionSaved }) {
-  const shared = { productId, onCapture, onApplyToCanvas, onAddLayer, logUsage, onVersionSaved };
+export default function AIStudioTab({ productId, onCapture, onApplyToCanvas, onAddView, onAddLayer, logUsage, onVersionSaved }) {
+  const shared = { productId, onCapture, onApplyToCanvas, onAddView, onAddLayer, logUsage, onVersionSaved };
   return (
     <div style={{ maxWidth: 1080 }}>
       <div className="form-hint" style={{ marginBottom: 16 }}>

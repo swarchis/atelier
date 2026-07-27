@@ -78,6 +78,13 @@ export default function DesignDetail() {
   const [moodboard, setMoodboard] = useState([]);
   const [palette, setPalette] = useState([]);
   const [variants, setVariants] = useState([]);
+  // Alternate garment views (back/side/detail). The main canvas is always the
+  // FRONT view; these are switchable tabs beside it so generating a new angle
+  // never destroys the front.
+  const [views, setViews] = useState([]);
+  const [activeView, setActiveView] = useState('front');
+  const [switchingView, setSwitchingView] = useState(null);
+  const [frontImageUrl, setFrontImageUrl] = useState(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const photopeaRef = useRef(null);
   const canvasPanelRef = useRef(null);
@@ -116,6 +123,8 @@ export default function DesignDetail() {
         // snapshot; it's refreshed on every save so it's never staler.
         const psd = (data || []).find(v => v.label === PSD_VERSION_LABEL);
         const raster = (data || []).find(v => v.label !== PSD_VERSION_LABEL);
+        // Remembered so switching back to Front can reopen it in place.
+        if (raster?.image_url && !cancelled) setFrontImageUrl(raster.image_url);
         const pick = psd || raster;
         if (!pick?.image_url || cancelled) return;
         const res = await fetch(pick.image_url);
@@ -159,6 +168,7 @@ export default function DesignDetail() {
     const capturedUrl = await photopeaRef.current.capture();
     const blob = await fetch(capturedUrl).then(r => r.blob());
     const publicUrl = await uploadDesignImage(blob, id, label === 'Autosave' ? 'autosave' : 'save');
+    setFrontImageUrl(publicUrl);
     if (label === 'Autosave') {
       const { data: existing } = await supabase
         .from('design_versions').select('id')
@@ -249,11 +259,19 @@ export default function DesignDetail() {
   // loaded directly here, same pattern TechPackDetail uses for tech_packs.
   useEffect(() => {
     async function loadStudioData() {
-      const { data } = await supabase.from('designs').select('moodboard, palette, variants').eq('product_id', id).single();
+      // `views` arrives with migration 029. If that hasn't been applied yet the
+      // whole select would error and silently take moodboard/palette/variants
+      // down with it, so fall back to the pre-029 column set.
+      let { data } = await supabase.from('designs').select('moodboard, palette, variants, views').eq('product_id', id).single();
+      if (!data) {
+        const fallback = await supabase.from('designs').select('moodboard, palette, variants').eq('product_id', id).single();
+        data = fallback.data;
+      }
       if (data) {
         setMoodboard(data.moodboard || []);
         setPalette(data.palette || []);
         setVariants(data.variants || []);
+        setViews(data.views || []);
       }
     }
     loadStudioData();
@@ -267,6 +285,76 @@ export default function DesignDetail() {
     const url = await photopeaRef.current.capture();
     const blob = await fetch(url).then(r => r.blob());
     return blobToBase64(blob);
+  };
+
+  // ── Garment views ─────────────────────────────────────────────────────────
+  // The live canvas always shows exactly one view. Before switching away we
+  // capture it back into whichever view is currently active, so moving between
+  // Front and Back never loses edits.
+  const viewTabs = [{ key: 'front', label: 'Front' }, ...views];
+
+  const saveActiveView = async () => {
+    if (activeView === 'front') {
+      await persistCanvas('Autosave');
+      return;
+    }
+    const capturedUrl = await photopeaRef.current.capture();
+    const blob = await fetch(capturedUrl).then(r => r.blob());
+    const publicUrl = await uploadDesignImage(blob, id, 'view');
+    const next = views.map(v => (v.key === activeView ? { ...v, imageUrl: publicUrl } : v));
+    setViews(next);
+    await persistStudioField('views', next);
+  };
+
+  const switchView = async (key) => {
+    if (key === activeView || switchingView) return;
+    setSwitchingView(key);
+    setCaptureError(null);
+    try {
+      // Best-effort: an empty canvas can't be captured, which shouldn't block
+      // the switch itself.
+      try { await saveActiveView(); } catch (err) { console.error('Could not save the current view:', err); }
+      const target = key === 'front' ? frontImageUrl : views.find(v => v.key === key)?.imageUrl;
+      if (target) photopeaRef.current?.openImage(target);
+      setActiveView(key);
+    } finally {
+      setSwitchingView(null);
+    }
+  };
+
+  // Called by the AI Studio "Generate a View" tool instead of overwriting the
+  // canvas: the new angle becomes its own tab and the front view survives.
+  const addViewFromResult = async (dataUrl, label) => {
+    const key = `view-${Date.now()}`;
+    setSwitchingView(key);
+    setCaptureError(null);
+    try {
+      try { await saveActiveView(); } catch (err) { console.error('Could not save the current view:', err); }
+      const blob = await fetch(dataUrl).then(r => r.blob());
+      const imageUrl = await uploadDesignImage(blob, id, 'view');
+      const entry = { key, label: (label || '').trim() ? label.trim().slice(0, 24) : 'New view', imageUrl };
+      const next = [...views, entry];
+      setViews(next);
+      await persistStudioField('views', next);
+      photopeaRef.current?.openImage(imageUrl);
+      setActiveView(key);
+      setTab('canvas');
+      toast.success(`Added "${entry.label}" as a new view.`);
+    } catch (err) {
+      setCaptureError('Could not add that view: ' + err.message + ' (if this mentions a missing "views" column, apply migration 029.)');
+    } finally {
+      setSwitchingView(null);
+    }
+  };
+
+  const deleteView = async (key) => {
+    const next = views.filter(v => v.key !== key);
+    setViews(next);
+    await persistStudioField('views', next);
+    if (activeView === key) {
+      setActiveView('front');
+      if (frontImageUrl) photopeaRef.current?.openImage(frontImageUrl);
+    }
   };
 
   const applyResultToCanvas = (url) => {
@@ -672,11 +760,53 @@ export default function DesignDetail() {
           <div style={{ flex: showSplitStudio ? '0 0 auto' : 1, width: showSplitStudio ? splitWidth : undefined, minWidth: 0, height: expanded ? 0 : 600 }}>
             <div ref={canvasPanelRef} className={`canvas-panel ${expanded ? 'expanded' : ''}`} style={{ '--cp-accent': 'var(--c-design)' }}>
               <div className="canvas-panel-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-2)' }}>Canvas</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+                  {/* One tab per garment view. Front is the main canvas; extra
+                      views are added by the AI "Generate a View" tool. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    {viewTabs.map(v => {
+                      const isActive = activeView === v.key;
+                      const isBusy = switchingView === v.key;
+                      return (
+                        <div key={v.key} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                          <button
+                            onClick={() => switchView(v.key)}
+                            disabled={!!switchingView}
+                            title={isActive ? `${v.label} view (showing)` : `Switch to the ${v.label} view`}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 5,
+                              padding: v.key === 'front' ? '4px 10px' : '4px 20px 4px 10px',
+                              fontSize: 12, fontWeight: isActive ? 700 : 500,
+                              background: isActive ? 'var(--bg-1)' : 'transparent',
+                              color: isActive ? 'var(--ink)' : 'var(--ink-3)',
+                              border: '1px solid', borderColor: isActive ? 'var(--border-2)' : 'transparent',
+                              borderRadius: 'var(--r-sm)', cursor: switchingView ? 'default' : 'pointer',
+                              maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {isBusy && <i className="ph ph-circle-notch ph-spin" style={{ fontSize: 11 }} />}
+                            {v.label}
+                          </button>
+                          {v.key !== 'front' && (
+                            <button
+                              onClick={() => deleteView(v.key)}
+                              disabled={!!switchingView}
+                              title={`Remove the ${v.label} view`}
+                              style={{
+                                position: 'absolute', right: 5, background: 'none', border: 'none',
+                                color: 'var(--ink-4)', cursor: 'pointer', fontSize: 11, padding: 2, lineHeight: 1,
+                              }}
+                            >
+                              <i className="ph ph-x" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                   <span className="canvas-panel-badge">
                     <span className="canvas-panel-dot" style={{ background: statusMeta.color }} />
-                    {statusMeta.label}
+                    {switchingView ? 'Switching view…' : statusMeta.label}
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -720,6 +850,7 @@ export default function DesignDetail() {
                   productId={id}
                   onCapture={captureCanvasBase64}
                   onApplyToCanvas={applyResultToCanvas}
+                  onAddView={addViewFromResult}
                   onAddLayer={addLayerToCanvas}
                   logUsage={logUsage}
                   onVersionSaved={() => setHistoryRefreshKey(k => k + 1)}
@@ -807,6 +938,7 @@ export default function DesignDetail() {
             productId={id}
             onCapture={captureCanvasBase64}
             onApplyToCanvas={applyResultToCanvas}
+            onAddView={addViewFromResult}
             onAddLayer={addLayerToCanvas}
             logUsage={logUsage}
             onVersionSaved={() => setHistoryRefreshKey(k => k + 1)}
