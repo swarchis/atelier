@@ -66,6 +66,7 @@ export default function DesignDetail() {
   const [savingName, setSavingName] = useState(false);
   const [savingCanvas, setSavingCanvas] = useState(false);
   const autosaveBusy = useRef(false);
+  const autosaveFailures = useRef(0);
   const [toggling, setToggling] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
   const [tagType, setTagType] = useState('composition');
@@ -116,24 +117,36 @@ export default function DesignDetail() {
       try {
         const { data } = await supabase
           .from('design_versions')
-          .select('image_url, label')
+          .select('image_url, psd_url, label, created_at')
           .eq('product_id', id)
           .order('created_at', { ascending: false })
           .limit(10);
-        // Restoring must never flatten the design, so the newest row carrying a
-        // layered file wins. Pre-030 saves kept the PSD as its own row with the
-        // path in image_url — still honoured so older designs keep their layers.
-        const layered = (data || []).find(v => v.psd_url);
-        const legacyPsd = (data || []).find(v => v.label === PSD_VERSION_LABEL);
-        const raster = (data || []).find(v => v.label !== PSD_VERSION_LABEL);
+        // RECENCY WINS. Rows arrive newest-first, so the newest real save is the
+        // one to restore — full stop. Preferring "whichever row has a layered
+        // file" instead (as this used to) reopened the stale legacy working-file
+        // row, which the current save path no longer updates — that's why
+        // designs came back as their first generated version. Layers are
+        // preferred only WITHIN the newest save.
+        const rows = data || [];
+        const newest = rows.find(v => v.label !== PSD_VERSION_LABEL);
+        const legacyPsd = rows.find(v => v.label === PSD_VERSION_LABEL);
+
+        let psdUrl = newest?.psd_url || null;
+        // Pre-030 designs kept the layered file in its own rolling row tracking
+        // the same canvas. Use it ONLY when it is at least as recent as the
+        // newest save, so a stale one can never resurrect old work.
+        if (!psdUrl && legacyPsd?.image_url) {
+          const legacyAt = new Date(legacyPsd.created_at || 0).getTime();
+          const newestAt = new Date(newest?.created_at || 0).getTime();
+          if (!newest || legacyAt >= newestAt) psdUrl = legacyPsd.image_url;
+        }
+
         // Remembered so switching back to Front can reopen it in place.
         if (!cancelled) {
-          if (raster?.image_url) setFrontImageUrl(raster.image_url);
-          const psdUrl = layered?.psd_url || legacyPsd?.image_url || null;
+          if (newest?.image_url) setFrontImageUrl(newest.image_url);
           if (psdUrl) setFrontPsdUrl(psdUrl);
         }
-        const psdUrl = layered?.psd_url || legacyPsd?.image_url || null;
-        const pickUrl = psdUrl || raster?.image_url;
+        const pickUrl = psdUrl || newest?.image_url;
         if (!pickUrl || cancelled) return;
         const res = await fetch(pickUrl);
         if (!res.ok) throw new Error(`image fetch failed (${res.status})`);
@@ -177,6 +190,27 @@ export default function DesignDetail() {
   // layer stack, so restoring an old version brings its layers back instead of
   // a flattened image. image_url stays the thumbnail history/previews use;
   // psd_url is what actually gets reopened.
+  // Write a version row, retrying without psd_url if that column doesn't exist
+  // yet (migration 030 not applied). A save must never fail outright just
+  // because layers can't be stored — it simply saves flattened instead.
+  const writeVersionRow = async (payload, existingId) => {
+    const attempt = (body) => (existingId
+      ? supabase.from('design_versions').update(body).eq('id', existingId)
+      : supabase.from('design_versions').insert([{ product_id: id, ...body }]));
+    let { error } = await attempt(payload);
+    if (error && /psd_url/i.test(error.message || '')) {
+      console.warn('design_versions.psd_url is missing — apply migration 030 to preserve layers. Saving flattened for now.');
+      const { psd_url, ...withoutPsd } = payload;
+      ({ error } = await attempt(withoutPsd));
+    }
+    return error;
+  };
+
+  // Capture the canvas ONCE as both a flattened preview and a layered PSD, and
+  // store them on the SAME version row. Every save therefore carries its own
+  // layer stack, so restoring an old version brings its layers back instead of
+  // a flattened image. image_url stays the thumbnail history/previews use;
+  // psd_url is what actually gets reopened.
   const persistCanvas = async (label) => {
     const capturedUrl = await photopeaRef.current.capture();
     const blob = await fetch(capturedUrl).then(r => r.blob());
@@ -200,21 +234,14 @@ export default function DesignDetail() {
       const { data: existing } = await supabase
         .from('design_versions').select('id')
         .eq('product_id', id).eq('label', 'Autosave').maybeSingle();
-      let updated = false;
-      if (existing) {
-        const { error } = await supabase
-          .from('design_versions')
-          .update({ ...row, created_at: new Date().toISOString() })
-          .eq('id', existing.id);
-        updated = !error; // update blocked (e.g. missing RLS policy) → insert instead
-      }
-      if (!updated) {
-        await supabase.from('design_versions')
-          .insert([{ product_id: id, ...row, label: 'Autosave', source: 'autosave' }]);
-      }
+      let error = existing
+        ? await writeVersionRow({ ...row, created_at: new Date().toISOString() }, existing.id)
+        : await writeVersionRow({ ...row, label: 'Autosave', source: 'autosave' });
+      // An update blocked by RLS leaves nothing saved — fall back to an insert.
+      if (error && existing) error = await writeVersionRow({ ...row, label: 'Autosave', source: 'autosave' });
+      if (error) throw error;
     } else {
-      const { error } = await supabase.from('design_versions')
-        .insert([{ product_id: id, ...row, label, source: 'manual-save' }]);
+      const error = await writeVersionRow({ ...row, label, source: 'manual-save' });
       if (error) throw error;
     }
 
@@ -243,7 +270,19 @@ export default function DesignDetail() {
     const timer = setInterval(async () => {
       if (canvasStatus !== 'ready' || autosaveBusy.current || savingCanvas || analyzing || generatingTP || toggling) return;
       autosaveBusy.current = true;
-      try { await persistCanvas('Autosave'); } catch { /* skip this cycle */ }
+      try {
+        await persistCanvas('Autosave');
+        autosaveFailures.current = 0;
+      } catch (err) {
+        // A single miss is normal (empty canvas, transient capture timeout),
+        // but silent forever is how a broken autosave hides until work is
+        // already lost — so say something once it's clearly not transient.
+        autosaveFailures.current += 1;
+        console.error('Autosave failed:', err);
+        if (autosaveFailures.current === 3) {
+          toast.error("Autosave isn't working — use Save to store your work.");
+        }
+      }
       autosaveBusy.current = false;
     }, 120000);
     return () => clearInterval(timer);
