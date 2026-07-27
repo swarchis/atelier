@@ -116,6 +116,16 @@ const PhotopeaEditor = forwardRef(function PhotopeaEditor({ svgMarkup, file, onS
       if (!win) return;
       win.postMessage(`app.open("${dataUrl}", "", true);`, '*');
     },
+    // Replace the canvas with a File/Blob by posting its raw bytes — the same
+    // path the initial load uses, and the only one that reliably opens a PSD
+    // with its layer stack intact (app.open with a URL flattens/varies).
+    // Used when switching garment views and restoring saved versions.
+    openFile: async (fileOrBlob) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win || !fileOrBlob) return;
+      const buf = await fileOrBlob.arrayBuffer();
+      win.postMessage(buf, '*');
+    },
   }));
 
   const handleLoad = async () => {

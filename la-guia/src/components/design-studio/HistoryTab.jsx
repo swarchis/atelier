@@ -14,7 +14,7 @@ function timeAgo(iso) {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
-function VersionHistory({ productId, onApplyToCanvas }) {
+function VersionHistory({ productId, onApplyToCanvas, onRestoreVersion }) {
   const [versions, setVersions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -35,10 +35,10 @@ function VersionHistory({ productId, onApplyToCanvas }) {
 
   const remove = async (versionId) => {
     const v = versions.find(ver => ver.id === versionId);
-    if (v && v.image_url) {
-      const fileName = v.image_url.split('/').pop();
-      await supabase.storage.from('mockups').remove([fileName]);
-    }
+    // Remove the layered file alongside the preview, or deleting a version
+    // would leave its (much larger) PSD orphaned in storage.
+    const files = [v?.image_url, v?.psd_url].filter(Boolean).map(u => u.split('/').pop());
+    if (files.length) await supabase.storage.from('mockups').remove(files);
     const { error } = await supabase.from('design_versions').delete().eq('id', versionId);
     if (!error) setVersions(prev => prev.filter(ver => ver.id !== versionId));
   };
@@ -64,7 +64,7 @@ function VersionHistory({ productId, onApplyToCanvas }) {
                 <div style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.label}</div>
                 <div style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>{timeAgo(v.created_at)}</div>
               </div>
-              <button className="btn btn-sm" onClick={() => onApplyToCanvas(v.image_url)}>Restore</button>
+              <button className="btn btn-sm" onClick={() => onRestoreVersion(v)} title={v.psd_url ? 'Restore this version with its layers' : 'Restore this version (saved before layered history — flattened)'}>Restore{v.psd_url ? '' : ' (flat)'}</button>
               <button onClick={() => remove(v.id)} title="Delete version" style={{ background: 'none', border: 'none', color: 'var(--ink-4)', cursor: 'pointer', fontSize: 13 }}>
                 <i className="ph ph-trash" />
               </button>
@@ -163,10 +163,10 @@ function Comments({ productId }) {
   );
 }
 
-export default function HistoryTab({ productId, onApplyToCanvas }) {
+export default function HistoryTab({ productId, onApplyToCanvas, onRestoreVersion }) {
   return (
     <div style={{ maxWidth: 1080, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
-      <VersionHistory productId={productId} onApplyToCanvas={onApplyToCanvas} />
+      <VersionHistory productId={productId} onApplyToCanvas={onApplyToCanvas} onRestoreVersion={onRestoreVersion} />
       <Comments productId={productId} />
     </div>
   );

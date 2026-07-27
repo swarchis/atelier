@@ -85,6 +85,7 @@ export default function DesignDetail() {
   const [activeView, setActiveView] = useState('front');
   const [switchingView, setSwitchingView] = useState(null);
   const [frontImageUrl, setFrontImageUrl] = useState(null);
+  const [frontPsdUrl, setFrontPsdUrl] = useState(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const photopeaRef = useRef(null);
   const canvasPanelRef = useRef(null);
@@ -119,19 +120,26 @@ export default function DesignDetail() {
           .eq('product_id', id)
           .order('created_at', { ascending: false })
           .limit(10);
-        // Prefer the layered working file (full layer stack) over a flattened
-        // snapshot; it's refreshed on every save so it's never staler.
-        const psd = (data || []).find(v => v.label === PSD_VERSION_LABEL);
+        // Restoring must never flatten the design, so the newest row carrying a
+        // layered file wins. Pre-030 saves kept the PSD as its own row with the
+        // path in image_url — still honoured so older designs keep their layers.
+        const layered = (data || []).find(v => v.psd_url);
+        const legacyPsd = (data || []).find(v => v.label === PSD_VERSION_LABEL);
         const raster = (data || []).find(v => v.label !== PSD_VERSION_LABEL);
         // Remembered so switching back to Front can reopen it in place.
-        if (raster?.image_url && !cancelled) setFrontImageUrl(raster.image_url);
-        const pick = psd || raster;
-        if (!pick?.image_url || cancelled) return;
-        const res = await fetch(pick.image_url);
+        if (!cancelled) {
+          if (raster?.image_url) setFrontImageUrl(raster.image_url);
+          const psdUrl = layered?.psd_url || legacyPsd?.image_url || null;
+          if (psdUrl) setFrontPsdUrl(psdUrl);
+        }
+        const psdUrl = layered?.psd_url || legacyPsd?.image_url || null;
+        const pickUrl = psdUrl || raster?.image_url;
+        if (!pickUrl || cancelled) return;
+        const res = await fetch(pickUrl);
         if (!res.ok) throw new Error(`image fetch failed (${res.status})`);
         const blob = await res.blob();
         if (!cancelled) {
-          setPersistedFile(psd
+          setPersistedFile(psdUrl
             ? new File([blob], 'design.psd', { type: 'image/vnd.adobe.photoshop' })
             : new File([blob], 'design.png', { type: blob.type || 'image/png' }));
         }
@@ -164,11 +172,30 @@ export default function DesignDetail() {
   // newest) rather than flooding history. Whatever is newest here is exactly
   // what the canvas-restore fallback and every preview load, so saved work
   // survives navigating away, reloads, and new sessions.
+  // Capture the canvas ONCE as both a flattened preview and a layered PSD, and
+  // store them on the SAME version row. Every save therefore carries its own
+  // layer stack, so restoring an old version brings its layers back instead of
+  // a flattened image. image_url stays the thumbnail history/previews use;
+  // psd_url is what actually gets reopened.
   const persistCanvas = async (label) => {
     const capturedUrl = await photopeaRef.current.capture();
     const blob = await fetch(capturedUrl).then(r => r.blob());
     const publicUrl = await uploadDesignImage(blob, id, label === 'Autosave' ? 'autosave' : 'save');
     setFrontImageUrl(publicUrl);
+
+    // Best-effort: an oversized document or a bucket MIME restriction must not
+    // lose the save entirely — the raster preview above has already landed.
+    let psdUrl = null;
+    try {
+      const psdBlob = await photopeaRef.current.capturePsd();
+      if (psdBlob && psdBlob.size <= 40 * 1024 * 1024) psdUrl = await uploadDesignPsd(psdBlob, id);
+      else if (psdBlob) console.warn('PSD too large to store (>40MB) — saved flattened preview only.');
+    } catch (err) {
+      console.error('PSD capture failed (raster preview still saved):', err);
+    }
+    if (psdUrl) setFrontPsdUrl(psdUrl);
+
+    const row = { image_url: publicUrl, psd_url: psdUrl };
     if (label === 'Autosave') {
       const { data: existing } = await supabase
         .from('design_versions').select('id')
@@ -177,50 +204,22 @@ export default function DesignDetail() {
       if (existing) {
         const { error } = await supabase
           .from('design_versions')
-          .update({ image_url: publicUrl, created_at: new Date().toISOString() })
+          .update({ ...row, created_at: new Date().toISOString() })
           .eq('id', existing.id);
         updated = !error; // update blocked (e.g. missing RLS policy) → insert instead
       }
       if (!updated) {
         await supabase.from('design_versions')
-          .insert([{ product_id: id, image_url: publicUrl, label: 'Autosave', source: 'autosave' }]);
+          .insert([{ product_id: id, ...row, label: 'Autosave', source: 'autosave' }]);
       }
     } else {
       const { error } = await supabase.from('design_versions')
-        .insert([{ product_id: id, image_url: publicUrl, label, source: 'manual-save' }]);
+        .insert([{ product_id: id, ...row, label, source: 'manual-save' }]);
       if (error) throw error;
     }
 
-    // Working file: the full layered PSD, one rolling row updated on every
-    // save (manual and auto), so reopening the design restores the complete
-    // layer stack — not a flattened raster. Best-effort: if the PSD leg fails
-    // (huge document, bucket MIME restriction), the raster snapshot above has
-    // already saved and the design still restores flattened.
-    try {
-      const psdBlob = await photopeaRef.current.capturePsd();
-      if (psdBlob && psdBlob.size <= 40 * 1024 * 1024) {
-        const psdUrl = await uploadDesignPsd(psdBlob, id);
-        const { data: psdRow } = await supabase
-          .from('design_versions').select('id')
-          .eq('product_id', id).eq('label', PSD_VERSION_LABEL).maybeSingle();
-        let psdSaved = false;
-        if (psdRow) {
-          const { error } = await supabase
-            .from('design_versions')
-            .update({ image_url: psdUrl, created_at: new Date().toISOString() })
-            .eq('id', psdRow.id);
-          psdSaved = !error;
-        }
-        if (!psdSaved) {
-          await supabase.from('design_versions')
-            .insert([{ product_id: id, image_url: psdUrl, label: PSD_VERSION_LABEL, source: 'psd' }]);
-        }
-      }
-    } catch (err) {
-      console.error('PSD working-file save failed (raster snapshot still saved):', err);
-    }
-
     setHistoryRefreshKey(k => k + 1);
+    return { imageUrl: publicUrl, psdUrl };
   };
 
   const handleSaveCanvas = async () => {
@@ -301,9 +300,31 @@ export default function DesignDetail() {
     const capturedUrl = await photopeaRef.current.capture();
     const blob = await fetch(capturedUrl).then(r => r.blob());
     const publicUrl = await uploadDesignImage(blob, id, 'view');
-    const next = views.map(v => (v.key === activeView ? { ...v, imageUrl: publicUrl } : v));
+    // Views keep their own layered file too — switching tabs must not be a
+    // slow way of flattening a design.
+    let psdUrl = null;
+    try {
+      const psdBlob = await photopeaRef.current.capturePsd();
+      if (psdBlob && psdBlob.size <= 40 * 1024 * 1024) psdUrl = await uploadDesignPsd(psdBlob, id);
+    } catch (err) {
+      console.error('PSD capture failed for this view (flattened preview still saved):', err);
+    }
+    const next = views.map(v => (
+      v.key === activeView ? { ...v, imageUrl: publicUrl, psdUrl: psdUrl || v.psdUrl || null } : v
+    ));
     setViews(next);
     await persistStudioField('views', next);
+  };
+
+  // Load a stored view into the canvas, preferring its layered file so the
+  // layer stack survives the switch. Posts raw bytes (openFile) rather than a
+  // URL, which is the only path that reliably reopens a PSD with its layers.
+  const openIntoCanvas = async ({ psdUrl, imageUrl }) => {
+    const url = psdUrl || imageUrl;
+    if (!url) return;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`could not load that view (${res.status})`);
+    await photopeaRef.current?.openFile(await res.blob());
   };
 
   const switchView = async (key) => {
@@ -314,8 +335,10 @@ export default function DesignDetail() {
       // Best-effort: an empty canvas can't be captured, which shouldn't block
       // the switch itself.
       try { await saveActiveView(); } catch (err) { console.error('Could not save the current view:', err); }
-      const target = key === 'front' ? frontImageUrl : views.find(v => v.key === key)?.imageUrl;
-      if (target) photopeaRef.current?.openImage(target);
+      const target = key === 'front'
+        ? { psdUrl: frontPsdUrl, imageUrl: frontImageUrl }
+        : (views.find(v => v.key === key) || {});
+      await openIntoCanvas(target);
       setActiveView(key);
     } finally {
       setSwitchingView(null);
@@ -336,7 +359,7 @@ export default function DesignDetail() {
       const next = [...views, entry];
       setViews(next);
       await persistStudioField('views', next);
-      photopeaRef.current?.openImage(imageUrl);
+      await openIntoCanvas({ imageUrl });
       setActiveView(key);
       setTab('canvas');
       toast.success(`Added "${entry.label}" as a new view.`);
@@ -353,7 +376,22 @@ export default function DesignDetail() {
     await persistStudioField('views', next);
     if (activeView === key) {
       setActiveView('front');
-      if (frontImageUrl) photopeaRef.current?.openImage(frontImageUrl);
+      await openIntoCanvas({ psdUrl: frontPsdUrl, imageUrl: frontImageUrl }).catch(() => {});
+    }
+  };
+
+  // Restoring a saved version reopens its OWN layered file, so history is a
+  // real undo trail rather than a gallery of flattened screenshots. Versions
+  // saved before migration 030 have no psd_url and restore flattened — the
+  // History row says so rather than pretending otherwise.
+  const restoreVersion = async (v) => {
+    setCaptureError(null);
+    try {
+      await openIntoCanvas({ psdUrl: v.psd_url, imageUrl: v.image_url });
+      setTab('canvas');
+      toast.success(v.psd_url ? 'Version restored with its layers.' : 'Version restored (this one was saved flattened).');
+    } catch (err) {
+      setCaptureError('Could not restore that version: ' + err.message);
     }
   };
 
@@ -983,7 +1021,7 @@ export default function DesignDetail() {
         )}
         
         {tab === 'history' && (
-          <HistoryTab key={historyRefreshKey} productId={id} onApplyToCanvas={applyResultToCanvas} />
+          <HistoryTab key={historyRefreshKey} productId={id} onApplyToCanvas={applyResultToCanvas} onRestoreVersion={restoreVersion} />
         )}
       </div>
     </>
