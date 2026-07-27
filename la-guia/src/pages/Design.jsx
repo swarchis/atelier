@@ -310,7 +310,7 @@ const startFromUpload = async (e) => {
               <div style={{ marginTop: 20, padding: '12px 14px', background: 'var(--bg-3)', borderRadius: 'var(--r-sm)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12.5, color: 'var(--ink-3)', flex: 1, minWidth: 200 }}>
-                    Don't see your garment type above? AI will sketch a blank starting outline for you to build on.
+                    Don't see your garment type above? AI will generate a blank garment mockup for you to build on.
                   </span>
                   <input
                     className="form-input" style={{ width: 160 }} placeholder="e.g. Balaclava"

@@ -1744,8 +1744,14 @@ const ELEMENT_MODE_PROMPTS = {
   // path coordinates for this, which is a spatial-reasoning task text models
   // are bad at blind — results were unrecognizable for anything but the
   // simplest shapes. An actual image model reasons in pixel space, so it's
-  // structurally better suited to rendering a coherent garment outline.
-  'silhouette': (p) => `ONE single ${p || 'garment'}, drawn once as a technical fashion flat sketch: the empty garment only — no person, no body, no mannequin. A SINGLE front view, centered and vertically symmetric, filling most of the frame. Clean black ink outline, thin uniform line weight, technical CAD line-art. Exactly one garment and exactly one view — this is NOT a spec sheet, NOT a turnaround, NOT a front-and-back layout, NOT a set of variations; render a single isolated garment outline and nothing else`,
+  // structurally better suited to rendering a coherent garment.
+  //
+  // Style note: this deliberately targets a "ghost mannequin" blank apparel
+  // mockup — the dimensional, softly shaded blank a designer prints artwork
+  // onto — NOT a flat CAD line drawing. Flat line-art came back as a bare
+  // uniform outline that gave founders nothing to build on; a shaded blank
+  // reads as an actual garment and is far more useful as a starting canvas.
+  'silhouette': (p) => `A blank ${p || 'garment'} product mockup template, front view, centered and vertically symmetric, filling most of the frame. Plain undyed off-white fabric with no branding, print, pattern, logo or text on it. Render it as if worn on an invisible mannequin so the garment holds its natural three-dimensional shape: soft even studio lighting, gentle grey shading and subtle fabric folds that describe its volume, visible seam and stitch detail, and darker shadow recessed inside any opening (face opening, hood, neckline, cuffs, sleeves). Crisp clean edges. Exactly one garment, exactly one view`,
 };
 
 // Per-mode generation options for gpt-image-1.
@@ -1767,14 +1773,14 @@ const ELEMENT_MODE_OPTIONS = {
 const ELEMENT_STYLE_SUFFIX = {
   'add-element': 'Flat vector-style graphic, centered, on a fully transparent background. No scene, no mockup, no photograph, no shadow, no frame or border, no text or watermark — just the graphic itself.',
   'pattern': 'A flat, evenly lit repeating swatch that tiles seamlessly edge to edge and fills the entire frame. No garment, no mockup, no shadow, no text or watermark.',
-  'silhouette': 'Pure black line art on a fully transparent background. No colour, no fill, no shading, no gradients, no photograph, no 3D render, no text, no watermark, no frame or border.',
+  'silhouette': 'Clean product-photography-quality blank apparel mockup, isolated on a fully transparent background — no backdrop, no surface, no ground shadow, no coloured background of any kind. Neutral white and light-grey palette only. No text, no watermark, no frame or border.',
 };
 
 // gpt-image-1 has no negativePrompt parameter — exclusions go in the prompt as
 // plain language, which this model follows reliably (unlike SDXL).
 const ELEMENT_MODE_EXCLUSIONS = {
   'add-element': 'Draw only one design: no alternates, no variations, no grid or sheet of options.',
-  'silhouette': 'Do not draw any person, body, face, hair, hands, arms, legs, feet, mannequin or dress form. Do not draw a back view, side view, three-quarter view, turnaround, spec sheet, or any second garment — exactly one garment, seen from the front, once.',
+  'silhouette': 'The garment must be empty: no person, face, skin, hair, eyes, hands, arms, legs, and no visible mannequin, dress form or hanger. Do not render a back view, side view, three-quarter view, turnaround, spec sheet or any second garment — exactly one garment, from the front, once. Do not produce a flat two-dimensional CAD line drawing or bare outline: the garment must look dimensional and softly shaded, like a real blank product photo.',
 };
 
 app.post('/api/design/generate-element', metered('design-generate-element'), async (req, res) => {
