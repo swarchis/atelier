@@ -42,12 +42,40 @@ export function TeamProvider({ children }) {
         .eq('invited_email', user.email)
         .is('user_id', null);
       if (!pending || pending.length === 0) return;
+      // Seed a display name from the user's own profile so teammates see a
+      // person, not an email address. They can change it any time (and are
+      // prompted to if it's still blank).
+      const { data: prefs } = await supabase
+        .from('user_preferences').select('full_name').eq('user_id', user.id).maybeSingle();
+      const seededName = prefs?.full_name?.trim() || null;
       await Promise.all(pending.map(row =>
-        supabase.from('brand_members').update({ user_id: user.id, status: 'active', joined_at: new Date().toISOString() }).eq('id', row.id)
+        supabase.from('brand_members').update({
+          user_id: user.id,
+          status: 'active',
+          joined_at: new Date().toISOString(),
+          ...(seededName ? { display_name: seededName } : {}),
+        }).eq('id', row.id)
       ));
+      loadMembers();
     }
     claimInvites();
   }, [user?.id]);
+
+  // The current user's membership row on this brand (owners have none).
+  const myMembership = members.find(m => m.user_id === user?.id) || null;
+  // Prompt-worthy: they've joined as a member but are still shown as an email.
+  const needsDisplayName = !!myMembership && !myMembership.display_name;
+
+  const setMyDisplayName = async (name) => {
+    const clean = (name || '').trim();
+    if (!clean || !user?.id) return;
+    // Name themselves across every brand they belong to, so they aren't a
+    // different anonymous email on each one.
+    const { error } = await supabase
+      .from('brand_members').update({ display_name: clean }).eq('user_id', user.id);
+    if (error) throw error;
+    setMembers(prev => prev.map(m => (m.user_id === user.id ? { ...m, display_name: clean } : m)));
+  };
 
   const myRole = activeBrand?.memberRole || 'owner';
   const canManage = myRole === 'owner' || myRole === 'admin';
@@ -99,7 +127,7 @@ export function TeamProvider({ children }) {
   };
 
   return (
-    <TeamContext.Provider value={{ members, loading, myRole, canManage, inviteMember, updateMemberRole, removeMember, refresh: loadMembers }}>
+    <TeamContext.Provider value={{ members, loading, myRole, canManage, inviteMember, updateMemberRole, removeMember, refresh: loadMembers, myMembership, needsDisplayName, setMyDisplayName }}>
       {children}
     </TeamContext.Provider>
   );

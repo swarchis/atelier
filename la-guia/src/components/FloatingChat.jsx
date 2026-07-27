@@ -43,6 +43,9 @@ export default function FloatingChat() {
     if (senderId === user.id) return 'You';
     if (senderId === activeBrand?.user_id) return 'Brand owner';
     const m = members.find(m => m.user_id === senderId);
+    // Prefer the name they chose when they joined; only fall back to guessing
+    // from the email prefix if they haven't set one.
+    if (m?.display_name) return m.display_name;
     if (m) return m.invited_email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     return 'Teammate';
   };
@@ -201,7 +204,7 @@ export default function FloatingChat() {
                     {addableMembers.map(m => (
                       <label key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 8px', borderRadius: 6, background: selected.includes(m.user_id) ? 'var(--accent-bg)' : 'transparent' }}>
                         <input type="checkbox" checked={selected.includes(m.user_id)} onChange={() => toggleSelected(m.user_id)} />
-                        {m.invited_email}
+                        {m.display_name || m.invited_email}
                         <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'capitalize' }}>{m.role}</span>
                       </label>
                     ))}

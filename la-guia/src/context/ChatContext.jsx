@@ -121,22 +121,21 @@ export function ChatProvider({ children }) {
 
   const createGroupChat = async ({ name, participantUserIds }) => {
     if (!activeBrand || !user) throw new Error('No active brand');
-    const { data: chat, error } = await supabase
-      .from('chats')
-      .insert([{ brand_id: activeBrand.id, type: 'group', name: name?.trim() || 'New chat', created_by: user.id }])
-      .select()
-      .single();
+    // Definer-rights RPC: creating the chat and its participant rows in one
+    // transaction avoids the RLS insert failure ("new row violates row-level
+    // security policy for table chats") that the direct insert path hits, and
+    // guarantees a chat is never left with no members. The creator is always
+    // added as a participant so their own last_read_at is tracked like
+    // everyone else's — otherwise their own chat always looks unread.
+    const { data: chat, error } = await supabase.rpc('create_group_chat', {
+      p_brand_id: activeBrand.id,
+      p_name: name?.trim() || 'New chat',
+      p_participant_ids: [...new Set(participantUserIds || [])],
+    });
     if (error) throw error;
-    // The creator gets a participant row too (not just an implicit "is
-    // creator" pass in RLS) so their own last_read_at is tracked the same
-    // way as everyone else's — otherwise their own chat would always look
-    // unread to them.
-    const uniqueIds = [...new Set([user.id, ...(participantUserIds || [])])];
-    const rows = uniqueIds.map(uid => ({ chat_id: chat.id, user_id: uid }));
-    const { error: partError } = await supabase.from('chat_participants').insert(rows);
-    if (partError) throw partError;
-    setGroupChats(prev => [...prev, chat]);
-    return chat;
+    const created = Array.isArray(chat) ? chat[0] : chat;
+    setGroupChats(prev => [...prev, created]);
+    return created;
   };
 
   const addParticipant = async (chatId, userId) => {

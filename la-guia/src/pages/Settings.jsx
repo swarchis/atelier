@@ -120,7 +120,8 @@ function TeamTab() {
           {members.map(m => (
             <div className="list-row" key={m.id}>
               <div>
-                <div style={{ fontSize: 13.5 }}>{m.invited_email}</div>
+                <div style={{ fontSize: 13.5 }}>{m.display_name || m.invited_email}</div>
+                {m.display_name && <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{m.invited_email}</div>}
                 <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{m.status === 'active' ? 'Active' : 'Invite pending'}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

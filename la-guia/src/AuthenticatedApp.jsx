@@ -22,6 +22,7 @@ import ShortcutsHelpModal from './components/ShortcutsHelpModal.jsx';
 import FloatingChat from './components/FloatingChat.jsx';
 import OutOfCreditsModal from './components/OutOfCreditsModal.jsx';
 import ToastHost from './components/ToastHost.jsx';
+import MemberNamePrompt from './components/MemberNamePrompt.jsx';
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts.js';
 
 import Home from './pages/Home.jsx';
@@ -98,6 +99,7 @@ function AppShellInner() {
         <FloatingChat />
         <OutOfCreditsModal />
         <ToastHost />
+        <MemberNamePrompt />
       </div>
     </OnboardingProvider>
   );
