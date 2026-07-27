@@ -1625,12 +1625,13 @@ Return 2 to 4 suggestions, ordered most important first. Use "warning" only for 
 // ---------------------------------------------------------
 // One endpoint, many "modes" — every tool here needs to see and faithfully
 // edit the founder's *actual* existing design (recolor, fabric-swap, etc.),
-// so these run on Gemini's image model, which takes a reference image and
-// returns a genuinely edited version of it. Section "7." below handles the
-// opposite kind of tool — generating a brand new, isolated element to *add*
-// to the design — on OpenAI's gpt-image-1. (gpt-image-1 also supports
-// image-to-image via /v1/images/edits, so these modes could move over too;
-// callOpenAIImage already accepts reference images.)
+// so these run image-to-image on gpt-image-1 via /v1/images/edits, passing the
+// current canvas in as the reference. Section "7." below handles the opposite
+// kind of tool — generating a brand new, isolated element to *add* to the
+// design — on the same model with no reference image. Both go through
+// callOpenAIImage; they stay separate endpoints because editing an existing
+// image and generating an isolated asset are genuinely different capabilities
+// (different prompt rules, options, and credit prices), not one with a flag.
 // Hard rules appended to EVERY design-image prompt. In real use the two
 // biggest failure modes were (a) the model returning a contact sheet of
 // several variations on one canvas and (b) the rendering style drifting run

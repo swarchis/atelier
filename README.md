@@ -20,15 +20,17 @@ grainline/
 │   ├── .env.local           VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (not committed)
 │   └── package.json
 ├── api/                      Express backend — the only place secret keys are used
-│   ├── index.js              AI (Gemini + Tavily), Stripe billing, Shopify OAuth, Resend email
-│   ├── scripts/               One-time setup scripts (Stripe product/price creation)
+│   ├── index.js              AI (Gemini text + OpenAI images + Tavily), Stripe billing
+│   │                         and AI credits, storefront/social OAuth, Resend email
+│   ├── config/aiCredits.js   AUTHORITATIVE per-feature credit costs, tier grants, packs
+│   ├── scripts/              One-time setup scripts (Stripe products/prices, webhook)
 │   ├── .env                  Secret keys (not committed) — see Local setup
 │   └── package.json
 └── supabase/
     └── migrations/           SQL schema for your Supabase project, run in order
 ```
 
-**The split is deliberate:** the frontend talks to Supabase *directly* for all data (products, designs, vendors, quotes, etc.), protected by Row Level Security — no backend round-trip needed for CRUD. The Express backend (`api/`) exists **only** for calls that need a secret key that can't live in browser code (Gemini, Tavily, Stripe, Shopify, Resend).
+**The split is deliberate:** the frontend talks to Supabase *directly* for all data (products, designs, vendors, quotes, etc.), protected by Row Level Security — no backend round-trip needed for CRUD. The Express backend (`api/`) exists **only** for calls that need a secret key that can't live in browser code (Gemini, OpenAI, Tavily, Stripe, the storefront/social OAuth apps, Resend) — plus the two things that must not be client-trusted at all: validating the caller's JWT and moving AI credits.
 
 ---
 
@@ -41,10 +43,14 @@ Auth · Brands (multi-brand — a user can own or belong to several, switching r
 
 Every delete (design, tech pack, material, collection) goes through `ConfirmDeleteModal` (`la-guia/src/components/ConfirmDeleteModal.jsx`) — a deliberate trash-icon click opens it, and the actual delete button stays disabled until you type the item's exact name, so an accidental click or stray Enter key can't finish it.
 
-**AI Design Studio** (`la-guia/src/components/design-studio/`, opened as tabs on a Design's detail page): real image generation, split across two providers by what each tool actually needs to do —
+**AI Design Studio** (`la-guia/src/components/design-studio/`, opened as tabs on a Design's detail page): real image generation on **OpenAI `gpt-image-1`**, split across two endpoints by what each tool actually does to the canvas —
 
-- **Transform tools** (sketch-to-design, AI text edit, background remover, recolor, fabric swap, mockup generator, flat sketch, alternate views) edit the founder's *actual* existing design, so they run on Gemini's image model (`/api/design/ai-image`, one mode-specific prompt template per tool) — it's the one that can take a reference image and hand back a faithfully edited version. Applying a result replaces the canvas outright, since these are genuinely whole-image changes (there's no partial "layer" for "this garment is now green").
-- **Addition tools** (Add Element, Pattern Generator) generate a brand-new, isolated element with no reference to the existing design at all — these run on Stable Diffusion via Pixazo (`/api/design/generate-element`, base SDXL through `https://gateway.pixazo.ai/getImage/v1/getSDXLImage`). A result never overwrites anything: it's either inserted as a genuinely new, movable/deletable Photopea layer (`PhotopeaEditor.addLayer`, uses Photopea's own `app.open(url, "", true)` smart-object-layer behavior) or downloaded as a transparent PNG for anyone working in Photoshop/Illustrator instead of the in-app canvas. Pixazo's SD models are text-to-image only (confirmed against their docs) — there's no SD endpoint that can take your existing design as input, which is why the transform tools couldn't move here too.
+- **Transform tools** (sketch-to-design, polish, AI text edit, background remover, recolor, fabric swap, mockup generator, flat sketch, alternate views, variants — 10 modes) edit the founder's *actual* existing design, so they go through `/api/design/ai-image` (one mode-specific prompt template per tool) with the current canvas passed in as a reference image. Applying a result replaces the canvas outright, since these are genuinely whole-image changes (there's no partial "layer" for "this garment is now green"). The one exception is **alternate views**, which no longer overwrite anything — see the garment views note below.
+- **Addition tools** (Add Element, Pattern Generator) generate a brand-new, isolated element with no reference to the existing design at all, through `/api/design/generate-element` (modes `add-element`, `pattern`, plus `silhouette` for Design.jsx's custom-garment generator). A result never overwrites anything: it's either inserted as a genuinely new, movable/deletable Photopea layer (`PhotopeaEditor.addLayer`, uses Photopea's own `app.open(url, "", true)` smart-object-layer behavior) or downloaded as a transparent PNG for anyone working in Photoshop/Illustrator instead of the in-app canvas.
+
+Both endpoints share one `callOpenAIImage` helper. `gpt-image-1` returns **real alpha**, so background removal, flat sketches, logos and silhouettes come back as genuinely transparent drop-in layers rather than the painted-white approximation an earlier provider could only fake. Every design-image prompt gets `IMAGE_OUTPUT_RULES` appended — the two biggest real-world failure modes were the model returning a contact sheet of variations on one canvas and the rendering style drifting run to run, so every mode pins one subject, one panel, consistent presentation, no stray text.
+
+*(History: the transform tools originally ran on Gemini's image model and the addition tools on Stable Diffusion via Pixazo. Both moved to `gpt-image-1`; `PIXAZO_API_KEY` is no longer read anywhere in this repo and can be deleted from your env. Gemini is still the text model behind every non-image AI feature.)*
 
 Also real: a moodboard (uploaded reference images), an AI color palette generator, AI trend inspiration (Tavily-grounded, cached once per category per day), AI-generated design variants, version history (every saved AI result), and a comment thread — all Supabase-backed per design. AI design critique (`/api/analyze-design`, scores a canvas snapshot) predates this and lives on the Canvas tab.
 
@@ -135,11 +141,28 @@ Verified by checking the actual computed CSS at a 375px viewport (mobile-preset 
 
 **Team Chat & AI Assistant** (`la-guia/src/components/FloatingChat.jsx`, `la-guia/src/context/ChatContext.jsx`, mounted once in `App.jsx`'s shell so it persists across every page): a circular button in the bottom-right corner opens a panel with two kinds of real, Supabase-backed conversations. Every founder gets one personal **AI Assistant** chat (`chats.type = 'ai'`) — `/api/chat-reply` grounds its replies in a text summary of the brand's own products/vendors/quotes/production-orders/materials (the same "client assembles context, server just prompts" shape `/api/dashboard-suggestions` already used), gated behind `useAIUsage()` like every other AI feature, and it says so plainly when the brand data it was given doesn't answer the question rather than guessing. The rest are real **group chats** with any combination of teammates (`chats.type = 'group'`) — pick anyone from the brand's active team members (including an "Add everyone" shortcut), no cap on participants. Visibility is enforced per-chat-membership in Postgres RLS (a new `is_chat_member()` helper), not just brand membership, so teammates on the same brand can't read each other's AI conversations or a group chat they weren't added to. There's no realtime infrastructure anywhere else in this app, so group chats poll for new messages every 8s while a thread is open rather than introducing Supabase Realtime as a one-off. If the AI Assistant entry doesn't show up in the panel (only the "+ New chat" affordance does), `ChatContext.jsx` now surfaces the real Postgres error as a banner instead of only `console.error`-ing it — almost always either migration 016 hasn't been run yet or the backend hasn't been restarted since it was.
 
-**Real, needs your own keys to actually process/send:**
-Billing & subscription plans (Free / Basic / Premium) — real Stripe Checkout, Customer Portal, and plan-limit enforcement (active products, team seats, AI generations/month). Sales data — real Shopify Custom App OAuth. Team invite emails — real Resend delivery (see Gotchas below for its free-tier limits). AI Design Studio's transform tools need `GEMINI_API_KEY` to have access to the `gemini-2.5-flash-image` model specifically (a paid/billed model, distinct from the free-tier-friendly `gemini-flash-lite-latest` used everywhere else in this repo); its addition tools need a `PIXAZO_API_KEY` — see Gotchas for both. A handful of Premium feature lines are marked "Coming soon" in the UI — real marketing copy for where the tier is headed, not built into the app yet.
+**AI credits** (migration 028, `api/config/aiCredits.js`, `la-guia/src/data/aiCredits.js`, `AIUsageContext.jsx`, `BillingTab.jsx`, `OutOfCreditsModal.jsx`): AI access is metered as a **per-brand credit balance**, not a monthly call count — an image edit and a one-line chat reply cost wildly different amounts to serve, so counting "generations" priced them identically and left the expensive ones underwater. Costs are derived from real API spend under one invariant stated in `api/config/aiCredits.js`: **no action may cost more than $0.005 of API spend per credit charged**, so the worst case a customer can inflict — burning an entire balance on the priciest action — is bounded at `credits x $0.005`, which every plan and pack absorbs at >75% gross margin (the file carries the full per-product table).
 
-**Still static mock data** (`la-guia/src/data/mockData.js`):
-`ContentHub.jsx`
+- **Server-authoritative.** `api/config/aiCredits.js` is the only source of truth the backend enforces; `la-guia/src/data/aiCredits.js` is a display-only mirror for "this costs N credits" labels and **must be kept in sync by hand**. Prices are never taken from the client — top-up checkout looks the pack up by id server-side.
+- **Atomic debit.** `metered()` wraps every AI route: it verifies brand membership, then calls the `debit_ai_credits` Postgres function, which locks the balance row `FOR UPDATE` so concurrent calls can't overspend. Subscription credits are spent before purchased top-ups. A handler that ends ≥400 auto-refunds on `res.on('finish')`, so a failed generation never costs anything. Out of credits returns `402` with `code: 'INSUFFICIENT_CREDITS'`, which `aiApi.js` turns into the top-up modal from any call site.
+- **Two buckets.** `subscription_credits` are SET (not accumulated) to the tier allowance on every `invoice.paid`, so Stripe retries are idempotent; `topup_credits` are purchased one-off and persist until spent, guarded against double-crediting by checking `ai_credit_ledger` for the Stripe session id. Every movement is appended to that ledger with the resulting balance.
+- **Clients can only read.** `brand_ai_credits`/`ai_credit_ledger` have SELECT-only RLS policies and no client insert/update path at all — balances change solely through the service-role API. This is why the backend now needs `SUPABASE_SERVICE_ROLE_KEY`.
+- Silhouette generation is user-selectable draft/standard/high quality, and each tier costs a very different amount of API spend, so the three are priced as **separate features** (5 / 15 / 50 credits) resolved from the request body rather than one flat price — `metered()` accepts a `(req) => featureKey` resolver for exactly this.
+
+**Alternate garment views** (migration 029, `designs.views`): generating a back/side/detail view used to replace the canvas outright, destroying the front view to show the back. Views are now their own switchable tabs beside the canvas — the main canvas stays the front view (backed by `design_versions` as before) and each generated view is an entry in a `designs.views` jsonb array (`{ key, label, imageUrl, psdUrl }`). Switching tabs reopens that view's own file in place.
+
+**Layered working files per version** (migration 030, `design_versions.psd_url`, `designImages.js`, `PhotopeaEditor.jsx`): a save used to store only a flattened PNG, with the layer stack living in a single rolling "Working file (PSD)" row — so restoring an older version, or opening any view other than the front, collapsed the design into one flat image and permanently lost its layers. Every `design_versions` row now carries **both**: `image_url` is the flattened thumbnail history and previews use, `psd_url` is the layered file actually reopened. `PhotopeaEditor` gained `capturePsd()`/`openFile()` alongside `capture()`/`openImage()` — posting raw bytes is the only path that reliably opens a PSD with its layer stack intact (`app.open` with a URL flattens). Two rules the display and restore paths depend on: surfaces that show images (previews, history, activity) **skip** rows labelled `PSD_VERSION_LABEL`, and restore is **recency-first** — the newest real save wins, with layers preferred only *within* that save. Preferring "whichever row has a layered file" instead is what used to reopen the stale legacy rolling row, i.e. designs coming back as their first generated version. Saving degrades rather than fails: if the PSD capture or the `psd_url` column isn't available, the flattened save still lands.
+
+**Group chats & teammate names** (migration 031): two fixes on top of the Team Chat feature below. Group chat creation failed with an RLS violation because 022's INSERT policy compared `bm.brand_id = brand_id` inside a subquery over `brand_members` — since that table *has* a `brand_id` column, the unqualified name bound to the subquery's own column instead of the new row's, making the member branch both meaningless and a quiet cross-brand hole. 031 rewrites it with `chats.brand_id` qualified explicitly, and adds a `create_group_chat()` SECURITY DEFINER RPC (mirroring `ensure_personal_ai_chat`) that makes the access decision in one place and creates the chat plus its participant rows in a single transaction, so a chat can never be orphaned without members. Separately, teammates were displayed as raw invite emails — `user_preferences.full_name` can't help, since RLS scopes it to its own user — so the name now lives on `brand_members.display_name` where the rest of the brand can read it, seeded from the user's profile when they claim an invite, promptable via `MemberNamePrompt`, and set across every brand they belong to at once.
+
+**Production hardening** (`api/index.js` top, `la-guia/src/main.jsx`): `helmet` security headers (CSP and cross-origin isolation off on purpose — this is a pure cross-origin JSON API also used for redirect-based OAuth); a CORS allowlist from `ALLOWED_ORIGINS` that stays permissive-with-a-warning while unset so nothing breaks before it's configured; `trust proxy` set to one hop so `req.ip` is the real client behind Railway's proxy; and three tiers of rate limiting — broad (600/15min), strict on the AI paths (20/min, since each call costs real money) and tight on email endpoints (15/15min, since abuse there means spam from your domain) — with webhooks and `/health` exempt so Stripe/Shopify server-to-server bursts are never dropped. CORS alone was never the protection here: it only stops browser cross-site calls, and scripts ignore it. Sentry is wired on both sides, active only when a DSN is set (`SENTRY_DSN` / `VITE_SENTRY_DSN`); the frontend sends errors only, no tracing or replay, and `?sentry-test=1` on any page fires a deliberate test error to verify a deploy reaches the dashboard.
+
+**Mobile** (`la-guia/capacitor.config.json`, `la-guia/MOBILE.md`): the same React/Vite bundle ships to iOS and Android through Capacitor — no UI rewrite, the native shell loads the built web bundle, and the WebGL intro is auto-skipped on device. Platform projects aren't generated in this repo (each must be built on its own OS); see `MOBILE.md` for the one-time setup and the `appId` warning before a first store submission.
+
+**Real, needs your own keys to actually process/send:**
+Billing & subscription plans (Free / Basic / Premium) — real Stripe Checkout, Customer Portal, one-time credit top-ups, and plan-limit enforcement (active products and team seats, both checked in the UI; AI spend is enforced server-side as credits — see AI credits above). Sales data — real Shopify / WooCommerce / Etsy connections. Team invite emails and campaigns — real Resend delivery (see Gotchas below for its free-tier limits). Every AI feature needs `GEMINI_API_KEY` (text) and every image feature needs `OPENAI_API_KEY` (`gpt-image-1`); vendor search additionally needs `TAVILY_API_KEY`. Nothing in `plans.js` is marketing-only: the old `roadmap: true` "Coming soon" plan lines were **removed** rather than shown as promises, so every feature listed on a tier is something the app does today.
+
+**Still static mock data:** none. `la-guia/src/data/mockData.js` survives only as a shared `STAGES` constant imported by `Home.jsx` and `Welcome.jsx` — every page, `ContentHub.jsx` included, now reads real Supabase data.
 
 ---
 
@@ -167,15 +190,21 @@ You need access to your Supabase project. Run these in the SQL Editor **in order
 18. `supabase/migrations/018_sampling.sql` — **required** for Sampling: new `samples`/`sample_images`/`sample_annotations`/`sample_fit_feedback` tables (with RLS) — the Sampling page and `/sampling/:productId` won't load without it.
 19. `supabase/migrations/019_production_tracking.sql` — **required** for Production's shipment tracking, QC/issues, and inventory tabs: `carrier`/`tracking_number`/`tracking_url`/`shipped_at`/`delivered_at`/`received_units` columns on `production_orders`, plus new `production_issues`/`production_updates` tables (with RLS). The core stage-change path degrades gracefully without it (falls back to updating just `stage`) so an out-of-date DB doesn't break the Kanban flow every other feature depends on.
 20. `supabase/migrations/020_materials_library.sql` — **required** for the Materials Library's new fields and tabs: `type`/`sustainability_info`/`certifications`/`availability` columns on `materials`, real insert/update/delete RLS policies on `materials` (it was select-only before this — `deleteMaterial()` had nothing to actually delete with), and new brand-scoped `material_cost_log`/`material_vendors` tables (with RLS).
-23. `supabase/migrations/023_production_payments.sql` — **required** for Financial Tools' Cash Flow and Manufacturing Cost History tabs, and for the Production Order Payments tab / break-even math on `ProductInsights.jsx` to actually persist anything: creates `production_payments` (with RLS), which those three features had been reading and writing since an earlier session with no migration ever creating the table. (021/022 aren't documented here — they landed from elsewhere.)
+21. `supabase/migrations/021_chat_ai_creation_rpc.sql` — repair path for personal AI chat creation: adds `ensure_personal_ai_chat()`, a SECURITY DEFINER function that centralizes the brand-access decision and then creates-or-returns the user's one AI chat, for projects that could pass the chat SELECT policy but fail the direct client INSERT.
+22. `supabase/migrations/022_chat_rls_policy_repair.sql` — recreates the `chats` INSERT policy with explicit brand-owner/member checks so chat creation no longer depends on a stale or differently-defined `has_brand_access()` helper (21's RPC doesn't help a deployed browser bundle that hasn't been rebuilt and still uses the direct INSERT path). **Superseded by 031** — this version has the `brand_id` binding bug described there; run 031 as well.
+23. `supabase/migrations/023_production_payments.sql` — **required** for Financial Tools' Cash Flow and Manufacturing Cost History tabs, and for the Production Order Payments tab / break-even math on `ProductInsights.jsx` to actually persist anything: creates `production_payments` (with RLS), which those three features had been reading and writing since an earlier session with no migration ever creating the table.
 24. `supabase/migrations/024_ecommerce_platforms.sql` — **required** for WooCommerce/Etsy (next up) and Product Publishing: adds `api_key`/`refresh_token`/`token_expires_at` to `store_connections` (WooCommerce's consumer key, Etsy's refresh flow — Shopify's tokens don't expire so this wasn't needed until now), and a new `platform_listings` table (with RLS) tracking which product was published to which platform.
 25. `supabase/migrations/025_woocommerce_and_multiplatform_sales.sql` — **required** for WooCommerce (and any second sales platform generally): adds a `platform` column to `sales_data` and moves its unique constraint from `(brand_id, product_id, month)` to `(brand_id, product_id, month, platform)` — without this, connecting a second storefront silently overwrites the first's revenue rows for any month/product they both sold.
 26. `supabase/migrations/026_marketing_foundation.sql` — **required** for Content Hub (`social_accounts`/`content_posts` finally have a real table), and for the upcoming Influencer CRM/Email Campaigns/Launch Planner: adds `influencers`/`influencer_deals`/`email_contacts`/`email_campaigns` (all with RLS) and `products.launch_date`/`launch_plan`.
 27. `supabase/migrations/027_qol_uiux_foundation.sql` — **required** for the new Comments panels (Vendor/Quote/Tech Pack detail pages), the unified Pinned system, Design fabric tags, and the customizable dashboard: adds `comments`/`pinned_items` (both with RLS), `designs.fabric_tags`, and `user_preferences.dashboard_layout`.
+28. `supabase/migrations/028_ai_credits.sql` — **required** for every AI feature: creates `brand_ai_credits` (the per-brand balance) and `ai_credit_ledger` (append-only audit trail), plus the four functions the backend calls — `debit_ai_credits` (row-locked, subscription bucket first), `refund_ai_credits`, `grant_subscription_credits` (SET semantics, so Stripe retries are idempotent) and `add_topup_credits`. Both tables are SELECT-only under RLS; only the service-role API can change a balance. Seeds every existing brand with its tier's allowance so nobody is locked out on deploy. Without this, every metered endpoint returns a credit-system error.
+29. `supabase/migrations/029_design_views.sql` — **required** for alternate garment views: adds `designs.views` jsonb.
+30. `supabase/migrations/030_design_version_psd.sql` — **required** for layers surviving a save/restore: adds `design_versions.psd_url`. The save path degrades gracefully without it (retries the write without the column and stores a flattened image only), so an out-of-date DB loses layers rather than losing saves.
+31. `supabase/migrations/031_group_chat_and_member_names.sql` — **required** for group chats and teammate display names: rewrites 022's `chats` INSERT policy with the new row qualified explicitly (fixing both an RLS failure on creation and a quiet cross-brand hole), adds the `create_group_chat()` RPC, and adds `brand_members.display_name` with a policy letting a member rename themselves.
 
-Migrations 002–020 use `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`, so they're safe no-ops on a DB that already has those columns — run them anyway on a fresh project, in order.
+Migrations 002–020 use `IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`, so they're safe no-ops on a DB that already has those columns — run them anyway on a fresh project, in order. 021–031 are likewise written to be re-runnable (`create or replace`, `drop policy if exists`, `add column if not exists`).
 
-- **Storage bucket**: A public bucket named `mockups` must exist for Design Studio snapshots.
+- **Storage bucket**: A public bucket named `mockups` must exist — it holds Design Studio snapshots, tech pack images, moodboard uploads, product assets **and** the layered `.psd` working files. If you restrict the bucket's allowed MIME types, include `image/vnd.adobe.photoshop`, or every save silently falls back to a flattened image with no layers. Give it enough of a file-size limit for a real layered document (a PNG snapshot is small; its PSD is not).
 - **Auth**: "Confirm email" should be disabled in Auth settings for local testing.
 
 ### 2. Backend (`api/`)
@@ -187,13 +216,19 @@ node index.js
 Create `api/.env`:
 ```
 PORT=3001
+
+# Required for auth + AI credits — every metered AI endpoint fails without these
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+
 GEMINI_API_KEY=...
+OPENAI_API_KEY=...
 TAVILY_API_KEY=...
 STRIPE_SECRET_KEY=...
+STRIPE_WEBHOOK_SECRET=...
 SHOPIFY_CLIENT_ID=...
 SHOPIFY_CLIENT_SECRET=...
 RESEND_API_KEY=...
-PIXAZO_API_KEY=...
 OAUTH_STATE_SECRET=...
 INSTAGRAM_CLIENT_ID=...
 INSTAGRAM_CLIENT_SECRET=...
@@ -204,8 +239,20 @@ YOUTUBE_CLIENT_ID=...
 YOUTUBE_CLIENT_SECRET=...
 PINTEREST_CLIENT_ID=...
 PINTEREST_CLIENT_SECRET=...
+
+# Deployment (safe to omit locally — defaults are localhost)
+APP_URL=https://your-frontend
+API_URL=https://your-api
+ALLOWED_ORIGINS=https://your-frontend
+SENTRY_DSN=...
 ```
 `STRIPE_PRICE_BASIC`/`STRIPE_PRICE_PREMIUM` get written into this same file automatically by the billing setup script below.
+
+**`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`**: the backend uses these for two things it can't do with an anon key — validating the caller's JWT on every metered route, and moving AI credits (grant/debit/refund/top-up), which are deliberately unreachable from any client. Without them `requireAuth` fails **closed** with a clear 500 rather than letting requests through unauthenticated, so every AI feature stops working. The service-role key bypasses RLS entirely: keep it server-side, never in `la-guia/.env.local`.
+
+**`OPENAI_API_KEY`**: powers every image feature — AI Design Studio's transform and addition tools, and silhouette generation — via `gpt-image-1`. Without it those tools return "OPENAI_API_KEY is not set" inline in the tool card; the text-based AI features (Gemini) keep working.
+
+**`STRIPE_WEBHOOK_SECRET`**: required for AI credits to be granted at all. Subscriptions grant credits on `invoice.paid` and top-ups on `checkout.session.completed`, both of which arrive only by webhook — see the Billing section below.
 
 **`OAUTH_STATE_SECRET`**: any random string, used to HMAC-sign the `state` param on every OAuth connect flow (Shopify today; WooCommerce/Etsy/Instagram/TikTok/YouTube/Pinterest as they're added). Falls back to an insecure hardcoded dev default if unset, so local dev works without it, but **set a real one before deploying anywhere real** — without it, the CSRF protection those flows depend on doesn't actually protect anything.
 
@@ -217,7 +264,9 @@ PINTEREST_CLIENT_SECRET=...
 
 **`PINTEREST_CLIENT_ID`/`PINTEREST_CLIENT_SECRET`**: from [developers.pinterest.com](https://developers.pinterest.com/) (self-serve). Register `{API_URL}/api/social/callback/pinterest` as a redirect URI.
 
-**Pixazo** (AI Design Studio's addition tools only): get a key from [api-console.pixazo.ai](https://api-console.pixazo.ai/api_keys) and add it as `PIXAZO_API_KEY`. Sent as an `Ocp-Apim-Subscription-Key` header, not `Authorization` — see `callPixazoElement` in `api/index.js` if you're swapping providers again. The API loads `api/.env` first and also tolerates keys placed in `la-guia/.env.local`; restart `node index.js` after changing either env file.
+**`ALLOWED_ORIGINS`** (deployment): comma-separated origin allowlist for CORS. Left unset it stays open to all origins and logs a warning on boot, so local dev and a first deploy don't break before it's configured — set it to your real frontend origin(s) once you have one. Note this is not your abuse protection: CORS only constrains browsers, and the rate limiters are what actually stand between the AI endpoints and a script.
+
+The API loads `api/.env` first and also tolerates keys placed in `la-guia/.env.local`; existing process-env values always win, so Railway/host secrets are never overwritten by a stray local file. Restart `node index.js` after changing either env file.
 
 ### 3. Frontend (`la-guia/`)
 ```bash
@@ -225,17 +274,20 @@ cd la-guia
 npm install
 npm run dev
 ```
-Create `la-guia/.env.local` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+Create `la-guia/.env.local` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (the **anon** key — never the service-role one; this file ships to the browser). Two optional extras: `VITE_API_URL` if the backend isn't on `http://localhost:3001`, and `VITE_SENTRY_DSN` to enable frontend error reporting (production builds only).
 
 Open **http://localhost:5173**. Both servers must be running.
 
 ### 4. Billing (Stripe)
 1. Add `STRIPE_SECRET_KEY=sk_...` to `api/.env`.
 2. From `api/`, run `node scripts/setup-stripe-products.js` once — creates the Basic ($29/mo) and Premium ($79/mo) Products/Prices in your Stripe account and writes `STRIPE_PRICE_BASIC`/`STRIPE_PRICE_PREMIUM` back into `api/.env`. Safe to re-run.
-3. Restart the backend so it picks up the new env vars.
-4. (Optional) add `APP_URL` to `api/.env` if the frontend isn't on `http://localhost:5173` — it's used to build Stripe Checkout redirect URLs and the Resend invite link.
+3. Run `node scripts/setup-stripe-webhook.js` once — creates (or updates, never duplicates) an endpoint at `{API_URL}/api/stripe/webhook` subscribed to `invoice.paid`, `customer.subscription.deleted` and `checkout.session.completed`, and prints the `STRIPE_WEBHOOK_SECRET` to add to `api/.env`. Locally, use `stripe listen --forward-to localhost:3001/api/stripe/webhook` instead — it prints its own signing secret.
+4. Restart the backend so it picks up the new env vars.
+5. (Optional) add `APP_URL` to `api/.env` if the frontend isn't on `http://localhost:5173` — it's used to build Stripe Checkout redirect URLs and the Resend invite link.
 
-Checkout confirmation and subscription-status reconciliation call Stripe directly from the backend and write the result to Supabase under the signed-in user's own session — no webhook or service-role key needed. A cancellation made through the Stripe portal takes effect the next time the founder opens Settings > Billing (that's when the reconciliation check runs), not instantly.
+**The webhook is not optional any more.** Plan changes still reconcile without it — checkout confirmation and subscription-status both call Stripe directly from the backend and write the result to Supabase under the signed-in user's own session — but **AI credits are only ever granted by webhook**: `invoice.paid` sets that cycle's subscription allowance, `checkout.session.completed` adds a purchased top-up, and `customer.subscription.deleted` zeroes the grant on cancellation. Without a working webhook, subscriptions upgrade the plan tier but never fund it, and paid top-ups never arrive. A cancellation made through the Stripe portal still takes effect in the UI the next time the founder opens Settings > Billing (that's when the reconciliation check runs), not instantly.
+
+Test and live mode are separate universes — separate keys, products, prices *and* webhook secrets. Re-run both setup scripts against the live key when you switch, and put the test key back in `api/.env` afterwards so local dev stays in test mode. `LAUNCH.md` walks through that changeover step by step.
 
 **Testing plan-gated features locally:** `npm run dev` (Vite dev mode) shows a "Developer tools" block at the bottom of Settings > Billing & Plan with `Force Free` / `Force Basic` / `Force Premium` buttons — these write `plan_tier` directly, bypassing Stripe entirely, so you can test each tier's gating without a real Checkout session. Gated behind `import.meta.env.DEV`, so it never renders in a production build.
 
@@ -249,12 +301,13 @@ Add `RESEND_API_KEY` to `api/.env`. Without it, invites still create a real `bra
 
 ## API reference (`api/index.js`)
 
+Every AI endpoint listed in `AI_PATHS` (the generation/analysis ones) is **authenticated and metered**: it requires a valid Supabase JWT as `Authorization: Bearer <token>`, a `brandId` in the body the caller actually belongs to, and enough credits — which `metered()` debits before the handler runs and refunds if it fails. `la-guia/src/lib/aiApi.js`'s `aiPost()` attaches the token, the active brand id and the brand's philosophy profile automatically, so call sites just pass their own fields. Billing endpoints require the JWT but aren't metered; webhooks and `/health` are exempt from both auth and rate limiting (they're verified by signature instead).
+
 | Endpoint | Purpose |
 |---|---|
 | `/api/analyze-design` | Scores a captured canvas snapshot |
 | `/api/generate-tech-pack` | Generates BOM + graded measurements from canvas (used by DesignDetail's quick "Auto-Generate Tech Pack") |
 | `/api/generate-tech-pack-full` | Tech Pack Builder's questionnaire-driven generator — `{ imageBase64?, category, answers }`, returns every section (BOM, measurements, construction, print placements, trims, labels, packaging, material usage, notes) |
-| `/api/generate-silhouette` | Generates a stroke-only starting outline for a custom garment type not in the preset library |
 | `/api/parse-vendor` | Extracts structured profile (incl. certifications, capabilities, price range) from pasted text |
 | `/api/search-vendors` | `{ keywords?, category?, location?, quantity?, moq?, targetPrice?, certifications?, imageBase64? }` — structured-filter web search via Tavily + Gemini extraction (certifications/capabilities/price range included), optionally weighted by an attached design image |
 | `/api/analyze-vendor-fit` | Scores vendor/product material & economic fit |
@@ -267,6 +320,8 @@ Add `RESEND_API_KEY` to `api/.env`. Without it, invites still create a real `bra
 | `/api/confirm-checkout` | Verifies a completed Checkout session before the frontend writes the new plan |
 | `/api/create-portal-session` | Opens Stripe's Customer Portal for managing/cancelling a subscription |
 | `/api/subscription-status` | Reconciles a brand's plan against the live Stripe subscription status |
+| `/api/create-topup-session` | Starts a one-time Checkout for an AI credit pack — the price is looked up server-side by pack id, never taken from the client |
+| `/api/stripe/webhook` | Signature-verified Stripe events: grants the cycle's AI credits on `invoice.paid`, adds purchased credits on `checkout.session.completed`, downgrades and zeroes the grant on `customer.subscription.deleted` |
 | `/api/shopify/auth` | Starts the Shopify OAuth flow for a brand |
 | `/api/shopify/callback` | Completes Shopify OAuth and stores the access token |
 | `/api/shopify/fetch-orders` | Pulls recent orders for Sales Dashboard analytics |
@@ -288,8 +343,10 @@ Add `RESEND_API_KEY` to `api/.env`. Without it, invites still create a real `bra
 | `/api/social/publish/:platform` | Real publish attempt where the connection has write access (Pinterest); honest rejection otherwise (Instagram/TikTok/YouTube) |
 | `/api/send-campaign` | Sends a real email campaign via Resend, one call per recipient, reporting per-recipient failures |
 | `/api/send-invite` | Dispatches teammate invitation emails via Resend |
-| `/api/design/ai-image` | AI Design Studio's **transform** endpoint (Gemini) — `{ mode, prompt, images }`, one of 9 modes (sketch-to-design, ai-edit, bg-remove, recolor, fabric-swap, mockup, flat-sketch, view, variant), edits the given reference image, returns base64 |
-| `/api/design/generate-element` | AI Design Studio's **addition** endpoint (Stable Diffusion / Pixazo base SDXL) — `{ mode, prompt }`, mode is `add-element` or `pattern`, no reference image, returns base64 with a near-white background punched to transparency |
+| `/api/send-vendor-email` | Sends a founder-reviewed outreach email to a vendor via Resend |
+| `/health` | Liveness probe — exempt from rate limiting |
+| `/api/design/ai-image` | AI Design Studio's **transform** endpoint (`gpt-image-1`) — `{ mode, prompt, images }`, one of 10 modes (sketch-to-design, polish-design, ai-edit, bg-remove, recolor, fabric-swap, mockup, flat-sketch, view, variant), edits the given reference image, returns base64 |
+| `/api/design/generate-element` | AI Design Studio's **addition** endpoint (`gpt-image-1`) — `{ mode, prompt, quality? }`, mode is `add-element`, `pattern` or `silhouette`, no reference image, returns base64 with real alpha. `quality` (low/medium/high) applies to silhouettes and sets the credit price |
 | `/api/design/color-palette` | Suggests a 5-color palette from a design image or a text brief |
 | `/api/design/trend-inspiration` | Tavily-grounded design trend research for a garment category |
 
@@ -297,6 +354,13 @@ Add `RESEND_API_KEY` to `api/.env`. Without it, invites still create a real `bra
 
 ## Known gaps / next up
 
+**Before charging real money, work through `LAUNCH.md`** — it's the operational checklist (Stripe webhook + live mode, Railway env vars, Supabase auth emails, Resend domain verification) with a verify step per item. The items below are product gaps rather than launch blockers.
+
+- **No automated tests anywhere** — `npm test` in `api/` is still the placeholder that exits 1. Verification in this project has been manual, against a running dev server.
+- **Etsy listings publish as text only** — image upload is a separate multipart endpoint that isn't wired up, so photos get added in Etsy afterward. Etsy also requires a real numeric taxonomy id, which the form asks for rather than guessing on a live listing.
+- **TikTok Shop is an intentional stub** — its Partner API isn't self-serve, so `/api/tiktokshop/auth` returns "not available yet" rather than redirecting somewhere that might be wrong.
+- **Instagram/TikTok publishing is read-scope only** — real content-publish permissions need a business-verified app review this integration doesn't have. Pinterest publishes for real; YouTube has an upload scope but `content_posts` stores no video file.
+- **No engagement/reach data anywhere in Marketing** — the tables have no such columns, so Campaign Analytics reports counts (scheduled/posted/failed, campaigns sent, recipients) and says plainly that click/open tracking isn't wired up.
 - **Phase 3:** Sales Dashboard now pulls real Shopify orders where connected; break-even/product-performance math still assumes a connected store — brands without one see the dashboard shaped around what it looks like once they connect.
 - **Task 4.1:** Inventory risk math engine based on sales velocity and brand risk profile — now unblocked by real Shopify order data, not yet built.
 - **Home dashboard:** the AI suggestions widget is cached once per brand per calendar day (a manual "Refresh" re-runs it) so opening the dashboard doesn't silently spend AI usage on every visit.
@@ -305,10 +369,15 @@ Add `RESEND_API_KEY` to `api/.env`. Without it, invites still create a real `bra
 
 - **Never commit `node_modules`.**
 - **Gemini Search grounding needs billing** — use Tavily instead.
-- **AI Design Studio needs `gemini-2.5-flash-image` access on your `GEMINI_API_KEY`** — this is a separate, billed image-generation model from `gemini-flash-lite-latest` (used for every other AI feature in this repo, and usable on Gemini's free tier). If the key doesn't have access, every **transform** tool (sketch-to-design, edit, background remover, recolor, fabric swap, mockup, flat sketch, views, variants) will fail with a Gemini API error surfaced inline in that tool's card — check your Google AI Studio billing if that happens.
-- **AI Design Studio's addition tools (Add Element, Pattern Generator) need `PIXAZO_API_KEY`**, separately from Gemini — missing/invalid key surfaces as an inline error in those two tool cards specifically, not the transform ones. Pixazo's Stable Diffusion endpoints are text-to-image only (no `image`/`init_image` parameter on SD 3.5, 3.0, XL, or XL Lightning) — confirmed directly against their docs before building this, so don't try to route a transform tool through Pixazo later without re-checking; only their separate mask-based Inpainting endpoint takes an image, and that's a different interaction model (needs a mask) than "edit this whole design." The app currently uses Pixazo's base SDXL endpoint because the Lightning endpoint returned a 403 insufficient-balance response for this key while base SDXL succeeded.
+- **Every image feature needs `OPENAI_API_KEY`** (`gpt-image-1`) — AI Design Studio's transform *and* addition tools, plus silhouette generation. A missing or unauthorized key surfaces as an inline error in that tool's card; the Gemini-backed text features are unaffected, so "AI works but images don't" almost always means this key.
+- **Image generation is the only real cost centre** — text calls run on `gemini-flash-lite-latest` at roughly a tenth of a cent. If you change a prompt's `size`, `quality` or `background` in `api/index.js`, re-check the credit price for that feature in `api/config/aiCredits.js` against the $0.005-per-credit ceiling, and mirror any change into `la-guia/src/data/aiCredits.js`. The two files are kept in sync by hand — nothing enforces it.
+- **A credit price change is not retroactive** — `TIER_CREDITS` is applied on the next `invoice.paid`, so existing subscribers keep their current allowance until their cycle renews.
 - **Photopea resizing** — the container doesn't reliably resize; use the capture/remount pattern in `DesignDetail.jsx`.
 - **Resend testing** — on the free tier without a verified domain, Resend only allows sending emails to the address you signed up with; invites to any other address will silently fail to deliver (the `brand_members` row is still created correctly).
 - **RLS was off almost everywhere before `007_teams_and_rls.sql`** — if you forked this project earlier and skipped that migration, any authenticated client could read/write any brand's data. Run it.
 - **"Continue where you left off" is tracked in `localStorage`**, per brand, per browser — it doesn't sync across devices since there's no server-side "last viewed" column.
 - **Sticky notes' "active slot" (which of the 3 notes is shown large) is tracked in `localStorage`** too, per brand, per browser, for the same reason — the note *content* is real and synced via `brand_notes`, only which one is currently "large" is local.
+- **The canvas restore rule is recency-first, and it's load-bearing.** The newest non-`PSD_VERSION_LABEL` row wins; layers are preferred only *within* that row. If you ever reorder that logic to "prefer whichever row has a layered file," designs start reopening as their first generated version again (the legacy rolling working-file row is frozen at an old save and no longer updated). Display surfaces must keep skipping the `PSD_VERSION_LABEL` row, or previews and history show a working file instead of a picture.
+- **Photopea resizing/duplication** — content is pushed into the iframe at most once per document (`lastLoadedRef`), so a fullscreen toggle or a prop identity change can't open a second document over the founder's work. If you touch that effect, verify a split-view toggle mid-edit doesn't reopen the canvas. Captures carry a token each, because autosave chains a PNG and a PSD capture back to back and a stale timeout could otherwise reject the newer one.
+- **The backend's OAuth state is in-memory** — the handoff codes and Etsy PKCE verifiers live in plain `Map`s (this service has no database of its own). That assumes **one** API instance: scale it horizontally and a connect flow that starts on instance A and returns on instance B will fail with "expired or already used." A restart mid-connect does the same. Both are recoverable by connecting again; if you need real horizontal scaling, those two Maps are what has to move to shared storage.
+- **`OAUTH_STATE_SECRET` falls back to a hardcoded dev default** if unset, so local dev works out of the box — but that value is in this repo, meaning the CSRF signature on every connect flow is forgeable until you set a real one. Set it before deploying anywhere real.

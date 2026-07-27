@@ -115,20 +115,27 @@ on Outlook, etc.) → invite arrives in inbox.
 **Verify:** log out → "Continue with Google" from atelierlabs.app on a
 browser you're not already authed in → lands back in the app signed in.
 
-### 7. SEO / meta tags — **[ask Claude]**
-`index.html` has no description, OG tags, or social card, so a shared link
-renders bare. Claude adds: meta description, OG/Twitter cards, canonical URL,
-theme color, and a proper OG image (needs one 1200×630 image from you, or a
-generated placeholder).
+### 7. SEO / meta tags — ✅ **done**
+`index.html` now carries a meta description, OG + Twitter cards, canonical URL
+and theme color, with `public/og.png` as the social image, plus `robots.txt`
+and `sitemap.xml`. Nothing to do unless you want to swap the OG artwork.
 
-### 8. Error monitoring (~30 min)
+**Verify:** paste your URL into any link-preview debugger → card renders with
+title, description and image.
+
+### 8. Error monitoring (~10 min — code is already wired)
+`@sentry/react` and `@sentry/node` are installed and initialized; both stay
+completely inert until a DSN is set, so all that's left is creating the
+projects and pasting two values.
+
 1. sentry.io → create account → two projects: **React** and **Node/Express**.
 2. Copy both DSNs.
-3. **[ask Claude]** — wire `@sentry/react` + `@sentry/node` with the DSNs
-   (frontend DSN goes in Cloudflare Pages env as `VITE_SENTRY_DSN`, backend
-   DSN in Railway as `SENTRY_DSN`).
+3. Cloudflare Pages env → `VITE_SENTRY_DSN` (frontend, production builds only).
+   Railway → `SENTRY_DSN` (backend).
 
-**Verify:** throw a test error on staging → appears in Sentry within a minute.
+**Verify:** visit any page with `?sentry-test=1` → a deliberate test error
+appears in the React project within a minute. For the backend, hit
+`/api/debug-sentry`.
 
 ### 9. The dress rehearsal (~1 hour, the most valuable hour on this list)
 Fresh browser profile, brand-new email, act like a stranger:
@@ -149,9 +156,13 @@ Fresh browser profile, brand-new email, act like a stranger:
 
 Write down every point of friction — hand the list to Claude.
 
-### 10. Responsive/mobile pass — **[ask Claude, ~a day]**
-Desktop-only today. Claude does the layout work; you review on a real phone.
-Do after the dress rehearsal so known frictions fold into the same pass.
+### 10. Responsive/mobile pass — ✅ **first pass done, needs your eyes**
+The app shell is responsive below 768px: the sidebar became a slide-in panel
+behind a hamburger, the topbar wraps instead of overflowing, and DesignDetail's
+canvas row stacks vertically. That was verified against computed CSS at a 375px
+viewport, **not** by hand on a real device through a signed-in session — so
+step 12 of the dress rehearsal is the real test. Hand back anything that
+still feels cramped; per-page polish beyond the shell is genuinely untested.
 
 ---
 
@@ -201,6 +212,6 @@ touches money; a regression there costs real dollars and trust.
 
 ## Suggested order
 1 → 2 (tonight, ~1 hr) → 5 → 4 → 6 (one sitting, DNS waits overlap) →
-7 + 8 (Claude, parallel) → 9 dress rehearsal → 10 responsive pass →
-fix-list → 3 go live → announce. Start 11's Meta/TikTok registrations on
-day one — they're the long pole.
+8 (paste two DSNs) → 9 dress rehearsal → fix-list from it (including
+anything mobile from step 12) → 3 go live → announce. 7 and 10 are already
+done. Start 11's Meta/TikTok registrations on day one — they're the long pole.
