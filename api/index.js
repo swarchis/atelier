@@ -1666,7 +1666,7 @@ const IMAGE_MODE_PROMPTS = {
   // canvas, in place.
   'polish-design': (p) => `You are a fashion technical illustrator. Take this rough sketch and render it as ONE clean, professional garment design image — polished linework, soft fabric drape and shading, single garment only, no model.${p ? ` Style direction: ${p}.` : ''} Keep the same silhouette, proportions and every design detail from the sketch — you are rendering it, not redesigning it.`,
   'ai-edit': (p) => `You are editing this garment design image. Apply exactly this one change and nothing else: ${p || 'a small refinement'}. Everything else about the garment — silhouette, color, fabric, details, camera angle, background, and composition — must remain identical to the reference.`,
-  'bg-remove': () => `Cut the garment out from its background completely, leaving a fully transparent background behind it. Keep the garment itself pixel-identical — do not alter its colour, shape, shading or details, and keep its edges clean and accurate.`,
+  'bg-remove': () => `Cut the garment out from its background completely, leaving a fully transparent background behind it. Keep the garment itself pixel-identical — do not alter its colour, shape, shading or details, and keep its edges clean and accurate. Only the area OUTSIDE the garment's outer edge becomes transparent: never erase or punch holes through any part of the garment itself, including collars, plackets, facings and inner layers visible through a neckline or armhole.`,
   'recolor': (p) => `Recolor the garment in this image to ${p || 'a different color'}. Change ONLY the color: fabric texture, shading, folds, construction details, silhouette, camera angle, and background stay exactly as they are.`,
   'fabric-swap': (p) => `Change the fabric of the garment in this image to ${p || 'a different fabric'}, updating texture and drape to realistically reflect that fabric while keeping the exact same garment silhouette, cut, color palette, design details, camera angle, and background.`,
   'mockup': (p) => `Create ONE professional product photograph of this garment: ${p || 'worn by a single model in a studio setting with clean, even lighting'}. The garment's design, color, and details must match the reference image exactly. One photo, at most one model, one angle.`,
@@ -1722,7 +1722,11 @@ const ELEMENT_MODE_PROMPTS = {
   // onto — NOT a flat CAD line drawing. Flat line-art came back as a bare
   // uniform outline that gave founders nothing to build on; a shaded blank
   // reads as an actual garment and is far more useful as a starting canvas.
-  'silhouette': (p) => `A blank ${p || 'garment'} apparel mockup drawn as a clean digital VECTOR ILLUSTRATION — not a photograph. Front view, centered, vertically symmetric, filling most of the frame. Plain off-white fabric with no branding, print, pattern, logo or text. Smooth flat shapes with crisp dark outlines and soft light-grey cel shading that suggests the garment's three-dimensional volume, plus thin seam lines and a darker fill recessed inside any opening (face opening, hood, neckline, cuffs). Illustrated apparel-template style — simplified and graphic, with just enough shading to read as a real garment rather than a bare outline. Exactly one garment, exactly one view`,
+  'silhouette': (p) => `A blank ${p || 'garment'} apparel mockup drawn as a clean digital VECTOR ILLUSTRATION — not a photograph. Front view, centered, vertically symmetric, filling most of the frame. Smooth flat shapes with crisp dark outlines and soft light-grey cel shading that suggests the garment's three-dimensional volume, plus thin seam lines. Illustrated apparel-template style — simplified and graphic, with just enough shading to read as a real garment rather than a bare outline.
+
+STRICTLY WHITE: the garment is plain white fabric shaded only in neutral light greys. No colour anywhere in the image — no tints, no coloured fabric, no coloured trims, zips, buttons, drawcords, eyelets, labels or stitching. Every component is white or grey. No branding, print, pattern, logo or text on the garment.
+
+TRANSPARENCY BOUNDARY: only the area OUTSIDE the garment's outer edge is transparent. The garment itself is completely opaque — every part of it stays filled with solid white fabric, including collars, plackets, facings, hems, waistbands, straps and any inner layer visible through a neckline, armhole, face opening or hood. Never punch holes inside the garment's outline and never let the transparent background bleed into the garment. Exactly one garment, exactly one view`,
 };
 
 // Per-mode generation options for gpt-image-1.
@@ -1744,14 +1748,14 @@ const ELEMENT_MODE_OPTIONS = {
 const ELEMENT_STYLE_SUFFIX = {
   'add-element': 'Flat vector-style graphic, centered, on a fully transparent background. No scene, no mockup, no photograph, no shadow, no frame or border, no text or watermark — just the graphic itself.',
   'pattern': 'A flat, evenly lit repeating swatch that tiles seamlessly edge to edge and fills the entire frame. No garment, no mockup, no shadow, no text or watermark.',
-  'silhouette': 'Flat digital illustration style — clean vector artwork, NOT a photograph and not a 3D render. Isolated on a fully transparent background: no backdrop, no surface, no ground shadow, no coloured background of any kind. Neutral white and light-grey palette only. No text, no watermark, no frame or border.',
+  'silhouette': 'Flat digital illustration style — clean vector artwork, NOT a photograph and not a 3D render. Isolated on a fully transparent background: no backdrop, no surface, no ground shadow, no coloured background of any kind. Pure greyscale palette — white fabric, grey shading, dark outlines, and nothing else. No text, no watermark, no frame or border.',
 };
 
 // gpt-image-1 has no negativePrompt parameter — exclusions go in the prompt as
 // plain language, which this model follows reliably (unlike SDXL).
 const ELEMENT_MODE_EXCLUSIONS = {
   'add-element': 'Draw only one design: no alternates, no variations, no grid or sheet of options.',
-  'silhouette': 'The garment must be empty: no person, face, skin, hair, eyes, hands, arms, legs, and no visible mannequin, dress form or hanger. Do not render a back view, side view, three-quarter view, turnaround, spec sheet or any second garment — exactly one garment, from the front, once. Aim between the two extremes: NOT a photorealistic photograph, no fabric weave texture, no realistic studio lighting; but also NOT a bare uniform-weight CAD outline with no shading. It should read as a clean illustrated apparel mockup template.',
+  'silhouette': 'The garment must be empty: no person, face, skin, hair, eyes, hands, arms, legs, and no visible mannequin, dress form or hanger. Do not render a back view, side view, three-quarter view, turnaround, spec sheet or any second garment — exactly one garment, from the front, once. Do not use any colour — the result must be pure greyscale. Do not erase, cut out or make transparent any part of the garment itself, especially collars, necklines, plackets and facings; transparency belongs only outside its outer edge. Aim between the two extremes: NOT a photorealistic photograph, no fabric weave texture, no realistic studio lighting; but also NOT a bare uniform-weight CAD outline with no shading. It should read as a clean illustrated apparel mockup template.',
 };
 
 app.post('/api/design/generate-element', metered('design-generate-element'), async (req, res) => {
