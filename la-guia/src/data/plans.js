@@ -42,10 +42,10 @@ export const PLANS = [
     price: '$29',
     priceSuffix: '/month',
     priceId: 'basic',
-    limits: { products: 10, teamMembers: 3, aiPerMonth: 20, creditsPerMonth: 500 },
+    limits: { products: 10, teamMembers: 3, aiPerMonth: 20, creditsPerMonth: 1200 },
     summary: [
       'Up to 10 active products',
-      'AI design and tech-pack tools',
+      '1,200 AI credits/mo for design and tech-pack tools',
       'Production-readiness checks',
       'Vendor search and matching',
       'RFQs and quote comparison',
@@ -54,7 +54,7 @@ export const PLANS = [
     ],
     features: [
       { text: 'Five to ten active products' },
-      { text: 'Limited AI design generations (20/mo)' },
+      { text: '1,200 AI credits per month' },
       { text: 'AI-assisted tech-pack creation' },
       { text: 'Basic AI readiness checks' },
       { text: 'Manual and AI tech-pack editing' },
@@ -79,10 +79,10 @@ export const PLANS = [
     price: '$79',
     priceSuffix: '/month',
     priceId: 'premium',
-    limits: { products: Infinity, teamMembers: 10, aiPerMonth: 200, creditsPerMonth: 1500 },
+    limits: { products: Infinity, teamMembers: 10, aiPerMonth: 200, creditsPerMonth: 3500 },
     summary: [
       'Unlimited products',
-      'Full AI design and production suite',
+      '3,500 AI credits/mo across the full AI suite',
       'Advanced vendor matching',
       'Bulk RFQs and AI quote analysis',
       'Risk, cost and delay predictions',
@@ -92,7 +92,7 @@ export const PLANS = [
     ],
     features: [
       { text: 'Unlimited active products' },
-      { text: 'Generous AI credits (200/mo)' },
+      { text: '3,500 AI credits per month' },
       { text: 'Advanced AI design generation and editing', roadmap: true },
       { text: 'Natural-language design and measurement changes', roadmap: true },
       { text: 'Advanced tech-pack generation' },

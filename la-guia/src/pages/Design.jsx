@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useAIUsage } from '../context/AIUsageContext.jsx';
 import CreditCost from '../components/CreditCost.jsx';
+import { SILHOUETTE_QUALITY_OPTIONS, silhouetteFeature } from '../data/aiCredits.js';
 import { getPlan } from '../data/plans.js';
 import GarmentSilhouette, { CustomSilhouette, GARMENT_TYPES } from '../components/GarmentSilhouette.jsx';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal.jsx';
@@ -66,6 +67,7 @@ export default function Design() {
   const [collectionPicker, setCollectionPicker] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(null); // collection id mid-assign
   const [newName, setNewName] = useState(''); // optional name for the next created design
+  const [silQuality, setSilQuality] = useState('medium'); // AI silhouette render quality
   const fileRef = useRef(null);
   const designProducts = products.filter(p => p.status !== 'archived');
   const multiSelect = useMultiSelect(designProducts);
@@ -193,11 +195,11 @@ const startFromUpload = async (e) => {
     const garmentType = customType.trim();
     if (!garmentType) return;
     if (atProductLimit) { setGenerateError(`You're at your plan's limit of ${plan.limits.products} active products — upgrade to add more.`); return; }
-    if (!canAfford('design-generate-element')) { openTopup(); return; }
+    if (!canAfford(silhouetteFeature(silQuality))) { openTopup(); return; }
     setGenerating(true);
     setGenerateError(null);
     try {
-      const res = await aiPost('/api/design/generate-element', { mode: 'silhouette', prompt: garmentType });
+      const res = await aiPost('/api/design/generate-element', { mode: 'silhouette', prompt: garmentType, quality: silQuality });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
       await logUsage('silhouette');
@@ -320,8 +322,36 @@ const startFromUpload = async (e) => {
                   />
                   <button className="btn btn-sm" onClick={startFromAI} disabled={generating || loading || !customType.trim()}>
                     {generating ? <><i className="ph ph-spinner ph-spin" /> Sketching…</> : 'Generate silhouette'}
-                    {!generating && <CreditCost feature="design-generate-element" style={{ marginLeft: 6 }} />}
+                    {!generating && <CreditCost feature={silhouetteFeature(silQuality)} style={{ marginLeft: 6 }} />}
                   </button>
+                </div>
+
+                {/* Render quality — higher quality costs proportionally more
+                    credits because it costs proportionally more to generate. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Quality</span>
+                  {SILHOUETTE_QUALITY_OPTIONS.map(q => {
+                    const active = silQuality === q.key;
+                    return (
+                      <button
+                        key={q.key}
+                        type="button"
+                        title={q.hint}
+                        onClick={() => setSilQuality(q.key)}
+                        disabled={generating}
+                        className="btn btn-sm"
+                        style={{
+                          padding: '4px 10px', fontSize: 12,
+                          background: active ? 'var(--accent-bg)' : 'transparent',
+                          borderColor: active ? 'var(--accent)' : undefined,
+                          color: active ? 'var(--accent)' : 'var(--ink-3)',
+                        }}
+                      >
+                        {q.label}
+                        <CreditCost feature={silhouetteFeature(q.key)} style={{ marginLeft: 5, color: 'inherit', opacity: 0.75 }} />
+                      </button>
+                    );
+                  })}
                 </div>
                 {generateError && (
                   <div className="form-hint" style={{ color: 'var(--red)', marginTop: 10 }}>

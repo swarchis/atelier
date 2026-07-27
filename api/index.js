@@ -8,7 +8,7 @@ const dotenv = require('dotenv');
 const { Resend } = require('resend');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { creditCost, tierCredits, getPack } = require('./config/aiCredits');
+const { creditCost, tierCredits, getPack, silhouetteQuality, silhouetteFeature } = require('./config/aiCredits');
 
 // Load the API env first, then tolerate keys placed in the Vite app env.
 // Existing process env values win, so deploy/runtime secrets are left alone.
@@ -184,6 +184,10 @@ async function refundCredits(brandId, amount, feature) {
 
 // Per-route middleware: verify brand access, atomically charge the feature's
 // credit cost, and schedule an auto-refund if the response ends in an error.
+// `feature` is either a fixed key or a (req) => key resolver, for actions
+// whose price depends on the request — e.g. silhouette quality, where low /
+// medium / high each cost a different amount of API spend and so are priced
+// as separate features.
 function metered(feature) {
   return async (req, res, next) => {
     const brandId = (req.body && (req.body.brandId || req.body.brand_id)) || null;
@@ -191,10 +195,11 @@ function metered(feature) {
     const access = await verifyBrandAccess(req.user && req.user.id, brandId);
     if (!access) return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
 
-    const cost = creditCost(feature);
+    const resolved = typeof feature === 'function' ? feature(req) : feature;
+    const cost = creditCost(resolved);
     let remaining;
     try {
-      remaining = await debitCredits(brandId, cost, feature);
+      remaining = await debitCredits(brandId, cost, resolved);
     } catch (err) {
       console.error('Credit debit error:', err.message);
       return res.status(500).json({ ok: false, error: 'Credit system error — please try again.' });
@@ -205,10 +210,10 @@ function metered(feature) {
     // If the handler ends up erroring (>=400), give the credits back.
     res.on('finish', () => {
       if (res.statusCode >= 400) {
-        refundCredits(brandId, cost, feature).catch((e) => console.error('Refund error:', e.message));
+        refundCredits(brandId, cost, resolved).catch((e) => console.error('Refund error:', e.message));
       }
     });
-    req.aiCredits = { brandId, cost, remaining };
+    req.aiCredits = { brandId, cost, remaining, feature: resolved };
     return next();
   };
 }
@@ -551,35 +556,28 @@ app.post('/api/search-vendors', metered('search-vendors'), async (req, res) => {
     if (targetPrice) tightParts.push(`target price $${targetPrice}/unit`);
     if (certifications) tightParts.push(`${certifications} certified`);
     const tightQuery = tightParts.join(' ');
-    const broadQuery = [...coreParts, 'manufacturer', location].filter(Boolean).join(' ') || tightQuery;
 
     const MFG_BIAS = 'private label OR white label OR OEM ODM OR contract manufacturer OR wholesale factory -shop -"our collection"';
-    const [tightRes, broadRes] = await Promise.all([
-      fetch('https://api.tavily.com/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          api_key: process.env.TAVILY_API_KEY,
-          query: `${tightQuery} ${MFG_BIAS}`,
-          search_depth: 'advanced',
-          max_results: 12,
-        }),
-      }).then(r => r.json()),
-      fetch('https://api.tavily.com/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          api_key: process.env.TAVILY_API_KEY,
-          query: `${broadQuery} ${MFG_BIAS}`,
-          search_depth: 'basic',
-          max_results: 10,
-        }),
-      }).then(r => r.json()),
-    ]);
-    if (tightRes.error) throw new Error(tightRes.error);
+    // ONE search, not two. This used to fire a tight `advanced` search (12
+    // results) plus a broad `basic` search (10) and merge them. The tight
+    // query is a strict superset of the broad one's terms and `advanced`
+    // returns the better-quality set, so a single advanced search at Tavily's
+    // max_results ceiling (20) covers the same ground as the ~22 deduped
+    // results the pair produced — at half the search spend and lower latency.
+    const searchRes = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: process.env.TAVILY_API_KEY,
+        query: `${tightQuery} ${MFG_BIAS}`,
+        search_depth: 'advanced',
+        max_results: 20,
+      }),
+    }).then(r => r.json());
+    if (searchRes.error) throw new Error(searchRes.error);
 
     const seen = new Set();
-    const results = [...(tightRes.results || []), ...(broadRes.results || [])].filter(r => {
+    const results = (searchRes.results || []).filter(r => {
       if (seen.has(r.url)) return false;
       seen.add(r.url);
       return true;
@@ -1739,7 +1737,8 @@ TRANSPARENCY BOUNDARY: only the area OUTSIDE the garment's outer edge is transpa
 const ELEMENT_MODE_OPTIONS = {
   'add-element': { size: '1024x1024', background: 'transparent' },
   'pattern':     { size: '1024x1024', background: 'opaque' },
-  'silhouette':  { size: '1024x1536', background: 'transparent', quality: 'high' },
+  // quality is overridden per-request from the user's low/medium/high choice.
+  'silhouette':  { size: '1024x1536', background: 'transparent', quality: 'medium' },
 };
 
 // Framing appended to every element prompt. Replaces the old "draw it on solid
@@ -1758,13 +1757,23 @@ const ELEMENT_MODE_EXCLUSIONS = {
   'silhouette': 'The garment must be empty: no person, face, skin, hair, eyes, hands, arms, legs, and no visible mannequin, dress form or hanger. Do not render a back view, side view, three-quarter view, turnaround, spec sheet or any second garment — exactly one garment, from the front, once. Do not use any colour — the result must be pure greyscale. Do not erase, cut out or make transparent any part of the garment itself, especially collars, necklines, plackets and facings; transparency belongs only outside its outer edge. Aim between the two extremes: NOT a photorealistic photograph, no fabric weave texture, no realistic studio lighting; but also NOT a bare uniform-weight CAD outline with no shading. It should read as a clean illustrated apparel mockup template.',
 };
 
-app.post('/api/design/generate-element', metered('design-generate-element'), async (req, res) => {
+// Silhouettes are priced per quality tier (low/medium/high cost very
+// different amounts of API spend), so the credit feature is resolved from the
+// request rather than fixed.
+app.post('/api/design/generate-element', metered((req) => (
+  req.body?.mode === 'silhouette'
+    ? silhouetteFeature(req.body?.quality)
+    : 'design-generate-element'
+)), async (req, res) => {
   console.log("📥 Received element generation request...");
   try {
-    const { mode, prompt } = req.body;
+    const { mode, prompt, quality } = req.body;
     const builder = ELEMENT_MODE_PROMPTS[mode];
     if (!builder) return res.status(400).json({ ok: false, error: 'Unknown element mode: ' + mode });
-    const opts = ELEMENT_MODE_OPTIONS[mode] || { size: '1024x1024', background: 'auto' };
+    const opts = { ...(ELEMENT_MODE_OPTIONS[mode] || { size: '1024x1024', background: 'auto' }) };
+    // Honour the caller's chosen render quality; the credit charge above was
+    // resolved from the same value, so price and cost always agree.
+    if (mode === 'silhouette') opts.quality = silhouetteQuality(quality);
     const fullPrompt = [
       builder(prompt),
       ELEMENT_STYLE_SUFFIX[mode],
