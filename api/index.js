@@ -6,7 +6,6 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 const { Resend } = require('resend');
-const sharp = require('sharp');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { creditCost, tierCredits, getPack } = require('./config/aiCredits');
@@ -344,112 +343,63 @@ async function callGeminiImage(prompt, imageInputsBase64 = []) {
   return { base64: inline.data, mimeType: inline.mime_type || inline.mimeType || 'image/png' };
 }
 
-// Pixazo's gateway to Stable Diffusion — used only for text-to-image
-// generation of a standalone new element (a logo, an icon, a pattern swatch)
-// with nothing to composite against, which is all its SD models can do
-// (no image-input parameter exists on SD 3.5/3.0/XL/XL-Lightning — only
-// their separate mask-based Inpainting endpoint takes an image, and that's
-// not what "generate a new isolated graphic" needs). Use base SDXL here:
-// Pixazo currently rejects the Lightning route for this account with an
-// insufficient-balance 403, while base SDXL succeeds with the same key.
-const PIXAZO_SDXL_URL = 'https://gateway.pixazo.ai/getImage/v1/getSDXLImage';
+// ── OpenAI image generation (gpt-image-1) ───────────────────────────────────
+// Replaced Stable Diffusion via Pixazo, which followed prompts too loosely
+// (duplicate garments, ignored composition instructions). gpt-image-1 adheres
+// to instructions far better and, critically, renders REAL transparency —
+// so generated logos/silhouettes arrive as usable layers without the
+// white-background flood-fill hack SD required.
+//
+// One helper covers both directions:
+//   · no `images`  → POST /v1/images/generations (text-to-image)
+//   · with `images`→ POST /v1/images/edits       (image-to-image)
+// There is no negativePrompt in this API; callers fold exclusions into the
+// prompt as plain language, which this model actually respects.
+const OPENAI_IMAGE_MODEL = 'gpt-image-1';
 
-async function callPixazoElement(prompt, extraNegative = '', size = { width: 1024, height: 1024 }) {
-  if (!process.env.PIXAZO_API_KEY) {
-    throw new Error('PIXAZO_API_KEY is not set in api/.env — get one at api-console.pixazo.ai.');
+async function callOpenAIImage(prompt, { size = '1024x1024', background = 'auto', images = [], quality = 'medium' } = {}) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not set — add it in the API environment (platform.openai.com/api-keys).');
   }
-  const fullPrompt = `${prompt}. Flat graphic/icon style, centered, isolated on a plain solid white background, no shadow, no scene, no mockup, no photo — just the graphic itself.`;
+  const auth = { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` };
+  let response;
 
-  const response = await fetch(PIXAZO_SDXL_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'Ocp-Apim-Subscription-Key': process.env.PIXAZO_API_KEY },
-    body: JSON.stringify({
-      prompt: fullPrompt,
-      negativePrompt: `photo, photorealistic, background scene, shadow, gradient background, texture background, watermark, text, frame, border${extraNegative ? ', ' + extraNegative : ''}`,
-      height: size.height,
-      width: size.width,
-    }),
-  });
+  if (images.length) {
+    // Image-to-image: multipart. Content-Type is intentionally omitted so
+    // fetch sets the multipart boundary itself.
+    const form = new FormData();
+    form.append('model', OPENAI_IMAGE_MODEL);
+    form.append('prompt', prompt);
+    form.append('size', size);
+    form.append('quality', quality);
+    if (background !== 'auto') form.append('background', background);
+    images.forEach((b64, i) => {
+      form.append('image[]', new Blob([Buffer.from(b64, 'base64')], { type: 'image/png' }), `input-${i}.png`);
+    });
+    response = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: auth, body: form });
+  } else {
+    response = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OPENAI_IMAGE_MODEL,
+        prompt,
+        size,
+        quality,
+        n: 1,
+        ...(background !== 'auto' ? { background } : {}),
+      }),
+    });
+  }
 
   const data = await response.json();
   if (!response.ok) {
-    console.error("❌ Pixazo API Error:", JSON.stringify(data, null, 2));
-    throw new Error(data.error?.message || data.message || `Pixazo Error: ${response.status}`);
+    console.error('❌ OpenAI Image API Error:', JSON.stringify(data, null, 2));
+    throw new Error(data.error?.message || `OpenAI image error: ${response.status}`);
   }
-  const imageUrl = data.imageUrl || data.output || data.url;
-  if (!imageUrl) throw new Error('Pixazo did not return an image URL.');
-
-  // Fetch the generated PNG/WebP and punch the near-white background out to
-  // real alpha transparency — SD has no native transparency output, so a
-  // solid white background (per the prompt above) is the practical way to
-  // get something that behaves like a layer instead of a flat rectangle
-  // when it's added to the canvas.
-  const imgRes = await fetch(imageUrl);
-  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
-  const { data: pixels, info } = await sharp(imgBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  floodFillTransparentBackground(pixels, info.width, info.height);
-  const pngBuffer = await sharp(pixels, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
-  return { base64: pngBuffer.toString('base64'), mimeType: 'image/png' };
-}
-
-// A flat per-pixel "near-white → transparent" threshold (the first attempt
-// at this) punches out ANY light pixel in the image, including enclosed
-// white regions that are actually part of the subject — a shoe's light
-// leather panels, a logo's white negative space, a sketch's unshaded
-// highlights. Flood-filling from the image border instead only removes
-// background that's actually connected to the edge, leaving anything
-// enclosed by darker linework untouched.
-//
-// A *fixed* whiteness cutoff still isn't enough on its own, though — Pixazo's
-// SD backend frequently ignores "plain white background" and returns a
-// light-gray one instead (seen as low as rgb(226,228,227), comfortably
-// below a naive >240 cutoff), which left the entire image opaque: a solid
-// pale rectangle with the real artwork lost inside it, not a transparent
-// layer. Sampling the actual border color per-generation and flood-filling
-// by color distance from THAT, rather than assuming pure white, adapts to
-// whatever background shade this particular generation actually came back
-// with.
-function floodFillTransparentBackground(pixels, width, height, tolerance = 28) {
-  let rSum = 0, gSum = 0, bSum = 0, n = 0;
-  const sampleBorder = (x, y) => {
-    const i = (y * width + x) * 4;
-    rSum += pixels[i]; gSum += pixels[i + 1]; bSum += pixels[i + 2]; n++;
-  };
-  for (let x = 0; x < width; x += 4) { sampleBorder(x, 0); sampleBorder(x, height - 1); }
-  for (let y = 0; y < height; y += 4) { sampleBorder(0, y); sampleBorder(width - 1, y); }
-  const bgR = rSum / n, bgG = gSum / n, bgB = bSum / n;
-
-  const isBackgroundColor = (pixelIdx) => {
-    const i = pixelIdx * 4;
-    const dr = pixels[i] - bgR, dg = pixels[i + 1] - bgG, db = pixels[i + 2] - bgB;
-    return Math.sqrt(dr * dr + dg * dg + db * db) < tolerance;
-  };
-
-  const visited = new Uint8Array(width * height);
-  const queue = new Int32Array(width * height);
-  let qHead = 0, qTail = 0;
-
-  const seed = (x, y) => {
-    const p = y * width + x;
-    if (visited[p] || !isBackgroundColor(p)) return;
-    visited[p] = 1;
-    queue[qTail++] = p;
-  };
-
-  for (let x = 0; x < width; x++) { seed(x, 0); seed(x, height - 1); }
-  for (let y = 0; y < height; y++) { seed(0, y); seed(width - 1, y); }
-
-  while (qHead < qTail) {
-    const p = queue[qHead++];
-    const x = p % width;
-    const y = (p - x) / width;
-    pixels[p * 4 + 3] = 0;
-
-    if (x + 1 < width) seed(x + 1, y);
-    if (x - 1 >= 0) seed(x - 1, y);
-    if (y + 1 < height) seed(x, y + 1);
-    if (y - 1 >= 0) seed(x, y - 1);
-  }
+  const b64 = data.data?.[0]?.b64_json;
+  if (!b64) throw new Error('OpenAI returned no image.');
+  return { base64: b64, mimeType: 'image/png' };
 }
 
 // ---------------------------------------------------------
@@ -1725,11 +1675,12 @@ Return 2 to 4 suggestions, ordered most important first. Use "warning" only for 
 // ---------------------------------------------------------
 // One endpoint, many "modes" — every tool here needs to see and faithfully
 // edit the founder's *actual* existing design (recolor, fabric-swap, etc.),
-// which is why these stay on Gemini's image model: it's the one that takes
-// a reference image and returns a genuinely edited version of it. Pixazo's
-// Stable Diffusion endpoints below are text-to-image only, so they handle
-// the opposite kind of tool — generating a brand new, isolated element to
-// *add* to the design rather than editing the design itself. See "7." below.
+// so these run on Gemini's image model, which takes a reference image and
+// returns a genuinely edited version of it. Section "7." below handles the
+// opposite kind of tool — generating a brand new, isolated element to *add*
+// to the design — on OpenAI's gpt-image-1. (gpt-image-1 also supports
+// image-to-image via /v1/images/edits, so these modes could move over too;
+// callOpenAIImage already accepts reference images.)
 // Hard rules appended to EVERY design-image prompt. In real use the two
 // biggest failure modes were (a) the model returning a contact sheet of
 // several variations on one canvas and (b) the rendering style drifting run
@@ -1776,7 +1727,7 @@ app.post('/api/design/ai-image', metered('design-ai-image'), async (req, res) =>
 });
 
 // ---------------------------------------------------------
-// 7. AI DESIGN STUDIO — new element generation (Stable Diffusion / Pixazo)
+// 7. AI DESIGN STUDIO — new element generation (OpenAI gpt-image-1)
 // ---------------------------------------------------------
 // Generates a standalone graphic (a logo/icon, or a pattern swatch) with no
 // input image — this is what feeds the frontend's "add as a new layer"
@@ -1797,24 +1748,33 @@ const ELEMENT_MODE_PROMPTS = {
   'silhouette': (p) => `ONE single ${p || 'garment'}, drawn once as a technical fashion flat sketch: the empty garment only — no person, no body, no mannequin. A SINGLE front view, centered and vertically symmetric, filling most of the frame. Clean black ink outline, thin uniform line weight, technical CAD line-art. Exactly one garment and exactly one view — this is NOT a spec sheet, NOT a turnaround, NOT a front-and-back layout, NOT a set of variations; render a single isolated garment outline and nothing else`,
 };
 
-// SDXL's favorite failure here is a sheet of several options on one canvas —
-// ban it outright. 'pattern' deliberately gets no anti-grid terms: a tile is
-// SUPPOSED to repeat, and negating "grid" degrades legitimate patterns.
-const ANTI_GRID_NEGATIVE = 'multiple designs, multiple variations, grid of options, collage, contact sheet, side-by-side versions, several drawings';
-
-// Canvas shape per mode. Verified in production: on a SQUARE canvas the model
-// fills the spare width with a second copy of the garment (front+back pair) no
-// matter how firmly the prompt forbids it — the shape of the frame drives the
-// composition more than the wording does. A tall portrait frame matches a
-// single garment's proportions and leaves no room for a neighbour. Logos and
-// tileable patterns stay square.
-const ELEMENT_MODE_SIZE = {
-  'silhouette': { width: 768, height: 1024 },
+// Per-mode generation options for gpt-image-1.
+//
+// `size`: a SQUARE frame invites side-by-side duplicates for garments (the
+// model fills spare width with a front+back pair), so silhouettes render
+// portrait — a shape that fits one garment and leaves no room for a neighbour.
+// `background`: gpt-image-1 renders true alpha, so logos and silhouettes come
+// back as drop-in layers. Patterns stay opaque — a tile must fill its frame.
+const ELEMENT_MODE_OPTIONS = {
+  'add-element': { size: '1024x1024', background: 'transparent' },
+  'pattern':     { size: '1024x1024', background: 'opaque' },
+  'silhouette':  { size: '1024x1536', background: 'transparent', quality: 'high' },
 };
 
-const ELEMENT_MODE_EXTRA_NEGATIVE = {
-  'add-element': ANTI_GRID_NEGATIVE,
-  'silhouette': `${ANTI_GRID_NEGATIVE}, multiple views, back view, front and back, turnaround, three-quarter view, side view, spec sheet, two garments, three garments, duplicate garment, tiled, split panel, panels, person, human, people, man, woman, child, face, head, hair, neck, hands, fingers, arms, legs, feet, body, torso, skin, figure, character, model, mannequin, dress form, color, fabric texture, painting, 3d render, photorealistic render, shading, gradient, sketch shading, cross-hatching`,
+// Framing appended to every element prompt. Replaces the old "draw it on solid
+// white so we can flood-fill the white out" workaround, which real
+// transparency makes unnecessary.
+const ELEMENT_STYLE_SUFFIX = {
+  'add-element': 'Flat vector-style graphic, centered, on a fully transparent background. No scene, no mockup, no photograph, no shadow, no frame or border, no text or watermark — just the graphic itself.',
+  'pattern': 'A flat, evenly lit repeating swatch that tiles seamlessly edge to edge and fills the entire frame. No garment, no mockup, no shadow, no text or watermark.',
+  'silhouette': 'Pure black line art on a fully transparent background. No colour, no fill, no shading, no gradients, no photograph, no 3D render, no text, no watermark, no frame or border.',
+};
+
+// gpt-image-1 has no negativePrompt parameter — exclusions go in the prompt as
+// plain language, which this model follows reliably (unlike SDXL).
+const ELEMENT_MODE_EXCLUSIONS = {
+  'add-element': 'Draw only one design: no alternates, no variations, no grid or sheet of options.',
+  'silhouette': 'Do not draw any person, body, face, hair, hands, arms, legs, feet, mannequin or dress form. Do not draw a back view, side view, three-quarter view, turnaround, spec sheet, or any second garment — exactly one garment, seen from the front, once.',
 };
 
 app.post('/api/design/generate-element', metered('design-generate-element'), async (req, res) => {
@@ -1823,11 +1783,13 @@ app.post('/api/design/generate-element', metered('design-generate-element'), asy
     const { mode, prompt } = req.body;
     const builder = ELEMENT_MODE_PROMPTS[mode];
     if (!builder) return res.status(400).json({ ok: false, error: 'Unknown element mode: ' + mode });
-    const result = await callPixazoElement(
+    const opts = ELEMENT_MODE_OPTIONS[mode] || { size: '1024x1024', background: 'auto' };
+    const fullPrompt = [
       builder(prompt),
-      ELEMENT_MODE_EXTRA_NEGATIVE[mode] || '',
-      ELEMENT_MODE_SIZE[mode] || { width: 1024, height: 1024 },
-    );
+      ELEMENT_STYLE_SUFFIX[mode],
+      ELEMENT_MODE_EXCLUSIONS[mode],
+    ].filter(Boolean).join('. ');
+    const result = await callOpenAIImage(fullPrompt, opts);
     console.log("✅ Element generation successful:", mode);
     res.json({ ok: true, imageBase64: result.base64, mimeType: result.mimeType });
   } catch (error) {

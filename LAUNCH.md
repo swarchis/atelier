@@ -35,6 +35,7 @@ Railway → backend service → **Variables**. Set / confirm ALL of these:
 | `ALLOWED_ORIGINS` | `https://atelierlabs.app` | Locks CORS to your frontend (backend currently warns on every boot). Comma-separate if you add `www.`. |
 | `STRIPE_WEBHOOK_SECRET` | from step 1 | Webhook signature verification. |
 | `OAUTH_STATE_SECRET` | any long random string (e.g. run `openssl rand -hex 32` or mash 40+ random characters) | Signs OAuth handoff state. **Currently falls back to a publicly-visible dev default in the repo — forgeable.** |
+| `OPENAI_API_KEY` | `sk-...` from platform.openai.com/api-keys | Image generation (logos, patterns, AI silhouettes) now runs on OpenAI `gpt-image-1`. **Without it those three tools return "OPENAI_API_KEY is not set".** `PIXAZO_API_KEY` is no longer used and can be deleted. |
 
 **Verify:** after redeploy, Railway logs no longer show the
 `ALLOWED_ORIGINS not set` warning.
