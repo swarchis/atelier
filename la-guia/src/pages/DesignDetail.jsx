@@ -833,7 +833,13 @@ export default function DesignDetail() {
           </div>
         )}
 
-        <div className="canvas-row" style={{ maxWidth: showSplitStudio ? 'none' : 1080, display: 'flex', gap: showSplitStudio ? 0 : 16, alignItems: 'flex-start', marginBottom: 16 }}>
+        {/* Split view pins both panes to the same height and lets each scroll on
+            its own. Previously the row was align-items:flex-start with only the
+            canvas given a height, so the AI Studio column (nine tool cards) ran
+            roughly twice as tall, and scrolling down to reach a tool scrolled
+            the canvas off screen — which defeats the one thing split view is
+            for: comparing an AI result against the live canvas. */}
+        <div className="canvas-row" style={{ maxWidth: showSplitStudio ? 'none' : 1080, display: 'flex', gap: showSplitStudio ? 0 : 16, alignItems: showSplitStudio ? 'stretch' : 'flex-start', marginBottom: 16 }}>
           <div style={{ flex: showSplitStudio ? '0 0 auto' : 1, width: showSplitStudio ? splitWidth : undefined, minWidth: 0, height: expanded ? 0 : 600 }}>
             <div ref={canvasPanelRef} className={`canvas-panel ${expanded ? 'expanded' : ''}`} style={{ '--cp-accent': 'var(--c-design)' }}>
               <div className="canvas-panel-header">
@@ -922,7 +928,10 @@ export default function DesignDetail() {
           {showSplitStudio ? (
             <>
               <Splitter width={splitWidth} onWidthChange={setSplitWidth} min={360} max={900} />
-              <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Same explicit height as the canvas pane (not 100%, so it stays
+                  correct when the mobile breakpoint stacks the row), with its
+                  own scrollbar so the tool list moves independently. */}
+              <div className="split-studio-pane" style={{ flex: 1, minWidth: 0, height: expanded ? undefined : 600, overflowY: 'auto', paddingLeft: 16 }}>
                 <AIStudioTab
                   productId={id}
                   onCapture={captureCanvasBase64}

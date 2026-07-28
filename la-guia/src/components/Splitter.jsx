@@ -30,10 +30,18 @@ export default function Splitter({ width, onWidthChange, min = 220, max = 640 })
   return (
     <div
       onMouseDown={onMouseDown}
-      style={{ width: 6, cursor: 'col-resize', flexShrink: 0, background: 'transparent', position: 'relative' }}
+      className="splitter-handle"
+      // alignSelf:stretch is load-bearing. This element has no content of its
+      // own — only an absolutely-positioned bar — so under the row's default
+      // align-items:flex-start it computed to ZERO height: an invisible
+      // divider with no hit area, making drag-to-resize impossible. Stretching
+      // to the row's height is what gives it something to fill.
+      style={{ width: 10, cursor: 'col-resize', flexShrink: 0, alignSelf: 'stretch', minHeight: 40, background: 'transparent', position: 'relative' }}
       title="Drag to resize"
+      role="separator"
+      aria-orientation="vertical"
     >
-      <div style={{ position: 'absolute', left: 2, top: 0, bottom: 0, width: 2, borderRadius: 1, background: 'var(--border-2)' }} />
+      <div className="splitter-bar" />
     </div>
   );
 }

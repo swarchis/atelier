@@ -732,6 +732,24 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   .canvas-row { flex-direction: column !important; }
   .canvas-row > * { width: 100% !important; flex: none !important; }
   .canvas-row > [title="Drag to resize"] { display: none; }
+  /* Stacked, the AI Studio pane no longer sits beside the canvas, so its
+     split-view height cap and left gutter would just crop it mid-card. */
+  .canvas-row > .split-studio-pane { height: auto !important; overflow: visible !important; padding-left: 0 !important; }
+}
+
+/* ── SPLIT-VIEW DIVIDER ─────────────────────────────────────
+   The handle is a wide, invisible hit area; only the thin bar inside it is
+   drawn. It has to announce itself as draggable — the previous 2px hairline
+   on a transparent 6px strip read as a rendering seam between two panels
+   rather than a control. */
+.splitter-bar {
+  position: absolute; left: 4px; top: 0; bottom: 0; width: 2px;
+  border-radius: 2px; background: var(--border-2);
+  transition: background 120ms ease, width 120ms ease, left 120ms ease;
+}
+.splitter-handle:hover .splitter-bar,
+.splitter-handle:active .splitter-bar {
+  background: var(--accent); width: 4px; left: 3px;
 }
 
 /* ── PRINT MEDIA QUERY FOR PDF TECH PACK EXPORT ────────────── */
