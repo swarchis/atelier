@@ -167,7 +167,13 @@ export function ChatProvider({ children }) {
   // pending/unclaimed invites have no auth user yet and can't be added.
   const addableMembers = [
     ...(activeBrand && activeBrand.user_id && activeBrand.user_id !== user?.id
-      ? [{ user_id: activeBrand.user_id, invited_email: 'Brand owner', role: 'owner' }]
+      ? [{
+          user_id: activeBrand.user_id,
+          // The owner has no membership row, so their name lives on the brand.
+          display_name: activeBrand.owner_display_name || null,
+          invited_email: activeBrand.owner_display_name || 'Brand owner',
+          role: 'owner',
+        }]
       : []),
     ...members.filter(m => m.status === 'active' && m.user_id && m.user_id !== user?.id),
   ];

@@ -76,6 +76,10 @@ export function TeamProvider({ children }) {
       .from('brand_members').update({ display_name: clean }).eq('user_id', user.id);
     if (error) throw error;
     setMembers(prev => prev.map(m => (m.user_id === user.id ? { ...m, display_name: clean } : m)));
+
+    // Brands they OWN have no membership row to carry the name, so mirror it
+    // onto the brand itself — that's the only copy teammates can read.
+    await supabase.from('brands').update({ owner_display_name: clean }).eq('user_id', user.id);
   };
 
   const myRole = activeBrand?.memberRole || 'owner';

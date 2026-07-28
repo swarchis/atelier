@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '../context/ChatContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
@@ -14,6 +14,9 @@ function timeLabel(iso) {
     ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : d.toLocaleDateString();
 }
+
+// Messages from one person within this window collapse into a single turn.
+const GROUP_WINDOW_MS = 2 * 60 * 1000;
 
 export default function FloatingChat() {
   const { user } = useAuth();
@@ -38,10 +41,31 @@ export default function FloatingChat() {
   const activeChat = activeChatId === aiChat?.id ? aiChat : groupChats.find(c => c.id === activeChatId) || null;
   const messages = activeChat ? (messagesByChat[activeChat.id] || []) : [];
 
+  // Collapse a run of messages from the same sender sent close together into
+  // one visual turn (Apple Messages style): the name appears once above the
+  // run and the timestamp once below it, instead of repeating on every line.
+  const messageGroups = useMemo(() => {
+    const groups = [];
+    for (const m of messages) {
+      const current = groups[groups.length - 1];
+      const prev = current && current.items[current.items.length - 1];
+      const sameSender = current
+        && current.senderId === m.sender_id
+        && current.senderType === m.sender_type;
+      const closeInTime = prev
+        && (new Date(m.created_at) - new Date(prev.created_at)) <= GROUP_WINDOW_MS;
+      if (sameSender && closeInTime) current.items.push(m);
+      else groups.push({ key: m.id, senderId: m.sender_id, senderType: m.sender_type, items: [m] });
+    }
+    return groups;
+  }, [messages]);
+
   const senderLabel = senderId => {
     if (!senderId) return 'AI Assistant';
     if (senderId === user.id) return 'You';
-    if (senderId === activeBrand?.user_id) return 'Brand owner';
+    // The owner has no brand_members row, so their chosen name lives on the
+    // brand itself; fall back to the generic label only if they never set one.
+    if (senderId === activeBrand?.user_id) return activeBrand?.owner_display_name || 'Brand owner';
     const m = members.find(m => m.user_id === senderId);
     // Prefer the name they chose when they joined; only fall back to guessing
     // from the email prefix if they haven't set one.
@@ -235,21 +259,35 @@ export default function FloatingChat() {
                     {activeChat.type === 'ai' ? 'Ask anything about your products, vendors, or production status.' : 'No messages yet — say hello.'}
                   </div>
                 )}
-                {messages.map(m => {
-                  const mine = m.sender_id === user.id;
+                {messageGroups.map(group => {
+                  const mine = group.senderId === user.id;
+                  const last = group.items[group.items.length - 1];
                   return (
-                    <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
-                      {!mine && <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 2, marginLeft: 4 }}>{senderLabel(m.sender_id)}</div>}
-                      <div style={{
-                        maxWidth: '80%', padding: '8px 12px', borderRadius: 12,
-                        borderBottomRightRadius: mine ? 3 : 12, borderBottomLeftRadius: mine ? 12 : 3,
-                        background: mine ? 'var(--accent)' : m.sender_type === 'ai' ? 'var(--accent-bg)' : 'var(--bg-3)',
-                        color: mine ? '#fff' : 'var(--ink)',
-                        fontSize: 13, lineHeight: 1.4, whiteSpace: 'pre-wrap',
-                      }}>
-                        {m.body}
-                      </div>
-                      <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 2 }}>{timeLabel(m.created_at)}</div>
+                    <div key={group.key} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', gap: 2 }}>
+                      {/* Name once at the top of the run, timestamp once at the
+                          bottom — a burst of quick replies reads as one turn. */}
+                      {!mine && <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 2, marginLeft: 4 }}>{senderLabel(group.senderId)}</div>}
+                      {group.items.map((m, i) => {
+                        const isFirst = i === 0;
+                        const isLast = i === group.items.length - 1;
+                        // Square off the inner corners on the sender's side so
+                        // stacked bubbles read as one connected cluster, with
+                        // the tail only on the final bubble.
+                        const corners = mine
+                          ? { borderTopRightRadius: isFirst ? 12 : 4, borderBottomRightRadius: isLast ? 3 : 4 }
+                          : { borderTopLeftRadius: isFirst ? 12 : 4, borderBottomLeftRadius: isLast ? 3 : 4 };
+                        return (
+                          <div key={m.id} style={{
+                            maxWidth: '80%', padding: '8px 12px', borderRadius: 12, ...corners,
+                            background: mine ? 'var(--accent)' : m.sender_type === 'ai' ? 'var(--accent-bg)' : 'var(--bg-3)',
+                            color: mine ? '#fff' : 'var(--ink)',
+                            fontSize: 13, lineHeight: 1.4, whiteSpace: 'pre-wrap',
+                          }}>
+                            {m.body}
+                          </div>
+                        );
+                      })}
+                      <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 2 }}>{timeLabel(last.created_at)}</div>
                     </div>
                   );
                 })}

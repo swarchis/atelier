@@ -43,7 +43,7 @@ function Toggle({ on, onToggle }) {
 }
 
 function TeamTab() {
-  const { members, loading, myRole, canManage, inviteMember, updateMemberRole, removeMember } = useTeam();
+  const { members, loading, myRole, canManage, inviteMember, updateMemberRole, removeMember, setMyDisplayName } = useTeam();
   const { activeBrand } = useProducts();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('editor');
@@ -274,6 +274,10 @@ export default function Settings() {
     setSavingName(true);
     try {
       await updatePreferences({ full_name: fullName.trim() || null });
+      // Propagate to the places teammates can actually read: the membership
+      // rows for brands they've joined, and the brand row for ones they own.
+      // Without this the name would only ever be visible to themselves.
+      if (fullName.trim()) await setMyDisplayName(fullName);
     } finally {
       setSavingName(false);
     }
