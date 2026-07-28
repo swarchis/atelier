@@ -1126,9 +1126,11 @@ app.post('/api/stripe/webhook', async (req, res) => {
           
         if (error) throw error;
         // Zero the AI credit grant for the brand(s) on this customer.
-        const { data: brands } = await supabase.from('brands').select('id').eq('stripe_customer_id', customerId);
+        const { data: brands, error: brandsErr } = await supabase.from('brands').select('id').eq('stripe_customer_id', customerId);
+        if (brandsErr) throw brandsErr;
         for (const b of brands || []) {
-          await supabase.rpc('grant_subscription_credits', { p_brand_id: b.id, p_amount: 0, p_reset_at: null });
+          const { error: rpcErr } = await supabase.rpc('grant_subscription_credits', { p_brand_id: b.id, p_amount: 0, p_reset_at: null });
+          if (rpcErr) throw rpcErr;
         }
         console.log(`✅ Automatically downgraded canceled Stripe customer ${customerId} to Free plan.`);
       } catch (err) {
@@ -1149,10 +1151,17 @@ app.post('/api/stripe/webhook', async (req, res) => {
       const credits = parseInt(session.metadata.credits, 10);
       if (brandId && credits > 0) {
         try {
-          const { data: seen } = await supabase.from('ai_credit_ledger')
+          // supabase-js RESOLVES with { error } on failure — it does not reject.
+          // Every one of these has to be checked by hand or the catch below is
+          // decorative: a failed RPC would log success, return 200, and Stripe
+          // would never retry. That is exactly how a paid top-up goes missing
+          // with nothing anywhere saying so.
+          const { data: seen, error: seenErr } = await supabase.from('ai_credit_ledger')
             .select('id').eq('stripe_ref', session.id).eq('type', 'topup').maybeSingle();
+          if (seenErr) throw seenErr;
           if (!seen) {
-            await supabase.rpc('add_topup_credits', { p_brand_id: brandId, p_amount: credits, p_stripe_ref: session.id });
+            const { error: rpcErr } = await supabase.rpc('add_topup_credits', { p_brand_id: brandId, p_amount: credits, p_stripe_ref: session.id });
+            if (rpcErr) throw rpcErr;
             console.log(`✅ Added ${credits} top-up credits to brand ${brandId} (${session.id}).`);
           }
         } catch (err) {
@@ -1173,6 +1182,14 @@ app.post('/api/stripe/webhook', async (req, res) => {
     const priceId = line && line.price ? line.price.id : null;
     const tier = priceId ? (Object.entries(PRICE_IDS).find(([, id]) => id === priceId) || [])[0] : null;
 
+    // An unrecognised price id means STRIPE_PRICE_BASIC/PREMIUM don't match the
+    // account the invoice came from — the classic symptom of test-mode price ids
+    // left in a live deploy. Without this the block just falls through and a
+    // paid subscription grants nothing, with no trace of why.
+    if (supabase && customerId && !tier) {
+      console.error(`❌ invoice.paid for customer ${customerId} with unmapped price ${priceId} — check STRIPE_PRICE_BASIC / STRIPE_PRICE_PREMIUM.`);
+    }
+
     if (supabase && customerId && tier) {
       try {
         const amount = tierCredits(tier);
@@ -1180,9 +1197,15 @@ app.post('/api/stripe/webhook', async (req, res) => {
         const periodEnd = line && line.period && line.period.end
           ? new Date(line.period.end * 1000).toISOString()
           : null;
-        const { data: brands } = await supabase.from('brands').select('id').eq('stripe_customer_id', customerId);
-        for (const b of brands || []) {
-          await supabase.rpc('grant_subscription_credits', { p_brand_id: b.id, p_amount: amount, p_reset_at: periodEnd });
+        const { data: brands, error: brandsErr } = await supabase.from('brands').select('id').eq('stripe_customer_id', customerId);
+        if (brandsErr) throw brandsErr;
+        // A customer with no matching brand row means the grant silently went
+        // nowhere — the subscription is paid but nobody got credits, so fail
+        // loudly and let Stripe retry rather than logging a success.
+        if (!brands || !brands.length) throw new Error(`No brand found for Stripe customer ${customerId}`);
+        for (const b of brands) {
+          const { error: rpcErr } = await supabase.rpc('grant_subscription_credits', { p_brand_id: b.id, p_amount: amount, p_reset_at: periodEnd });
+          if (rpcErr) throw rpcErr;
         }
         console.log(`✅ Granted ${amount} AI credits (${tier}) to Stripe customer ${customerId}.`);
       } catch (err) {
