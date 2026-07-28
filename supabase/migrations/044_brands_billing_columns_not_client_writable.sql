@@ -1,3 +1,21 @@
+-- ⚠️⚠️ THIS MIGRATION DOES NOT WORK. SUPERSEDED BY 045. ⚠️⚠️
+--
+-- It was applied to production and had NO EFFECT — it reported success and
+-- changed nothing, which is why it is kept here rather than deleted.
+--
+-- Why it fails: in PostgreSQL a column-level REVOKE cannot subtract from a
+-- table-level grant. brands already carries a table-wide UPDATE for anon and
+-- authenticated (pg_class.relacl shows `authenticated=arwdDxtm`, where `w` is
+-- UPDATE across every column), and `revoke update (col, …)` does not touch it.
+-- Verified after applying: has_column_privilege('authenticated', 'public.brands',
+-- 'plan_tier', 'UPDATE') still returned true.
+--
+-- The working approach is to revoke the table-level UPDATE outright and then
+-- grant back only the columns the client legitimately writes. See
+-- 045_brands_billing_columns_not_client_writable_fix.sql.
+--
+-- Original intent below, which 045 carries out properly.
+--
 -- Stop the browser from writing the columns that decide entitlement and billing.
 --
 -- ⚠️ DO NOT APPLY THIS UNTIL THE MATCHING CODE IS DEPLOYED AND VERIFIED.
