@@ -1,0 +1,24 @@
+-- Stop bucket-wide listing of `content_media`, matching what 039 did for `mockups`.
+--
+-- The policy scoped on nothing but bucket_id, so any signed-in user could list
+-- every file in the bucket — and since the bucket is public, every listed key is
+-- a working download URL. Narrower than the `mockups` case (that one was granted
+-- to role `public`, so it needed no account at all, and the bucket holds every
+-- tenant's designs) which is why it was left out of 039's urgent pass.
+--
+-- Safe for the same reasons: nothing in la-guia/src calls .list(), .download()
+-- or .createSignedUrl(); getPublicUrl() only builds a string; and downloads from
+-- a public bucket go through /object/public/... which does not consult RLS.
+-- Uploads are unaffected — "Allow authenticated uploads to content_media"
+-- (INSERT) stays, and a fresh key needs only INSERT.
+--
+-- Clears database-linter 0025_public_bucket_allows_listing for this bucket.
+--
+-- The UPDATE and DELETE policies on content_media are deliberately left alone.
+-- They are equally unscoped, but ContentHub has no delete path and its uploads
+-- are keyed by `${activeBrand.id}-${Date.now()}.png`, so removing them now would
+-- buy little and risk breaking a path this audit has not traced end to end.
+-- They belong with the phase 2 namespacing work, where they can be replaced by
+-- properly brand-scoped versions rather than simply dropped.
+
+drop policy if exists "Allow authenticated select from content_media" on storage.objects;

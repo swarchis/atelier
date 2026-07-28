@@ -1,0 +1,55 @@
+-- Stop anonymous enumeration of, and cross-tenant overwrite in, the `mockups`
+-- storage bucket.
+--
+-- Both policies below scoped on nothing but bucket_id, with no path or tenant
+-- component — and upload paths are flat in the bucket root
+-- (`${productId}-${prefix}-${Date.now()}.ext`, see lib/designImages.js), so
+-- there is no folder structure for a policy to key off.
+--
+-- What that allowed, verified against production on 2026-07-28:
+--
+--   "Public Read Access" (SELECT, role `public`, which includes `anon`)
+--   Listing is governed by the SELECT policy on storage.objects — storage.search
+--   is SECURITY INVOKER, so RLS applies. A POST to
+--   /storage/v1/object/list/mockups carrying only the anon key that ships in the
+--   public JS bundle returned all 732 objects: filenames, sizes, timestamps.
+--   Because the bucket is public, every listed key converts directly into a
+--   working download URL — so this turns an unguessable-UUID namespace into a
+--   complete index of every tenant's PSDs and design images. No account needed.
+--
+--   "Authenticated Updates" (UPDATE, role `authenticated`)
+--   `upsert: true` compiles to INSERT ... ON CONFLICT DO UPDATE, which needs
+--   INSERT + SELECT + UPDATE. Those three were granted on this bucket gated only
+--   by bucket_id, which is exactly the combination that makes overwriting
+--   another brand's file work once its key is known — and the SELECT policy
+--   above is what makes the keys known.
+--
+-- Dropping them is safe:
+--   · getPublicUrl() only builds a string, and downloads of a public bucket go
+--     through /object/public/... which does not consult RLS. Public reads keep
+--     working exactly as before.
+--   · Nothing in la-guia/src calls .list(), .download(), or .createSignedUrl()
+--     — checked every storage call site — so no app code depends on SELECT here.
+--   · Uploads keep working: the INSERT policy ("Authenticated Uploads") is left
+--     in place, and a fresh key needs only INSERT.
+--
+-- This is also what Supabase's own database linter recommends
+-- (0025_public_bucket_allows_listing): "Public buckets don't need this for
+-- object URL access and it may expose more data than intended."
+--
+-- KNOWN RESIDUAL, accepted deliberately: with SELECT and UPDATE gone, an upload
+-- whose key already exists can no longer overwrite and will fail instead. Every
+-- upload path stamps Date.now() into the filename behind a UUID prefix, so a
+-- collision requires two writes for the same product in the same millisecond.
+-- Trading that for closing anonymous enumeration is the right side of the deal.
+--
+-- NOT fixed here, and still open: `mockups` has no DELETE policy at all, so the
+-- app's .remove() calls delete nothing (an RLS-blocked delete matches zero rows
+-- and returns {data: [], error: null} — not an error, which is why this went
+-- unnoticed). Adding a delete policy safely requires per-brand path namespacing,
+-- since a blanket authenticated DELETE would let any user delete any file. That
+-- is the phase 2 change, along with the autosave churn that is orphaning ~2.3GB
+-- of superseded files.
+
+drop policy if exists "Public Read Access" on storage.objects;
+drop policy if exists "Authenticated Updates" on storage.objects;

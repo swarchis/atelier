@@ -18,11 +18,13 @@
 
 | # | Sev | Finding | Status |
 |---|---|---|---|
+| 10 | **Critical** | Signup broken in production — `handle_new_user` referenced a non-existent column | ✅ **Fixed & verified end to end in production** |
+| 9 | **High** | Storage: anonymous enumeration + cross-tenant overwrite of `mockups` | ✅ **Fixed & verified in production** (phase 1) |
 | 1 | **Critical** | AI credit RPCs callable by any user | ✅ **Fixed & verified in production** |
 | 4 | Medium | Chat participants — no brand check on insert | ✅ **Fixed & verified in production** |
 | 3 | Medium | `send-vendor-email` open relay | 🟡 **Code fixed — awaiting deploy + test** |
 | 2 | **High** | `plan_tier` / Stripe columns client-writable | 🔴 **Open** — needs billing rework (decision A) |
-| 5 | Medium | CORS fails open | 🔴 **Open** — config check only (decision E) |
+| 5 | Medium | CORS fails open | ✅ **Not an issue** — already configured correctly in production |
 | 6 | Low | OAuth handoff code in URL | 🔴 Open — accepted risk, well-mitigated |
 | 7 | Low | Blind SSRF in `isLikelyAlive()` | 🔴 Open — not currently reachable |
 | 8 | Low | Photopea `postMessage(…, '*')` | 🔴 Open — not currently reachable |
@@ -361,9 +363,59 @@ Confirmed working: AI features continued to function immediately after the revok
 
 No functional test was performed for 033, and none is meaningful yet: group-chat creation goes through `create_group_chat`, a `SECURITY DEFINER` RPC that bypasses RLS entirely, and the only direct-insert path (`ChatContext.addParticipant`) has no UI caller. The policy currently guards a route the app does not exercise — the `pg_policies` output is the real proof here.
 
-**Fix 3 (`send-vendor-email`) — code complete, NOT yet deployed.** It spans backend and frontend, so both must ship together: an old bundle won't send `brandId` and will start getting 403s. After deploying, send one RFQ from Quote Tracker to a vendor with an email on file and confirm it arrives with correct line breaks.
+**Fix 3 (`send-vendor-email`) — deployed 2026-07-28, not yet functionally tested.** Pushing to GitHub auto-deploys the frontend to Cloudflare Pages and the backend to Railway, so both sides shipped from the same commit — which is what this fix required, since an old bundle doesn't send `brandId` and would get a 403.
+
+Two caveats while it settles: Cloudflare and Railway build independently, so there is a short window where one side is ahead of the other and RFQ dispatch may 403; and any browser tab still running the pre-deploy bundle will keep sending without `brandId` until it is refreshed. Both resolve on their own — the feature is low-frequency and a reload fixes it.
+
+**Still to confirm:** send one RFQ from Quote Tracker to a vendor with an email on file, and check it arrives with correct line breaks.
 
 Nothing in this audit was exercised against a signed-in session — I have no way to reach one from here.
+
+---
+
+## Round 2 — findings from direct database access (2026-07-28)
+
+A read-only Supabase MCP connection was added after the first round, which made it possible to verify claims against production instead of inferring them from the repo. Two findings came out of it, plus empirical confirmation of one that had been rated only SUSPECTED.
+
+### Finding 10 — Critical: signup was broken in production
+
+Not a vulnerability; an outage. `handle_new_user()` — a dashboard-created trigger on `auth.users`, not in any migration — ran this on every signup:
+
+```sql
+UPDATE public.brand_members SET user_id = new.id, status = 'active'
+ WHERE email = new.email;
+```
+
+`brand_members` has no `email` column; `007` created it as `invited_email`. Postgres raises `42703`, the trigger aborts, and since it runs inside the `auth.users` insert, the entire signup transaction rolls back. The statement is unconditional, so this broke **every** signup path — email/password and OAuth alike — not just invited users.
+
+Confirmed three ways: the column list from `information_schema`; an `EXPLAIN` of the statement returning `column "email" does not exist`; and the auth logs, which showed two real Google signup attempts from `45.50.118.25` on 2026-07-28 at 14:28:21 and 14:30:44, both returning `500: Database error saving new user`. The most recent successful signup was 2026-07-20.
+
+Fixed in `038_fix_handle_new_user_column.sql` — column name corrected, plus `set search_path = public` since the function is `SECURITY DEFINER` and the linter flagged it.
+
+**Verified end to end in production.** The auth log captures both sides of the fix in one window: `POST /signup → 500 column "email" does not exist` at 20:07:39, then `POST /signup → 200` at 20:14:03 and 20:15:53, followed by `user_signedup` and a successful `/verify` → login. Both new users have a `brands` row created by the trigger (`My Personal Workspace`, tier `free`), confirming the insert half runs too.
+
+**Minor, noted not fixed:** the trigger claims a pending invite (`user_id` set, `status = 'active'`) at `auth.users` insert time, which is *before* email confirmation. Someone signing up as an address that has a pending invite consumes that invite without ever confirming the address. They cannot log in without confirming, so this is a nuisance rather than an access path — but it would block the legitimate invitee from claiming their row. Adding `and user_id is null` to the `WHERE`, or moving the link to confirmation time, would close it.
+
+### Finding 9 upgraded — High, CONFIRMED (was Low, SUSPECTED)
+
+The first round could only guess at storage policies, since none are in the repo. With DB access the guess was wrong in the safe direction: this was worse than rated, and it was verified rather than reasoned about.
+
+The live policies scoped on `bucket_id` alone, with no path or tenant component, against a completely flat namespace. Three things followed:
+
+- **Anonymous enumeration.** Listing is governed by the SELECT policy on `storage.objects` (`storage.search` is `SECURITY INVOKER`). `mockups`' SELECT policy was granted to role `public`, which includes `anon`. A `POST /storage/v1/object/list/mockups` carrying only the anon key from the public JS bundle returned **all 732 objects** — names, sizes, timestamps. Because the bucket is public, every key converts straight to a working download URL. The proof-by-contrast: the identical call against `content_media`, whose SELECT policy is scoped to `authenticated`, returned `[]`. Both buckets are `public=true`, so bucket publicity was never the deciding factor.
+- **Cross-tenant overwrite.** `upsert: true` compiles to `INSERT … ON CONFLICT DO UPDATE`, which needs INSERT **and** SELECT **and** UPDATE. All three were granted on `mockups` gated only by `bucket_id` — precisely the combination that makes overwriting another brand's file work once its key is known, and the SELECT policy is what made keys knowable.
+- **Deletes never worked.** No DELETE policy exists on `mockups` at all. An RLS-blocked delete is not an error in Postgres — it matches zero rows, so `remove()` returns `{data: [], error: null}`. The comment at `ProductsContext.jsx:557` ("a leftover file is better than a failed delete") describes a tradeoff that never existed: it is 100% leftover.
+
+Phase 1 fixed in `039_storage_stop_enumeration_and_overwrite.sql`, dropping `Public Read Access` and `Authenticated Updates`. Verified after applying: the anonymous list now returns `[]`, a public object URL still returns `200` with correct bytes and content-type, and Supabase's linter no longer reports `mockups` under `0025_public_bucket_allows_listing`.
+
+### Also surfaced, not yet fixed
+
+- **Uncapped storage growth.** 704 of 732 objects (2.29 GB) are referenced by no DB row. 682 are `working-*.psd` and `autosave-*.png` at ~120-second intervals: `DesignDetail.jsx:232-241` updates a single rolling `design_versions` row and never removes superseded files. That is ~2.3 GB in five days from three users — a cost problem at beta scale, and unrelated to the delete-policy issue.
+- **Stated-policy violation.** `PrivacyPolicy.jsx:139-140` commits to deleting content within 30 days. `delete_user()` purges database rows only; storage objects survive account deletion and remain publicly readable. Fixing this needs the phase 2 namespacing.
+- **`VariantsTab.jsx:37`** calls `supabase.storage` but never imports `supabase` — deleting a variant throws `ReferenceError`.
+- **`ProductsContext.jsx:572`** takes the file extension straight from the user's filename, and `mockups` has `allowed_mime_types = NULL`.
+- **Leaked-password protection is disabled** in Supabase Auth — a single dashboard toggle that checks new passwords against HaveIBeenPwned.
+- **`sales_data` confirmed** to have only a `SELECT` policy (decision D) — writes are denied, so store sync cannot be persisting.
 
 ---
 
@@ -376,8 +428,15 @@ The only open finding that is directly actionable by an attacker today. Three se
 
 Partially mitigated already: server-side AI spend gates on the credit balance, not on `plan_tier`, and credits can no longer be minted directly since 032. So the expensive half of this is closed.
 
-**2. Finding 5 — CORS fails open. (Medium, config)**
-`ALLOWED_ORIGINS` unset means every origin is allowed, with `credentials: true`. Narrower than it looks — auth is a `Bearer` token from `localStorage`, not cookies, so no ambient session to ride — but it should not be the launch default. **Unresolved: confirm the Railway value.** Closes with no code change if it is set.
+**2. Finding 5 — CORS. ✅ RESOLVED — no action was needed.**
+The concern was that `ALLOWED_ORIGINS` unset leaves CORS open to every origin. Verified against production on 2026-07-28 and it is correctly configured. Preflighting `https://api.atelierlabs.app/api/subscription-status`:
+
+- `Origin: https://evil.com` → `500`, **no** `access-control-allow-origin` header — the browser blocks the response.
+- `Origin: https://atelierlabs.app` → `204` with `access-control-allow-origin: https://atelierlabs.app` and `access-control-allow-credentials: true`.
+
+`APP_URL` was confirmed correct at the same time (`/api/social/auth/instagram` redirects to `https://atelierlabs.app/content?…`, not localhost), which also rules out Stripe success URLs and OAuth callbacks pointing at a dev host in production.
+
+Minor cosmetic note, deliberately not changed: a rejected origin surfaces as a `500` because the CORS callback throws into the generic error handler. A `403` would be more accurate, but the security behavior is correct as-is (no header, so the browser refuses it) and the brief rules out cosmetic diffs.
 
 **3. Decision B — storage bucket policies. (unverified)**
 Still the largest blind spot in this audit. No `storage.objects` policy exists anywhere in the repo; it is all dashboard state. Buckets are public (`getPublicUrl`), paths are flat with no per-brand prefix, and every upload uses `upsert: true`. The open questions are whether one brand can overwrite or delete another's files. Queries are in decision B above.
