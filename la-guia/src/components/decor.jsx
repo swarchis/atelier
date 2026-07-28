@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 // Atelier decorative motifs — the pinned swatches, wax seals, and dried flowers
 // that give the studio its handmade feel. No stock photography exists yet, so
@@ -82,18 +82,29 @@ const TONES = {
 // photo instead — the texture/gradient only shows up when there's nothing real.
 export function PhotoPanel({ variant = 'fabric', tone = 'gold', label, icon = 'ph-image', aspect = '4 / 5', imageUrl, style, className }) {
   const [c1, c2] = TONES[tone] || TONES.gold;
+  // Fall back to the woven placeholder if the image can't actually be painted.
+  // Designs uploaded before uploads used real content types have PSD bytes
+  // sitting behind a .png URL, so nothing but a load error reveals them — and
+  // without this the card shows a browser broken-image icon and alt text.
+  const [failed, setFailed] = useState(false);
+  const showImage = !!imageUrl && !failed;
   return (
     <div
       className={className}
       style={{
         position: 'relative', aspectRatio: aspect, borderRadius: 'var(--r-sm)', overflow: 'hidden',
-        background: imageUrl ? '#fff' : `linear-gradient(155deg, ${c1}, ${c2})`,
+        background: showImage ? '#fff' : `linear-gradient(155deg, ${c1}, ${c2})`,
         border: '1px solid var(--border)',
         ...style,
       }}
     >
-      {imageUrl ? (
-        <img src={imageUrl} alt={label || 'Product'} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+      {showImage ? (
+        <img
+          src={imageUrl}
+          alt={label || 'Product'}
+          onError={() => setFailed(true)}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+        />
       ) : (
         <div style={{ position: 'absolute', inset: 0, backgroundImage: TEXTURES[variant] || TEXTURES.fabric, mixBlendMode: 'multiply', opacity: 0.5 }} />
       )}

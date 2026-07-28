@@ -68,6 +68,37 @@ const EXT_BY_TYPE = {
   'image/tiff': 'tiff',
 };
 
+// True when a file is a Photoshop document (by MIME or extension — browsers
+// report PSD inconsistently, and often not at all).
+export function isPsdFile(file) {
+  if (!file) return false;
+  return /photoshop|psd/i.test(file.type || '') || /\.psb?$|\.psd$/i.test(file.name || '');
+}
+
+// Render a PSD's flattened composite to a PNG blob so it can be used as a
+// thumbnail. A PSD can't be painted by an <img>, so without this every
+// preview surface has to fall back to a placeholder icon. ag-psd is imported
+// lazily — it's only needed on the rare upload, and shouldn't sit in the main
+// bundle. Returns null if the file has no usable composite, in which case the
+// caller just goes without a thumbnail.
+export async function psdToPngBlob(file, maxEdge = 1200) {
+  const { readPsd } = await import('ag-psd');
+  const buffer = await file.arrayBuffer();
+  // Layer bitmaps are irrelevant here and by far the most expensive part to
+  // decode; only the merged composite is needed for a thumbnail.
+  const psd = readPsd(buffer, { skipLayerImageData: true, skipThumbnail: false });
+  const source = psd.canvas;
+  if (!source || !source.width || !source.height) return null;
+
+  const scale = Math.min(1, maxEdge / Math.max(source.width, source.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(source.width * scale));
+  canvas.height = Math.max(1, Math.round(source.height * scale));
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+}
+
 // Uploads a generated/edited image to the shared `mockups` bucket (same one
 // Design Studio snapshots and tech pack images already use) and returns its
 // public URL for storing on a design_versions row, moodboard entry, etc.

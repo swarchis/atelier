@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from './AuthContext.jsx';
-import { uploadDesignImage, isRenderableImageUrl, PSD_VERSION_LABEL } from '../lib/designImages.js';
+import { uploadDesignImage, isRenderableImageUrl, isPsdFile, psdToPngBlob, PSD_VERSION_LABEL } from '../lib/designImages.js';
 import { setActiveBrandId, setBrandProfile } from '../lib/aiApi.js';
 
 const ProductsContext = createContext(null);
@@ -457,21 +457,38 @@ export function ProductsProvider({ children }) {
       // "save as version" happened, so a freshly created design (upload or
       // AI silhouette) had no real photo anywhere and Home's featured card
       // fell back to the honest placeholder for what could be a long time.
-      // An uploaded PSD is stored as the layered working file too, so opening
-      // the design restores its layers instead of a flattened copy. image_url
-      // is NOT NULL so it still points at the same object; preview surfaces
-      // skip non-paintable URLs and show the placeholder until the first
-      // canvas save produces a real thumbnail.
-      const isLayered = /photoshop|psd/i.test(file.type || '') || /\.psd$/i.test(file.name || '');
-      uploadDesignImage(file, productData.id, baseType === 'upload' ? 'upload' : 'silhouette')
-        .then(url => supabase.from('design_versions').insert([{
+      // A PSD can't be painted by an <img>, so it gets stored twice: the file
+      // itself as the layered working file (psd_url, so opening the design
+      // restores its layers) and its flattened composite as a real PNG
+      // (image_url, so every thumbnail works immediately instead of waiting
+      // for the first canvas autosave).
+      (async () => {
+        const prefix = baseType === 'upload' ? 'upload' : 'silhouette';
+        if (!isPsdFile(file)) {
+          const url = await uploadDesignImage(file, productData.id, prefix);
+          return supabase.from('design_versions').insert([{
+            product_id: productData.id, image_url: url, label: 'Initial design', source: baseType,
+          }]);
+        }
+
+        const psdUrl = await uploadDesignImage(file, productData.id, prefix);
+        let previewUrl = null;
+        try {
+          const png = await psdToPngBlob(file);
+          if (png) previewUrl = await uploadDesignImage(png, productData.id, `${prefix}-preview`);
+        } catch (err) {
+          // A PSD we can't composite (unusual colour mode, corrupt file) still
+          // uploads and opens — it just falls back to the placeholder icon.
+          console.error('Could not build a preview from that PSD:', err);
+        }
+        return supabase.from('design_versions').insert([{
           product_id: productData.id,
-          image_url: url,
-          ...(isLayered ? { psd_url: url } : {}),
+          image_url: previewUrl || psdUrl,
+          psd_url: psdUrl,
           label: 'Initial design',
           source: baseType,
-        }]))
-        .catch(err => console.error('Failed to persist initial design image', err));
+        }]);
+      })().catch(err => console.error('Failed to persist initial design image', err));
     }
 
     setProducts(prev => [productData, ...prev]);
