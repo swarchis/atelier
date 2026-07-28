@@ -12,6 +12,28 @@
 
 ---
 
+## Status at a glance
+
+*Last updated 2026-07-28, after the first round of fixes.*
+
+| # | Sev | Finding | Status |
+|---|---|---|---|
+| 1 | **Critical** | AI credit RPCs callable by any user | ✅ **Fixed & verified in production** |
+| 4 | Medium | Chat participants — no brand check on insert | ✅ **Fixed & verified in production** |
+| 3 | Medium | `send-vendor-email` open relay | 🟡 **Code fixed — awaiting deploy + test** |
+| 2 | **High** | `plan_tier` / Stripe columns client-writable | 🔴 **Open** — needs billing rework (decision A) |
+| 5 | Medium | CORS fails open | 🔴 **Open** — config check only (decision E) |
+| 6 | Low | OAuth handoff code in URL | 🔴 Open — accepted risk, well-mitigated |
+| 7 | Low | Blind SSRF in `isLikelyAlive()` | 🔴 Open — not currently reachable |
+| 8 | Low | Photopea `postMessage(…, '*')` | 🔴 Open — not currently reachable |
+| 9 | Low | Public storage buckets, flat paths | 🔴 Open — unverifiable from repo (decision B) |
+
+**Highest remaining risk: Finding 2.** It is the only open item an attacker can act on today without needing information they shouldn't have.
+
+Decision item C (`delete_user`) is **resolved — no vulnerability**; see below.
+
+---
+
 ## Findings
 
 | # | Sev | File / line | What an attacker can actually do | Confidence |
@@ -257,8 +279,18 @@ select policyname, cmd, qual, with_check from pg_policies
 
 Also worth confirming the MIME allowlist on `mockups` permits `image/vnd.adobe.photoshop` — per `CLAUDE.md`, restricting it silently flattens every PSD save.
 
-**C. `delete_user` RPC exists but is not in the repo.**
-`Settings.jsx:291` calls `supabase.rpc('delete_user')`, and no migration defines it — it was created in the dashboard. An account-deletion function is almost certainly `SECURITY DEFINER`, which makes it exactly the shape as Finding 1. If it takes any parameter, or deletes by anything other than `auth.uid()`, it is a critical account-deletion primitive. Send me `select prosrc from pg_proc where proname = 'delete_user';` and I will review it. Separately, it should be committed as a migration so it is auditable.
+**C. `delete_user` RPC exists but is not in the repo. — ✅ RESOLVED, no vulnerability.**
+`Settings.jsx:291` calls `supabase.rpc('delete_user')`, and no migration defined it — it was created in the dashboard. Reviewed via `prosrc` on 2026-07-28:
+
+```sql
+DELETE FROM auth.users WHERE id = auth.uid();
+```
+
+Safe. It takes no arguments, so there is nothing to steer; the delete is scoped to `auth.uid()`, so it cannot reach another account. Called unauthenticated, `auth.uid()` is `NULL` and `id = NULL` matches zero rows — no mass-delete path. `SECURITY DEFINER` is required here (the `authenticated` role cannot write `auth.users`), and every identifier in the body is schema-qualified, so the absent `set search_path` cannot be used to shadow anything.
+
+Now captured in `supabase/migrations/034_delete_user.sql` so it is auditable and survives a project rebuild. That file is a reconstruction from `prosrc` — confirm it matches with `select pg_get_functiondef(oid) from pg_proc where proname = 'delete_user';` before treating it as the source of truth.
+
+**Not a security issue, but worth knowing before beta:** because the schema cascades, an *owner* deleting their account instantly wipes the whole brand — every teammate's products, designs, and tech packs. That is a product decision, not a flaw, but it is a sharp edge to have live with real users on it.
 
 **D. `sales_data` has no write policy — this may already be breaking a feature.**
 RLS is enabled on `sales_data`, but the only policy that exists anywhere is `FOR SELECT`. Meanwhile `SalesDashboard.jsx:179` calls `.upsert()` and `SalesContext.jsx:81` calls `.delete()`. With RLS on and no matching policy, Postgres denies both. This fails **closed**, so it is not a vulnerability — but if store sync currently works in production, a policy was added via the dashboard that is not in the repo, and I could not audit it. Tell me which it is: broken feature, or undocumented policy.
@@ -319,17 +351,45 @@ Caught during the edit: my first pass added `brandId: activeBrand?.id` to the fe
 - Escape ordering unit-checked against the real `escapeHtml`: `"Line2 & co <b>bold</b>\n<a href=...>"` → `"Line2 &amp; co &lt;b&gt;bold&lt;/b&gt;<br/>&lt;a href=&quot;...&quot;&gt;"`. Line breaks preserved, injected link inert.
 - `npx vite build` — succeeds in 12.58s, no new warnings.
 
-### Not verified — please confirm after deploying
+### Deployment status
 
-**The two migrations have not been run against a Postgres.** There is no Docker on this machine, so `supabase db start` could not bring up a local database, and I will not run migrations against your production project. The SQL was checked by hand: all four function signatures match their `028` definitions exactly `(uuid, integer, text)` ×3 and `(uuid, integer, timestamptz)`, and the dropped policy name matches `016` exactly. That is a careful read, not an execution.
+**Migration 032 — applied to production 2026-07-28. Verified.** Applied by hand via the Supabase SQL editor rather than `supabase db push`: the CLI has never been linked (no `config.toml`, no `.temp/`), so the remote `schema_migrations` table has no record of 002–031 and a push would have tried to replay all 33 migrations against a database that already has them — several (`INITIAL_SCHEMA:164/181/207`, `002`, `016`) `create policy` with no preceding drop and would have errored partway through.
 
-After applying them:
+Confirmed working: AI features continued to function immediately after the revoke, which is the specific thing that would have broken had the `service_role` re-grant been wrong.
 
-1. Re-run the privilege query from Finding 1 — all four columns should now read `false`.
-2. Confirm an AI action still works end to end (generate a silhouette, say) and that the credit balance decrements. This is the one thing that would break if the `service_role` re-grant were wrong.
-3. Create a group chat and add a teammate, to confirm the participant policy admits legitimate members.
-4. Send an RFQ from Quote Tracker to a vendor with an email on file, and confirm it arrives and renders with correct line breaks.
+**Migration 033 — applied to production 2026-07-28. Verified.** Run inside an explicit `begin; … commit;` so the drop could not land without the create. Confirmed via `pg_policies`: `chat_participants` has 4 policies, and the `INSERT` row's `with_check` now contains the `brands` / `brand_members` subqueries rather than the bare `is_chat_member(chat_id)`.
 
-None of the above was exercised against a signed-in session — I have no way to reach one from here, so nothing in this section should be read as tested end to end.
+No functional test was performed for 033, and none is meaningful yet: group-chat creation goes through `create_group_chat`, a `SECURITY DEFINER` RPC that bypasses RLS entirely, and the only direct-insert path (`ChatContext.addParticipant`) has no UI caller. The policy currently guards a route the app does not exercise — the `pg_policies` output is the real proof here.
 
-**Findings 2, 5, 6, 7, 8, 9 remain open**, along with decision items B (storage bucket policies), C (`delete_user`), D (`sales_data` write policies), and E (`ALLOWED_ORIGINS`). Item C is the one I would still chase before launch — an undocumented `SECURITY DEFINER` account-deletion function is the same shape as the Critical finding just fixed.
+**Fix 3 (`send-vendor-email`) — code complete, NOT yet deployed.** It spans backend and frontend, so both must ship together: an old bundle won't send `brandId` and will start getting 403s. After deploying, send one RFQ from Quote Tracker to a vendor with an email on file and confirm it arrives with correct line breaks.
+
+Nothing in this audit was exercised against a signed-in session — I have no way to reach one from here.
+
+---
+
+## Remaining vulnerabilities
+
+In the order I would deal with them.
+
+**1. Finding 2 — `plan_tier` and Stripe columns are client-writable. (High, open)**
+The only open finding that is directly actionable by an attacker today. Three separate consequences: free Premium via a one-line update; recurring free credits by copying a paying customer's `stripe_customer_id` (the `invoice.paid` handler grants to *every* brand matching that ID); and access to another customer's Stripe billing portal. Fix requires moving the plan write out of `BillingTab.jsx` and into `/api/confirm-checkout` — a real change to the billing flow, deliberately not bundled with the quick fixes. See decision A.
+
+Partially mitigated already: server-side AI spend gates on the credit balance, not on `plan_tier`, and credits can no longer be minted directly since 032. So the expensive half of this is closed.
+
+**2. Finding 5 — CORS fails open. (Medium, config)**
+`ALLOWED_ORIGINS` unset means every origin is allowed, with `credentials: true`. Narrower than it looks — auth is a `Bearer` token from `localStorage`, not cookies, so no ambient session to ride — but it should not be the launch default. **Unresolved: confirm the Railway value.** Closes with no code change if it is set.
+
+**3. Decision B — storage bucket policies. (unverified)**
+Still the largest blind spot in this audit. No `storage.objects` policy exists anywhere in the repo; it is all dashboard state. Buckets are public (`getPublicUrl`), paths are flat with no per-brand prefix, and every upload uses `upsert: true`. The open questions are whether one brand can overwrite or delete another's files. Queries are in decision B above.
+
+**4. Decision D — `sales_data` has no write policy.**
+RLS is on with only a `SELECT` policy, while the frontend calls `.upsert()` and `.delete()`. Fails **closed**, so not a vulnerability — but either store sync is broken, or an undocumented dashboard policy exists that I could not audit. Worth settling either way.
+
+**5. Findings 6–9. (Low, accepted)**
+None currently reachable, and I would not block launch on any of them:
+- **6** OAuth handoff code in the URL — 160 bits of entropy, single-use, 2-minute TTL.
+- **7** Blind SSRF in `isLikelyAlive()` — no response body returned; would require poisoning a search result.
+- **8** Photopea `postMessage(…, '*')` — incoming messages are already source-gated; the outbound wildcard only matters if the iframe were navigated off-origin.
+- **9** Public buckets with UUID paths — obscurity, not access control. Anything uploaded is world-readable to anyone holding the URL, permanently. Worth revisiting if unreleased designs become sensitive.
+
+**Also outstanding (not security):** the `react-router` advisories remain unpatched by choice — neither is reachable here (no SSR, no user-controlled navigation targets), and the brief ruled out upgrades for cleanliness. Worth doing on its own schedule.
