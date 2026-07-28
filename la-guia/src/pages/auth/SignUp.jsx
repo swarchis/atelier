@@ -34,6 +34,18 @@ const handleSubmit = async (e) => {
     setError('');
     try {
       const data = await signUp(form.email, form.password, form.brandName || 'Workspace');
+
+      // Supabase deliberately does NOT return an error when the email is already
+      // registered — that would let anyone probe which addresses have accounts.
+      // Instead it returns a decoy user with an empty `identities` array. Reading
+      // that is the documented way to detect a duplicate. Note this does surface
+      // the fact that an account exists, which is the trade-off for the clearer
+      // message; the same signal is not exposed anywhere else in the app.
+      if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        setError('An account with this email already exists. Sign in instead, or reset your password.');
+        return;
+      }
+
       if (data?.user && !data?.session) {
         setEmailSent(true); // Shows the "Check your email" banner
       } else {
@@ -45,22 +57,6 @@ const handleSubmit = async (e) => {
       setLoading(false);
     }
   };
-
-  {emailSent ? (
-        <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border-2)', padding: '20px', borderRadius: 'var(--r-sm)', textAlign: 'center', marginBottom: 20 }}>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--ink-1)' }}>✉️ Check your email</div>
-          <div style={{ fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5, marginBottom: 16 }}>
-            We've sent a verification link to <strong>{form.email}</strong>. Please confirm your email address to activate your account and log in.
-          </div>
-          <button type="button" className="btn btn-primary" onClick={() => navigate('/login')} style={{ width: '100%', justifyContent: 'center' }}>
-            Go to Sign In
-          </button>
-        </div>
-      ) : (
-        <>
-          {/* Keep your existing Google Button, Divider, and Form here */}
-        </>
-      )}
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
@@ -82,6 +78,25 @@ const handleSubmit = async (e) => {
     >
       {error && <div style={{ background: 'var(--red-bg)', color: 'var(--red)', padding: '10px 14px', borderRadius: 'var(--r-sm)', marginBottom: 16, fontSize: 13, border: '1px solid var(--red-border)' }}>{error}</div>}
 
+      {/* After a successful signup the account exists but is unconfirmed, so the
+          form is replaced by this panel rather than shown alongside it — leaving
+          the form up invited a second submit, which just trips Supabase's
+          57-second resend throttle and looks like a failure. */}
+      {emailSent ? (
+        <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border-2)', padding: '20px', borderRadius: 'var(--r-sm)', textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--ink-1)' }}>✉️ Check your email</div>
+          <div style={{ fontSize: 13, color: 'var(--red)', fontWeight: 600, lineHeight: 1.5, marginBottom: 8 }}>
+            You must confirm your email before you can sign in.
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5, marginBottom: 16 }}>
+            We've sent a verification link to <strong>{form.email}</strong>. Open it to activate your account. If it hasn't arrived in a minute or two, check your spam folder.
+          </div>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/login')} style={{ width: '100%', justifyContent: 'center' }}>
+            Go to Sign In
+          </button>
+        </div>
+      ) : (
+        <>
       <button
         type="button"
         className="btn"
@@ -139,6 +154,8 @@ const handleSubmit = async (e) => {
         <div className="form-hint" style={{ textAlign: 'center', marginTop: 10 }}>
           Once your account exists, you'll land in the shared workspace automatically.
         </div>
+      )}
+        </>
       )}
     </AuthLayout>
   );

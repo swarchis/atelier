@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { supabase } from '../../lib/supabase.js';
 import { base64ToBlob, uploadDesignImage } from '../../lib/designImages.js';
 import { aiPost } from '../../lib/aiApi.js';
 import { useAIUsage } from '../../context/AIUsageContext.jsx';
