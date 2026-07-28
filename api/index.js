@@ -288,6 +288,50 @@ function safeStoreUrl(rawUrl) {
   return `https://${parsed.host}${parsed.pathname.replace(/\/+$/, '')}`;
 }
 
+// Validates a URL we are about to fetch WITHOUT rewriting it — same https-only
+// and no-private-host rules as safeStoreUrl, but path and query are preserved,
+// which is what a redirect target needs.
+function assertSafeUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('That store redirected somewhere this server cannot parse.');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error('That store redirected to a non-HTTPS address, which this server will not follow.');
+  }
+  if (BLOCKED_HOST_PATTERNS.some((re) => re.test(parsed.hostname))) {
+    throw new Error('That store redirected to a private or local address, which this server will not follow.');
+  }
+  return parsed.toString();
+}
+
+// Follows redirects by hand, re-checking every hop.
+//
+// safeStoreUrl only ever vetted the FIRST url. Node's fetch defaults to
+// redirect:'follow', so a host that passed the check — any public https site the
+// caller controls — could answer with a 302 to 169.254.169.254 or 127.0.0.1 and
+// the request would go there anyway. The WooCommerce handlers return the
+// upstream body verbatim, so that turned a checked hostname into a full read of
+// whatever the redirect pointed at, not merely a blind probe.
+//
+// Validating the entry point is not enough once something else chooses the next
+// one. Cap the chain too: a redirect loop would otherwise hang the request.
+const MAX_REDIRECT_HOPS = 3;
+async function safeFetchFollow(initialUrl, options = {}) {
+  let url = initialUrl;
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+    const response = await fetch(url, { ...options, redirect: 'manual' });
+    if (response.status < 300 || response.status > 399) return response;
+    const location = response.headers.get('location');
+    if (!location) return response; // 3xx with no target — nothing to follow.
+    // Relative Locations ("/wp-json/...") resolve against the current url.
+    url = assertSafeUrl(new URL(location, url).toString());
+  }
+  throw new Error('That store URL redirected too many times.');
+}
+
 // Shopify's admin API only ever lives on <store>.myshopify.com. Pinning to it
 // keeps `shop` from being used to point a server-side fetch (or the OAuth
 // redirect) anywhere else.
@@ -727,18 +771,28 @@ Do not invent details not supported by the text. Return a JSON object with exact
     const parsed = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64 || null);
 
     const PARKING_SIGNALS = ['buy this domain', 'domain is for sale', 'this domain may be for sale', 'domain for sale', 'sedo.com', 'hugedomains', 'afternic', 'dan.com', 'godaddy.com/domainsearch', 'the lease to own', 'inquire about this domain'];
+    // These urls come from Tavily results as filtered by Gemini — web text, so
+    // untrusted, even though no user types them directly. Two guards: refuse
+    // private/loopback/metadata hosts outright, and do not follow redirects,
+    // since a public host answering 302 -> 169.254.169.254 would otherwise walk
+    // this straight into the internal network. http is still allowed here (real
+    // vendor sites are often plain http) — only the destination is constrained.
+    // Any throw falls through to `return true`, i.e. "assume alive, keep the
+    // result", which is the existing lenient behaviour on failure.
     async function isLikelyAlive(url) {
       if (!url) return true;
       try {
+        const host = new URL(url).hostname;
+        if (BLOCKED_HOST_PATTERNS.some((re) => re.test(host))) return true;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
-        const r = await fetch(url, { signal: controller.signal, redirect: 'follow' });
+        const r = await fetch(url, { signal: controller.signal, redirect: 'manual' });
         clearTimeout(timeout);
-        if (!r.ok) return true; 
+        if (!r.ok) return true;
         const text = (await r.text()).toLowerCase().slice(0, 5000);
         return !PARKING_SIGNALS.some(s => text.includes(s));
       } catch {
-        return true; 
+        return true;
       }
     }
     async function filterAlive(list) {
@@ -1398,7 +1452,7 @@ app.post('/api/woocommerce/validate', requireAuth, async (req, res) => {
   if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
   try {
     const base = normalizeStoreUrl(storeUrl);
-    const response = await fetch(`${base}/wp-json/wc/v3/system_status`, {
+    const response = await safeFetchFollow(`${base}/wp-json/wc/v3/system_status`, {
       headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret) }
     });
     if (!response.ok) {
@@ -1420,7 +1474,7 @@ app.post('/api/woocommerce/fetch-orders', requireAuth, async (req, res) => {
   if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
   try {
     const base = normalizeStoreUrl(storeUrl);
-    const response = await fetch(`${base}/wp-json/wc/v3/orders?per_page=100&status=any`, {
+    const response = await safeFetchFollow(`${base}/wp-json/wc/v3/orders?per_page=100&status=any`, {
       headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret) }
     });
     const data = await response.json();
@@ -1436,7 +1490,7 @@ app.post('/api/woocommerce/fetch-inventory', requireAuth, async (req, res) => {
   if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
   try {
     const base = normalizeStoreUrl(storeUrl);
-    const response = await fetch(`${base}/wp-json/wc/v3/products?per_page=100`, {
+    const response = await safeFetchFollow(`${base}/wp-json/wc/v3/products?per_page=100`, {
       headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret) }
     });
     const data = await response.json();
@@ -1456,7 +1510,7 @@ app.post('/api/woocommerce/publish-product', requireAuth, async (req, res) => {
   if (!storeUrl || !consumerKey || !consumerSecret || !name || !price) return res.status(400).json({ ok: false, error: 'Missing required fields' });
   try {
     const base = normalizeStoreUrl(storeUrl);
-    const response = await fetch(`${base}/wp-json/wc/v3/products`, {
+    const response = await safeFetchFollow(`${base}/wp-json/wc/v3/products`, {
       method: 'POST',
       headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret), 'Content-Type': 'application/json' },
       body: JSON.stringify({

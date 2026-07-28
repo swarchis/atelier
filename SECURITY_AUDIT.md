@@ -8,13 +8,15 @@
 - **CONFIRMED** — I traced the actual code path end to end in this repo.
 - **SUSPECTED** — depends on deployed configuration (Supabase dashboard, Railway env) that is not in the repo and that I cannot read from here. Each one includes a query or command you can run to settle it.
 
-**Bottom line:** one Critical and one High finding, both in the billing/credits path, both reachable by anyone who can sign up. Everything else is Medium or below. The parts of this codebase that were hardened previously (SSRF helpers, OAuth state signing, email auth, AI metering) held up under a second read. The gaps are in the database layer, which that earlier pass did not reach.
+**Bottom line (original pass):** one Critical and one High finding, both in the billing/credits path, both reachable by anyone who can sign up. Everything else Medium or below. The parts hardened previously (SSRF helpers, OAuth state signing, email auth, AI metering) held up under a second read. The gaps were in the database layer, which that earlier pass did not reach.
+
+**Bottom line (current, after three rounds):** thirteen findings, all Critical/High/Medium ones fixed and verified against production. Two of the most serious were only findable with direct database access — the credit RPCs and the signup outage — which is the main lesson from this engagement: reading migrations tells you what *should* be true, and only querying the database tells you what *is*. Twice the repo and the live schema disagreed (`sales_data`'s SELECT policy, and migration 044's silent no-op), and both times the database was right.
 
 ---
 
 ## Status at a glance
 
-*Last updated 2026-07-28, after the first round of fixes.*
+*Last updated 2026-07-28, after three rounds of fixes. Every status below was verified against the production database, not inferred from the repo.*
 
 | # | Sev | Finding | Status |
 |---|---|---|---|
@@ -22,17 +24,21 @@
 | 9 | **High** | Storage: anonymous enumeration + cross-tenant overwrite of `mockups` | ✅ **Fixed & verified in production** (phase 1) |
 | 1 | **Critical** | AI credit RPCs callable by any user | ✅ **Fixed & verified in production** |
 | 4 | Medium | Chat participants — no brand check on insert | ✅ **Fixed & verified in production** |
-| 3 | Medium | `send-vendor-email` open relay | 🟡 **Code fixed — awaiting deploy + test** |
-| 2 | **High** | `plan_tier` / Stripe columns client-writable | 🔴 **Open** — needs billing rework (decision A) |
+| 3 | Medium | `send-vendor-email` open relay | ✅ **Fixed & deployed** — one live RFQ send still untested |
+| 2 | **High** | `plan_tier` / Stripe columns client-writable | ✅ **Fixed & verified in production** |
+| 11 | Medium | Invite claimed before email confirmation | ✅ **Fixed & verified in production** |
+| 12 | Low | `content_media` listable by any signed-in user | ✅ **Fixed & verified in production** |
+| 13 | Low | `sales_data` writes denied (feature inert, failed closed) | ✅ **Fixed & verified in production** |
 | 5 | Medium | CORS fails open | ✅ **Not an issue** — already configured correctly in production |
 | 6 | Low | OAuth handoff code in URL | 🔴 Open — accepted risk, well-mitigated |
 | 7 | Low | Blind SSRF in `isLikelyAlive()` | 🔴 Open — not currently reachable |
 | 8 | Low | Photopea `postMessage(…, '*')` | 🔴 Open — not currently reachable |
-| 9 | Low | Public storage buckets, flat paths | 🔴 Open — unverifiable from repo (decision B) |
+| 9b | Medium | Storage phase 2 — flat paths, so `.remove()` silently no-ops and deleted files stay public | 🟡 **Deferred by decision** — policy/trust gap, not an attack path |
+| — | — | Autosave churn: 2312 MB of orphans, ~117 MB/day | 🟡 **Deferred** — operational cost, not security |
 
-**Highest remaining risk: Finding 2.** It is the only open item an attacker can act on today without needing information they shouldn't have.
+**No open finding is exploitable today.** Every Critical, High and Medium item is fixed and verified against production. What remains is Findings 6–8 (Low, none currently reachable) and the deferred second half of Finding 9 — public buckets with flat paths, which means deletion still silently no-ops. That is a stated-policy gap rather than an attack path; see "Remaining work" below.
 
-Decision item C (`delete_user`) is **resolved — no vulnerability**; see below.
+Decision items A, C, D and E are all **resolved**; see below.
 
 ---
 
@@ -265,7 +271,7 @@ The practical exposure is narrower than it looks: your API authenticates with a 
 
 Each of these either changes behavior or needs information I cannot obtain from the repo. **Nothing here has been changed.**
 
-**A. Fix for Finding 2 changes the billing flow.**
+**A. Fix for Finding 2 changes the billing flow. — ✅ RESOLVED.** Done as described, and verified in production; see "Round 3" below. The write moved into `/api/confirm-checkout` and `/api/subscription-status`, `BillingTab` reads instead of writes, the dev override was removed, and migration 045 revoked the client's grant on the three columns.
 The clean fix is `REVOKE UPDATE (plan_tier, stripe_customer_id, stripe_subscription_id) ON public.brands FROM authenticated, anon;`. That breaks `BillingTab.jsx` at lines 39, 79, 82, and 108, which write those columns from the client today. To keep the feature working, the write has to move server-side: `/api/confirm-checkout` already verifies the session with Stripe and checks brand access, so it can persist the plan with the service-role client and return it, and the reconciliation at lines 79/82 can move into `/api/subscription-status` the same way. The dev-only override at line 108 (`import.meta.env.DEV`-gated) would need a local-only path or removal.
 
 This is a two-file change with a real behavior surface. I did not touch it. **Tell me whether to do the full server-side move, or to hold.** Note that Finding 1 is independently fixable and does not depend on this.
@@ -294,14 +300,18 @@ Now captured in `supabase/migrations/034_delete_user.sql` so it is auditable and
 
 **Not a security issue, but worth knowing before beta:** because the schema cascades, an *owner* deleting their account instantly wipes the whole brand — every teammate's products, designs, and tech packs. That is a product decision, not a flaw, but it is a sharp edge to have live with real users on it.
 
-**D. `sales_data` has no write policy — this may already be breaking a feature.**
+**D. `sales_data` has no write policy. — ✅ RESOLVED.** Confirmed inert rather than broken-in-use: `sales_data`, `store_connections` and `platform_listings` are all empty, and the e-commerce integrations have never been switched on (no API keys, no platform verification). Write policies added in `042`, and the pre-existing owner-only SELECT — which was `009`'s version, not the member-inclusive one in `INITIAL_SCHEMA` — aligned to `has_brand_access` in `043` so team members can read what they can now write.
+
+**D (original wording).**
 RLS is enabled on `sales_data`, but the only policy that exists anywhere is `FOR SELECT`. Meanwhile `SalesDashboard.jsx:179` calls `.upsert()` and `SalesContext.jsx:81` calls `.delete()`. With RLS on and no matching policy, Postgres denies both. This fails **closed**, so it is not a vulnerability — but if store sync currently works in production, a policy was added via the dashboard that is not in the repo, and I could not audit it. Tell me which it is: broken feature, or undocumented policy.
 
-**E. Confirm `ALLOWED_ORIGINS` is set on Railway** (Finding 5). If it is, that finding closes with no code change. If you would rather the code refuse to start with permissive CORS when `NODE_ENV=production`, that is a small, safe change — say the word.
+**E. Confirm `ALLOWED_ORIGINS` is set on Railway. — ✅ RESOLVED, no change needed.** Verified against production: a preflight from `https://evil.com` returns no `access-control-allow-origin` header, one from `https://atelierlabs.app` returns it correctly. `APP_URL` was confirmed at the same time. Original note follows.
+
+**E (original wording).** If it is, that finding closes with no code change. If you would rather the code refuse to start with permissive CORS when `NODE_ENV=production`, that is a small, safe change — say the word.
 
 ---
 
-## What I would fix first
+## What I would fix first (historical — this plan was carried out in full; see "Remaining work")
 
 If you want a minimum set before beta users arrive, in order:
 
@@ -419,7 +429,70 @@ Phase 1 fixed in `039_storage_stop_enumeration_and_overwrite.sql`, dropping `Pub
 
 ---
 
-## Remaining vulnerabilities
+## Round 3 — Finding 2 closed, and a migration that lied (2026-07-28)
+
+**Finding 2 is fixed and verified.** The plan write moved server-side: `/api/confirm-checkout` now persists `plan_tier`, `stripe_customer_id` and `stripe_subscription_id` itself after verifying the session with Stripe (and refuses a checkout whose metadata names a plan with no matching price), and `/api/subscription-status` reconciles the tier the same way. `BillingTab.jsx` no longer writes any of them — a new `refreshActiveBrand()` in `ProductsContext` re-reads the row instead. The DEV-only "Force plan" button was removed; it was the last client-side writer, and local dev shares this database so there was no environment where it could have kept working.
+
+Verified end to end before the lockdown: a real live-mode upgrade wrote all three columns, `invoice.paid` granted exactly 1200 credits (matching `basic` in both `api/config/aiCredits.js` and `plans.js`), and `checkout.session.completed` added a 300-credit top-up with its `cs_live_…` dedup ref.
+
+**Migration 044 was a silent no-op, and that is worth recording.** It used
+`revoke update (plan_tier, …) on public.brands from authenticated, anon`. In PostgreSQL a column-level `REVOKE` cannot subtract from a table-level grant — `brands` carried a table-wide `UPDATE` (`pg_class.relacl` showed `authenticated=arwdDxtm`, where `w` covers every column), so the statement was accepted, reported success, and changed nothing. It was only caught because the fix was verified rather than assumed: `has_column_privilege('authenticated','public.brands','plan_tier','UPDATE')` still returned `true` afterwards.
+
+`045` does it correctly — revoke the table-wide `UPDATE`, then grant back exactly the nine columns the client legitimately writes (the eight on the Settings brand form, plus `owner_display_name` from `TeamContext`). Confirmed after applying: the three billing columns and `user_id` are all `false` for `authenticated` and `anon`; all nine app-written columns and `service_role` are `true`; reads are unaffected.
+
+Note for future work: adding a new user-editable brand field now requires adding it to that `grant update (...)` list, or the save fails with a permission error rather than an RLS error.
+
+**Two brands (`Setup Check Studio`, `Swiz brand`) sit at `plan_tier = 'premium'` with no Stripe customer or subscription** — leftovers from the removed dev override, deliberately kept as test accounts. Not a security issue (an owner setting their own tier via SQL is admin action, and the path that let *anyone* do it is closed), but they hold real seeded credits that spend real API money, and their `cycle_reset_at` will never fire because no subscription exists to trigger `invoice.paid`.
+
+---
+
+## Round 4 — a regression this audit caused, and the sweep that followed (2026-07-28)
+
+**Migration 039 broke all image uploads for about three hours.** Worth recording in full, because the mistake is more instructive than the fix.
+
+039 dropped both the SELECT and UPDATE policies on `mockups`, leaving only INSERT. Every upload in the app passes `upsert: true`, which compiles to `INSERT ... ON CONFLICT DO UPDATE` — and PostgreSQL requires the SELECT and UPDATE policies for that statement **whether or not a conflict actually occurs**. The check belongs to the plan, not to the runtime outcome.
+
+039's own comment argued the opposite, and confidently: *"an upload whose key already exists can no longer overwrite and will fail instead. Every upload path stamps Date.now() into the filename behind a UUID prefix, so a collision requires two writes for the same product in the same millisecond."* True about collisions, irrelevant to the requirement. Every save failed with `new row violates row-level security policy`, from `19:29` until it was reported and fixed.
+
+Cost: one `design-ai-image` generation at `22:16:27` was charged 15 credits and then lost the image. The metered auto-refund did not catch it, because that fires on an API response ≥400 — here the API returned 200 and the failure happened client-side afterwards. Any design saves attempted in that window did not persist.
+
+**The fix (046) is stricter than what 039 removed, not a rollback.** Both policies are re-added scoped to `owner = auth.uid()` rather than to `bucket_id`:
+- upsert works — a user can see and update their own object, which is all `ON CONFLICT` needs;
+- enumeration stays closed — a list returns only the caller's own files, and `anon` has no `auth.uid()` at all;
+- cross-tenant overwrite stays closed — you cannot update a row you do not own, so knowing another brand's filename buys nothing.
+
+`storage.objects.owner` is set at insert time and was already populated on all 732 rows across 3 owners, so this was a live column rather than an assumption.
+
+**The sweep found a second instance of the same bug before it was reported.** `ContentHub.jsx:111-113` uploads to `content_media` with `upsert: true`, and 040 had dropped that bucket's SELECT policy — so Content Hub media uploads had been failing silently too, unnoticed only because the feature had not been used since. Fixed in 047, which also narrowed that bucket's still-bucket-wide UPDATE and DELETE to owner scope; they were the same shape as the mockups policy that had allowed cross-tenant overwrite, and nothing in the app calls `.remove()` on `content_media`.
+
+The sweep covered every write path against the policies changed this session and found nothing else: `brands` writes touch only the nine granted columns, `updateBrand`'s trailing `.select()` is unaffected (UPDATE was revoked, SELECT was not), and no client RPC call targets a revoked function. Five user-facing paths were then exercised by hand — Settings save, Content Hub upload, RFQ send, variant delete, duplicate-email signup — and all pass.
+
+**Lessons, stated plainly:**
+1. `ON CONFLICT DO UPDATE` needs SELECT and UPDATE policies at plan time. Dropping a policy that "nothing uses" is only safe once you know what the *database* needs, not just what the application calls.
+2. A single upload attempt would have caught this in seconds. Every other fix in this audit was verified against production before being called done; this one was reasoned about instead, and it is the only one that broke.
+3. When one instance of a mistake is found, sweep for the rest immediately. The `content_media` case was already broken and would have surfaced as a second incident days later.
+
+---
+
+## Remaining work
+
+Nothing below is exploitable today. Ordered by when it will actually matter.
+
+**1. Autosave churn — operational, not security, and the most time-sensitive item here.**
+`DesignDetail.jsx:232-241` updates a single rolling `design_versions` row and never removes the files it supersedes. Measured against production: 2344 MB total in `mockups`, of which **2312 MB (98.6%) is superseded autosave churn**, growing at ~117 MB/day from three active users — roughly 39 MB/user/day. At thirty beta users that is ~1.2 GB/day, ~35 GB/month. This does not require the phase 2 namespacing: a cleanup job on the backend using the service-role key bypasses RLS entirely and can delete superseded files against the current flat paths.
+
+**2. Storage phase 2 — per-brand paths and working deletion.**
+Upload paths are flat (`{productId}-ai-{ts}.png`) with no folder component, so no policy can scope by tenant. Until that changes there can be no safe DELETE policy, which is why `.remove()` deletes nothing today — and an RLS-blocked delete returns `{data: [], error: null}`, so it fails silently. Consequences: deleted designs stay publicly readable at their URLs forever, and `PrivacyPolicy.jsx:139-140`'s commitment to delete content within 30 days cannot currently be honoured. Phase 1 already removed the anonymous-enumeration and cross-tenant-overwrite paths, so what is left is a policy/trust gap rather than an attack.
+
+**3. Findings 6, 7, 8 — Low, none currently reachable.** Unchanged from the original assessment.
+
+**4. Untested:** one live RFQ send through Quote Tracker, to confirm the `send-vendor-email` fix works in practice.
+
+**5. Deliberately declined:** Supabase leaked-password protection (user decision), `react-router` advisories (neither reachable — no SSR, no user-controlled navigation targets), `set search_path` on the remaining eight functions (hardening; all are schema-qualified internally).
+
+---
+
+## Original remaining-vulnerabilities list (superseded by the section above)
 
 In the order I would deal with them.
 
