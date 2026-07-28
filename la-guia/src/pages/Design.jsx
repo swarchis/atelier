@@ -12,7 +12,7 @@ import { useDragAndDrop } from '../lib/useDragAndDrop.js';
 import BulkActionBar from '../components/BulkActionBar.jsx';
 import { ContextMenuTarget } from '../components/ContextMenu.jsx';
 import { SkeletonCard } from '../components/Skeleton.jsx';
-import { base64ToBlob } from '../lib/designImages.js';
+import { base64ToBlob, isRenderableImageUrl } from '../lib/designImages.js';
 import { aiPost } from '../lib/aiApi.js';
 import { toast } from '../lib/toast.js';
 
@@ -44,6 +44,23 @@ const VIEWS = [
   { key: 'kanban', label: 'Kanban', icon: 'ph-kanban' },
   { key: 'table', label: 'Table', icon: 'ph-table' },
 ];
+
+// A design thumbnail that falls back to the garment icon when the stored
+// image can't actually be painted. Extension checks can't catch everything:
+// designs created before uploads used real content types have PSD bytes
+// sitting behind a .png URL, and only a load error reveals that.
+function DesignThumb({ url, name, fallback }) {
+  const [failed, setFailed] = useState(false);
+  if (!url || failed || !isRenderableImageUrl(url)) return fallback;
+  return (
+    <img
+      src={url}
+      alt={name}
+      onError={() => setFailed(true)}
+      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+    />
+  );
+}
 
 export default function Design() {
   const navigate = useNavigate();
@@ -306,7 +323,7 @@ const startFromUpload = async (e) => {
               >
                 <i className="ph ph-upload-simple" style={{ fontSize: 22, marginBottom: 8, display: 'block', color: 'var(--c-design)' }} />
                 Upload your own mockup, sketch, or reference photo
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={startFromUpload} />
+                <input ref={fileRef} type="file" accept="image/*,.psd,.psb" style={{ display: 'none' }} onChange={startFromUpload} />
               </div>
 
               <div style={{ marginTop: 20, padding: '12px 14px', background: 'var(--bg-3)', borderRadius: 'var(--r-sm)' }}>
@@ -417,11 +434,13 @@ const startFromUpload = async (e) => {
                     </button>
                     <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center', marginTop: 6 }}>
                       <div style={{ width: 44, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-3)', borderRadius: 8, color: 'var(--ink-3)', flexShrink: 0, overflow: 'hidden' }}>
-                        {(d?.previewUrl || d?.imageUrl || p?.image_url)
-                          ? <img src={d?.previewUrl || d?.imageUrl || p?.image_url} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          : d?.baseType === 'ai-silhouette' && d?.aiPaths?.paths?.length
+                        <DesignThumb
+                          url={d?.previewUrl || d?.imageUrl || p?.image_url}
+                          name={p.name}
+                          fallback={d?.baseType === 'ai-silhouette' && d?.aiPaths?.paths?.length
                             ? <CustomSilhouette paths={d.aiPaths.paths} accents={d.aiPaths.accents} size={30} />
                             : <GarmentSilhouette type={d?.silhouette || 'tee'} size={30} />}
+                        />
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>

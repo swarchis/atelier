@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from './AuthContext.jsx';
-import { uploadDesignImage, PSD_VERSION_LABEL } from '../lib/designImages.js';
+import { uploadDesignImage, isRenderableImageUrl, PSD_VERSION_LABEL } from '../lib/designImages.js';
 import { setActiveBrandId, setBrandProfile } from '../lib/aiApi.js';
 
 const ProductsContext = createContext(null);
@@ -155,6 +155,10 @@ export function ProductsProvider({ children }) {
             .order('created_at', { ascending: false });
           (versionData || []).forEach(v => {
             if (v.label === PSD_VERSION_LABEL) return; // working file, not an image
+            // A design started from an uploaded PSD has no paintable preview
+            // until its first canvas save; showing the PSD URL in an <img>
+            // renders a broken-image icon, so fall through to the placeholder.
+            if (!isRenderableImageUrl(v.image_url)) return;
             const entry = designsMap[v.product_id];
             if (entry && !entry.previewUrl) entry.previewUrl = v.image_url; // rows arrive newest-first
           });
@@ -453,9 +457,19 @@ export function ProductsProvider({ children }) {
       // "save as version" happened, so a freshly created design (upload or
       // AI silhouette) had no real photo anywhere and Home's featured card
       // fell back to the honest placeholder for what could be a long time.
+      // An uploaded PSD is stored as the layered working file too, so opening
+      // the design restores its layers instead of a flattened copy. image_url
+      // is NOT NULL so it still points at the same object; preview surfaces
+      // skip non-paintable URLs and show the placeholder until the first
+      // canvas save produces a real thumbnail.
+      const isLayered = /photoshop|psd/i.test(file.type || '') || /\.psd$/i.test(file.name || '');
       uploadDesignImage(file, productData.id, baseType === 'upload' ? 'upload' : 'silhouette')
         .then(url => supabase.from('design_versions').insert([{
-          product_id: productData.id, image_url: url, label: 'Initial design', source: baseType,
+          product_id: productData.id,
+          image_url: url,
+          ...(isLayered ? { psd_url: url } : {}),
+          label: 'Initial design',
+          source: baseType,
         }]))
         .catch(err => console.error('Failed to persist initial design image', err));
     }

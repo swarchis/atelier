@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useAppUI } from '../context/AppUIContext.jsx';
 import { useSales } from '../context/SalesContext.jsx';
 import { supabase } from '../lib/supabase.js';
-import { PSD_VERSION_LABEL } from '../lib/designImages.js';
+import { PSD_VERSION_LABEL, isRenderableImageUrl } from '../lib/designImages.js';
 import { riskTagClass, readinessColor, currency, stageLink, swatchGradient, tiltForId, SECTION_COLOR } from '../lib/format.js';
 import { PinnedPhoto, PhotoPanel, WaxSeal, Thumbtack } from '../components/decor.jsx';
 import ContinueWhereYouLeftOff from '../components/dashboard/ContinueWhereYouLeftOff.jsx';
@@ -244,7 +244,10 @@ export default function Home() {
       if (tp?.image_url) { setFeaturedImage(tp.image_url); return; }
       const { data: versions } = await supabase.from('design_versions').select('image_url').eq('product_id', featured.id).neq('label', PSD_VERSION_LABEL).order('created_at', { ascending: false }).limit(1);
       if (cancelled) return;
-      setFeaturedImage(versions?.[0]?.image_url || null);
+      // An uploaded PSD isn't paintable in an <img>; show the placeholder
+      // rather than a broken image until a real thumbnail exists.
+      const versionUrl = versions?.[0]?.image_url;
+      setFeaturedImage(isRenderableImageUrl(versionUrl) ? versionUrl : null);
     }
     loadFeaturedImage();
     return () => { cancelled = true; };
