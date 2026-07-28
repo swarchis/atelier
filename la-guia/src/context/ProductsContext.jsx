@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from './AuthContext.jsx';
-import { uploadDesignImage, isRenderableImageUrl, isPsdFile, psdToPngBlob, PSD_VERSION_LABEL } from '../lib/designImages.js';
+import { uploadDesignImage, uploadDesignPsd, isRenderableImageUrl, isPsdFile, psdToPngBlob, PSD_VERSION_LABEL } from '../lib/designImages.js';
 import { setActiveBrandId, setBrandProfile } from '../lib/aiApi.js';
 
 const ProductsContext = createContext(null);
@@ -22,6 +22,8 @@ export function ProductsProvider({ children }) {
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [loading, setLoading] = useState(true);
   const [productAssets, setProductAssets] = useState({});
+  // Reusable mockup templates this brand has saved for itself.
+  const [brandMockups, setBrandMockups] = useState([]);
 
   const uploadedFiles = useRef(new Map());
 
@@ -95,6 +97,7 @@ export function ProductsProvider({ children }) {
       setDesigns({});
       setCategories([]);
       setArchivedProducts([]);
+      setBrandMockups([]);
       setLoading(false);
       return;
     }
@@ -164,6 +167,15 @@ export function ProductsProvider({ children }) {
           });
         }
         setDesigns(designsMap);
+
+        // Saved mockups degrade quietly if migration 034 hasn't run — the
+        // built-in presets keep working either way.
+        const { data: mockupData, error: mockupError } = await supabase
+          .from('brand_mockups')
+          .select('*')
+          .eq('brand_id', activeBrand.id)
+          .order('created_at', { ascending: false });
+        setBrandMockups(mockupError ? [] : (mockupData || []));
       } catch (err) {
         console.error('Error loading brand data:', err);
       } finally {
@@ -507,6 +519,46 @@ export function ProductsProvider({ children }) {
     return productData.id;
   };
 
+  // Save an image (an upload, or a capture straight off a design canvas) as a
+  // reusable mockup for this brand. `psdBlob` is optional — when the mockup
+  // comes from a canvas we keep the layered original so starting from it later
+  // reopens the layers rather than a flattened copy.
+  const saveBrandMockup = async ({ name, blob, psdBlob }) => {
+    if (!activeBrand) throw new Error('No active brand');
+    const clean = (name || '').trim() || 'Untitled mockup';
+
+    // A PSD can't be painted in an <img>, so store a PNG preview for the tile
+    // and keep the PSD alongside it.
+    let imageBlob = blob;
+    let psd = psdBlob || null;
+    if (!psd && isPsdFile(blob)) {
+      psd = blob;
+      imageBlob = (await psdToPngBlob(blob).catch(() => null)) || blob;
+    }
+
+    const imageUrl = await uploadDesignImage(imageBlob, activeBrand.id, 'mockup');
+    const psdUrl = psd ? await uploadDesignPsd(psd, activeBrand.id) : null;
+
+    const { data, error } = await supabase
+      .from('brand_mockups')
+      .insert([{ brand_id: activeBrand.id, name: clean, image_url: imageUrl, psd_url: psdUrl, created_by: user?.id || null }])
+      .select()
+      .single();
+    if (error) throw error;
+    setBrandMockups(prev => [data, ...prev]);
+    return data;
+  };
+
+  const deleteBrandMockup = async (id) => {
+    const mockup = brandMockups.find(m => m.id === id);
+    const { error } = await supabase.from('brand_mockups').delete().eq('id', id);
+    if (error) throw error;
+    setBrandMockups(prev => prev.filter(m => m.id !== id));
+    // Best-effort storage cleanup; a leftover file is better than a failed delete.
+    const files = [mockup?.image_url, mockup?.psd_url].filter(Boolean).map(u => u.split('/').pop());
+    if (files.length) await supabase.storage.from('mockups').remove(files).catch(() => {});
+  };
+
   const getUploadedFile = id => uploadedFiles.current.get(id) || null;
 
   // --- PRODUCT MEDIA BIN / ASSETS ---
@@ -550,6 +602,7 @@ export function ProductsProvider({ children }) {
     <ProductsContext.Provider value={{
       products, collections, moveProduct, updateProduct, deleteProduct, toggleFavorite, designs, createDesign, createCollection,
       deleteCollection, updateBrand, getUploadedFile, activeBrand, brands, switchBrand, createBrand,
+      brandMockups, saveBrandMockup, deleteBrandMockup,
       categories, createCategory, deleteCategory,
       archivedProducts, loadArchivedProducts, duplicateProduct, setProductStatus, archiveProduct,
       updateDesignStatus, updateDesignFabricTags,

@@ -67,7 +67,7 @@ export default function Design() {
   const {
     products, designs, createDesign, deleteProduct, activeBrand, duplicateProduct, setProductStatus,
     archivedProducts, loadArchivedProducts, updateDesignStatus, loading: dataLoading,
-    collections, updateProduct,
+    collections, updateProduct, brandMockups, saveBrandMockup, deleteBrandMockup,
   } = useProducts();
   const { canAfford, openTopup, remaining: aiRemaining, logUsage } = useAIUsage();
   const [showNew, setShowNew] = useState(false);
@@ -86,6 +86,8 @@ export default function Design() {
   const [newName, setNewName] = useState(''); // optional name for the next created design
   const [silQuality, setSilQuality] = useState('medium'); // AI silhouette render quality
   const fileRef = useRef(null);
+  const mockupFileRef = useRef(null);
+  const [savingMockup, setSavingMockup] = useState(false);
   const designProducts = products.filter(p => p.status !== 'archived');
   const multiSelect = useMultiSelect(designProducts);
   const dnd = useDragAndDrop();
@@ -158,6 +160,63 @@ export default function Design() {
 
   const plan = getPlan(activeBrand?.plan_tier || 'free');
   const atProductLimit = products.length >= plan.limits.products;
+
+  // Start a design from one of the brand's saved mockups. Prefers the layered
+  // original when there is one, so a mockup saved off a canvas reopens with
+  // its layers instead of a flattened copy.
+  const startFromMockup = async (mockup) => {
+    if (atProductLimit) { navigate('/settings'); return; }
+    setLoading(true);
+    try {
+      const source = mockup.psd_url || mockup.image_url;
+      const res = await fetch(source);
+      if (!res.ok) throw new Error(`Could not load that mockup (${res.status})`);
+      const blob = await res.blob();
+      const isPsd = !!mockup.psd_url;
+      const file = new File([blob], isPsd ? `${mockup.name}.psd` : `${mockup.name}.png`, {
+        type: isPsd ? 'image/vnd.adobe.photoshop' : (blob.type || 'image/png'),
+      });
+      const id = await createDesign({
+        garmentType: mockup.name,
+        baseType: 'upload',
+        colorway: mockup.name,
+        file,
+        name: newName.trim() || mockup.name,
+      });
+      setNewName('');
+      navigate(`/design/${id}`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveMockup = async (e) => {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = '';
+    if (!file) return;
+    const name = window.prompt('Name this mockup', file.name.replace(/\.[^/.]+$/, ''));
+    if (name === null) return; // cancelled
+    setSavingMockup(true);
+    try {
+      await saveBrandMockup({ name, blob: file });
+      toast.success('Mockup saved — it will show up here for every new design.');
+    } catch (err) {
+      toast.error('Could not save that mockup: ' + err.message);
+    } finally {
+      setSavingMockup(false);
+    }
+  };
+
+  const handleDeleteMockup = async (mockup) => {
+    if (!window.confirm(`Remove "${mockup.name}" from your saved mockups?`)) return;
+    try {
+      await deleteBrandMockup(mockup.id);
+    } catch (err) {
+      toast.error('Could not remove that mockup: ' + err.message);
+    }
+  };
 
   const startFromSilhouette = async (type) => {
     if (atProductLimit) { navigate('/settings'); return; }
@@ -306,6 +365,60 @@ const startFromUpload = async (e) => {
                     <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-2)' }}>{t.label}</div>
                   </div>
                 ))}
+              </div>
+
+              <div className="section-label" style={{ marginBottom: 4 }}>Your saved mockups</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
+                Your own base mockups, ready to start from. Save one here, or from any design's canvas.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 10, marginBottom: 22 }}>
+                {brandMockups.map(mk => (
+                  <div
+                    key={mk.id}
+                    onClick={() => !loading && startFromMockup(mk)}
+                    title={`Start a design from "${mk.name}"`}
+                    style={{
+                      position: 'relative',
+                      border: '1.5px solid var(--border-2)', borderRadius: 'var(--r-sm)', padding: '10px 8px',
+                      textAlign: 'center', cursor: loading ? 'wait' : 'pointer', background: 'var(--bg-1)', transition: 'all 0.12s',
+                    }}
+                    onMouseEnter={e => { if (!loading) { e.currentTarget.style.borderColor = 'var(--c-design)'; e.currentTarget.style.transform = 'translateY(-2px)'; } }}
+                    onMouseLeave={e => { if (!loading) { e.currentTarget.style.borderColor = 'var(--border-2)'; e.currentTarget.style.transform = ''; } }}
+                  >
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDeleteMockup(mk); }}
+                      title="Remove this mockup"
+                      style={{ position: 'absolute', top: 4, right: 4, background: 'none', border: 'none', color: 'var(--ink-4)', cursor: 'pointer', fontSize: 12, padding: 2, lineHeight: 1 }}
+                    >
+                      <i className="ph ph-x" />
+                    </button>
+                    <div style={{ height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 4, overflow: 'hidden' }}>
+                      <img src={mk.image_url} alt={mk.name} style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                    </div>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mk.name}</div>
+                    {mk.psd_url && <div style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>layered</div>}
+                  </div>
+                ))}
+
+                <div
+                  onClick={() => !savingMockup && mockupFileRef.current?.click()}
+                  title="Save a mockup you can reuse on future designs"
+                  style={{
+                    border: '1.5px dashed var(--border-2)', borderRadius: 'var(--r-sm)', padding: '14px 8px 10px',
+                    textAlign: 'center', cursor: savingMockup ? 'wait' : 'pointer', color: 'var(--ink-3)',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 92,
+                  }}
+                >
+                  <i className={`ph ${savingMockup ? 'ph-circle-notch ph-spin' : 'ph-plus'}`} style={{ fontSize: 18, marginBottom: 6 }} />
+                  <div style={{ fontSize: 11.5, fontWeight: 700 }}>{savingMockup ? 'Saving…' : 'Save a mockup'}</div>
+                </div>
+                <input
+                  ref={mockupFileRef}
+                  type="file"
+                  accept="image/*,.psd,.psb"
+                  style={{ display: 'none' }}
+                  onChange={handleSaveMockup}
+                />
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '18px 0', color: 'var(--ink-4)' }}>

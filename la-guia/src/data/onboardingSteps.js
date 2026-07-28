@@ -30,7 +30,7 @@ export const ONBOARDING_STEPS = [
     path: '/',
     selector: '[data-tour="kanban-board"]',
     title: 'How work moves',
-    body: 'Every product sits on this board and travels left to right: Design, Tech Pack, Sourcing, Sampling, Production, Launched. Drag a card to change its stage. The rest of this tour follows the same path.',
+    body: 'Every product sits on this board, grouped into stages that run top to bottom: Design, Tech Pack, Sourcing, Sampling, Production, Launched. Drag a piece onto another stage to move it, or use the move button on the card itself. The rest of this tour follows the same path.',
   },
   {
     id: 'design',

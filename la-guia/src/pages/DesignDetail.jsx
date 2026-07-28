@@ -49,7 +49,7 @@ const TABS = [
 export default function DesignDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { products, designs, getUploadedFile, deleteProduct, updateProduct, activeBrand, categories, duplicateProduct, setProductStatus, updateDesignStatus, updateDesignFabricTags } = useProducts();
+  const { products, designs, getUploadedFile, deleteProduct, updateProduct, activeBrand, categories, duplicateProduct, setProductStatus, updateDesignStatus, updateDesignFabricTags, saveBrandMockup } = useProducts();
   const { canAfford, openTopup, logUsage } = useAIUsage();
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -65,6 +65,7 @@ export default function DesignDetail() {
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [savingCanvas, setSavingCanvas] = useState(false);
+  const [savingMockup, setSavingMockup] = useState(false);
   const autosaveBusy = useRef(false);
   const autosaveFailures = useRef(0);
   const [toggling, setToggling] = useState(false);
@@ -247,6 +248,34 @@ export default function DesignDetail() {
 
     setHistoryRefreshKey(k => k + 1);
     return { imageUrl: publicUrl, psdUrl };
+  };
+
+  // Save the current canvas as a reusable mockup for the whole brand, so a
+  // base block you've perfected here can start future designs. Captures the
+  // layered document alongside the flat preview, so starting from it later
+  // reopens the layers.
+  const handleSaveAsMockup = async () => {
+    const name = window.prompt('Name this mockup', product?.name || 'Base mockup');
+    if (name === null) return;
+    setSavingMockup(true);
+    setCaptureError(null);
+    try {
+      const capturedUrl = await photopeaRef.current.capture();
+      const blob = await fetch(capturedUrl).then(r => r.blob());
+      let psdBlob = null;
+      try {
+        const psd = await photopeaRef.current.capturePsd();
+        if (psd && psd.size <= 40 * 1024 * 1024) psdBlob = psd;
+      } catch (err) {
+        console.error('PSD capture failed; saving the mockup flattened:', err);
+      }
+      await saveBrandMockup({ name, blob, psdBlob });
+      toast.success('Saved to your mockups — start a new design from it any time.');
+    } catch (err) {
+      setCaptureError('Could not save that mockup: ' + err.message);
+    } finally {
+      setSavingMockup(false);
+    }
   };
 
   const handleSaveCanvas = async () => {
@@ -900,6 +929,14 @@ export default function DesignDetail() {
                     title="Save the current canvas as a snapshot (it also autosaves every 2 minutes)"
                   >
                     {savingCanvas ? <><i className="ph ph-spinner ph-spin" /> Saving…</> : <><i className="ph ph-floppy-disk" /> Save</>}
+                  </button>
+                  <button
+                    className="canvas-icon-btn"
+                    onClick={handleSaveAsMockup}
+                    disabled={savingMockup || savingCanvas || analyzing || generatingTP || toggling || canvasStatus !== 'ready'}
+                    title="Save this canvas as a reusable mockup for future designs"
+                  >
+                    <i className={`ph ${savingMockup ? 'ph-circle-notch ph-spin' : 'ph-bookmark-simple'}`} />
                   </button>
                   <button className="btn btn-sm btn-primary" onClick={captureAndAnalyze} disabled={analyzing || generatingTP}>
                     {analyzing ? 'Analyzing...' : 'Analyze Design'}
