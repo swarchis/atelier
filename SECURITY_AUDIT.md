@@ -28,6 +28,10 @@ An automated multi-agent scan (Round 5) found three issues this audit missed and
 
 | # | Sev | Finding | Status |
 |---|---|---|---|
+| 18 | Medium | Member `role` never enforced — a "viewer" had full write and delete on the whole brand | ✅ **Fixed & verified in production** (050) |
+| 19 | Medium | `chat_messages` never tied `sender_id` to the caller — messages forgeable as any teammate | ✅ **Fixed & verified in production** (051) |
+| 20 | Medium | `chat_participants` row could be moved into any chat, exposing its history | ✅ **Fixed & verified in production** (051) |
+| 21 | Medium | Tech-pack approval admin-only in the UI, writable by any member in the database | ✅ **Fixed & verified in production** (052) |
 | 14 | **Critical** | Cross-tenant takeover — `brand_members` UPDATE policies pin only `user_id`, so any account can rewrite its own row to `role: 'owner'` on any brand | ✅ **Fixed & verified in production** (048) |
 | 15 | **High** | Invite-acceptance policy leaves `role`/`brand_id` unconstrained — independent path to the same escalation | ✅ **Fixed & verified in production** (048) |
 | 16 | **High** | 045 revoked UPDATE on `brands` but not INSERT — billing columns still settable at creation | ✅ **Fixed & verified in production** (049) |
@@ -546,11 +550,95 @@ Worth recording, because rejections carry information too. The `metered()` auto-
 
 ---
 
+## Round 6 — the permission-layer batch from the scan's MEDIUMs (2026-07-28)
+
+Four of the 15 MEDIUM findings, all in the same layer, fixed together.
+
+### Finding 18 — member roles were never enforced
+
+`has_brand_access()` returns true for the owner or **any** active member and never
+reads `role`. Every write policy in the schema is built on it — 37 INSERT, 20
+UPDATE, 29 DELETE across 37 tables — so a teammate invited as `viewer` had the
+owner's power: create, edit and delete products, designs, tech packs, vendors,
+quotes, production orders, samples. The role dropdown was decorative.
+
+The severity here is about expectations more than reach. A founder inviting a
+contractor as "viewer" was handing over delete rights on the entire brand without
+being told, and both parties would reasonably believe otherwise.
+
+**Fixed in 050 with restrictive policies rather than 86 rewrites.** Swapping
+`has_brand_access` for a write-aware variant in every write policy means editing
+86 policies of varying shape, where one typo silently opens or closes a table.
+Restrictive policies AND with the existing permissive ones and can only ever
+subtract, so a mistake fails closed. The permissive policies are untouched.
+`SELECT` is deliberately not restricted — a viewer that cannot read is pointless
+rather than safe. The direct-`brand_id` table list is derived from `pg_policies`
+at run time rather than hardcoded, so it matches what is live; the 13 child
+tables are mapped through their parent, with every `(table, fk, parent)` triple
+confirmed against `information_schema`.
+
+Verified: 111 policies across 37 tables, all `RESTRICTIVE`, none on `SELECT`.
+
+**Note:** there are currently no viewers, so this changed nothing observable. It
+is protective for future invites, and "nothing looks different" is the expected
+result, not evidence it failed.
+
+### Findings 19 and 20 — chat forgery and chat hopping
+
+`chat_messages` INSERT checked only `is_chat_member(chat_id)`, so a member could
+post carrying anyone else's `sender_id` — the brand owner's, say — and the UI
+renders it under their name. In a tool where chat is where production decisions
+get agreed, a message that appears to come from the owner is a substantive
+problem.
+
+`chat_participants` UPDATE was `using (user_id = auth.uid())` with no `WITH
+CHECK`, so the row survived being repointed at any `chat_id`: the caller remained
+the row's owner, the check still passed, and they became a participant in a
+conversation they were never added to. `chat_messages` SELECT is gated on
+`is_chat_member`, so that is a straight read of another team's chat.
+
+**Both fixed in 051.** The message policy pins the two shapes the client actually
+inserts (`'user'` + own uid, `'ai'` + null) rather than a blanket
+`sender_id = auth.uid()`, which would have broken the assistant's replies. The
+participant hole is closed with a column grant — `last_read_at` is the only
+column the client ever updates — because, as in 048, a `WITH CHECK` cannot see
+that `chat_id` changed.
+
+**Residual, not closed:** a member can still insert a message as `sender_type:
+'ai'` with a body of their choosing, because the assistant's reply is written by
+the browser after `/api/chat-reply` returns. Closing it means moving that insert
+to the backend under the service-role key. Recorded rather than quietly left.
+
+### Finding 21 — approval was UI-only
+
+`TechPackDetail.jsx:270` writes `approval_status`, `approved_by`, `approved_at`
+and `approval_comment`. The control is admin-only on screen; nothing stopped any
+member writing those columns directly, including choosing whose name went in
+`approved_by`. Approval is the record of a decision — an approved tech pack is
+what goes to a factory — so a field anyone can set is not evidence of anything.
+
+**Fixed in 052** with a `BEFORE UPDATE` trigger that resolves the brand through
+`products` and requires `is_brand_admin`. The check short-circuits when the four
+columns are untouched, which is every ordinary tech-pack edit. Non-admins keep
+full edit rights on the tech pack itself; only the approval record is fenced.
+
+### Consequence worth carrying forward
+
+Authorization is now enforced by three different mechanisms — RLS policies,
+triggers (`brand_members`, `tech_packs`), and column grants (`brands`,
+`chat_participants`). **`pg_policies` alone no longer describes what those tables
+permit.** This is recorded at the top of `CLAUDE.md` as well, because it is the
+kind of thing that misleads someone six months from now.
+
+---
+
 ## Remaining work
 
 Nothing below is exploitable today. Ordered by when it will actually matter.
 
-**0. The 15 MEDIUM and 1 LOW findings from the Round 5 scan.** Not yet triaged or verified against the live database. Full text in `CLAUDE-SECURITY-20260728-220105/CLAUDE-SECURITY-RESULTS.md`. The ones called out as most substantive: an uncapped prompt on the 1-credit `/api/chat-reply` route (cost amplification — a caller pays 1 credit regardless of how much text they send), a `mode` type-confusion that under-charges credits, untrusted web text reaching a server-side fetch, and unauthenticated OAuth connect endpoints that will sign any supplied `brandId`. Each needs the same treatment the HIGHs got: confirm against `pg_policies`/live code before acting, since a scan of migration files cannot tell you which policy is actually live.
+**0. The remaining 11 MEDIUM and 1 LOW from the Round 5 scan.** Four (18–21, the permission-layer group) were fixed in Round 6. What is left is mostly cost and hygiene rather than access control: an uncapped prompt on the 1-credit `/api/chat-reply` route (one credit buys a full model context window of paid tokens), a `mode` type-confusion that under-charges silhouette renders, the `invoice.paid` handler's unbounded loop over brands sharing a customer id (largely defanged by 049, but it should still be capped), the icon CDN loading without subresource integrity, webhooks exempt from rate limiting ahead of a 50 MB body parser, and upstream error bodies echoed back to callers. Full text in `CLAUDE-SECURITY-20260728-220105/CLAUDE-SECURITY-RESULTS.md`.
+
+**0 (original wording — superseded).** The 15 MEDIUM and 1 LOW findings from the Round 5 scan, not yet triaged or verified against the live database. Full text in `CLAUDE-SECURITY-20260728-220105/CLAUDE-SECURITY-RESULTS.md`. The ones called out as most substantive: an uncapped prompt on the 1-credit `/api/chat-reply` route (cost amplification — a caller pays 1 credit regardless of how much text they send), a `mode` type-confusion that under-charges credits, untrusted web text reaching a server-side fetch, and unauthenticated OAuth connect endpoints that will sign any supplied `brandId`. Each needs the same treatment the HIGHs got: confirm against `pg_policies`/live code before acting, since a scan of migration files cannot tell you which policy is actually live.
 
 **0b. `social_accounts` holds OAuth `access_token` and `refresh_token` behind a `has_brand_access` SELECT gate.** Flagged in passing by two verifiers during Round 5 but never itself paneled, so it is unassessed rather than cleared. Finding 14 turned that gate into token theft; with 048 applied the immediate path is closed, but storing live third-party credentials in a table readable by every brand member deserves its own review — at minimum, whether members below admin should see them at all.
 

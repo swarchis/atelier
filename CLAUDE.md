@@ -41,6 +41,64 @@ JSX-in-`.js` mistake — a syntax checker won't. Run it before claiming a
 frontend change works. Neither check exercises a signed-in session, so say so
 rather than implying a feature was tested end to end.
 
+## Authorization is no longer "just RLS" — read this before touching permissions
+
+The architecture note above still holds: the frontend talks to Supabase directly
+and RLS is the primary gate. But after the July 2026 audit, four tables enforce
+rules that **do not appear in `pg_policies`**. Reading policies alone will tell
+you the wrong thing.
+
+| Table | Extra mechanism | What it enforces |
+|---|---|---|
+| `brand_members` | `BEFORE UPDATE` trigger (048) | A row's `brand_id`, `role`, and claimed `user_id` cannot change except by a brand admin |
+| `tech_packs` | `BEFORE UPDATE` trigger (052) | The four `approval_*` columns are admin-only |
+| `brands` | Column `GRANT`s (045, 049) | Only 9 columns are client-writable; `plan_tier` and the `stripe_*` ids are not, on INSERT **or** UPDATE |
+| `chat_participants` | Column `GRANT` (051) | Only `last_read_at` is client-writable, so a row can't be moved into another chat |
+
+Plus **111 restrictive policies** across 37 tables (050) that require
+`has_brand_write_access()` — owner/admin/editor — for INSERT/UPDATE/DELETE.
+Restrictive policies AND with the permissive ones and can only subtract, so if a
+write mysteriously fails for a non-owner, check these before the permissive
+policy. `SELECT` is deliberately unrestricted: viewers read everything.
+
+**Three rules that follow from this:**
+
+- **Adding a user-editable column to `brands` requires adding it to the
+  `grant update (...)`/`grant insert (...)` lists**, or the save fails with a
+  permission error rather than an RLS error — which sends you looking in
+  entirely the wrong place.
+- **A column-level `REVOKE` cannot subtract from a table-level grant.** Migration
+  044 tried, reported success, and changed nothing. To restrict columns you must
+  revoke the table-wide privilege and grant back the allowed list (045, 049, 051).
+- **RLS `WITH CHECK` cannot see the old row**, so "this column may not *change*"
+  is not expressible as a policy. That's why 048 and 052 are triggers.
+
+## Verify against the database, not the migrations
+
+`supabase/migrations/` records what *should* be true. It disagreed with the live
+database three times during the audit, and the database was right every time:
+`sales_data`'s live SELECT policy was the owner-only variant rather than the
+member-inclusive one in `INITIAL_SCHEMA`; migration 044 was a silent no-op; and
+`handle_new_user` referenced a column that had never existed, which broke every
+signup for eight days without anyone noticing.
+
+Several functions (`handle_new_user`, `delete_user`) were created in the
+dashboard and only captured as migrations retroactively. Before trusting a
+policy or function, query `pg_policies` / `pg_proc` / `pg_class.relacl`.
+
+## Storage: uploads use `upsert`, which needs more than INSERT
+
+Every upload passes `upsert: true`, so Postgres runs `INSERT ... ON CONFLICT DO
+UPDATE` and requires SELECT **and** UPDATE policies **whether or not a conflict
+happens** — the check is at plan time. Dropping the SELECT policy on `mockups`
+because "timestamped filenames never collide" broke every image save for three
+hours. Both buckets now scope SELECT/UPDATE to `owner = auth.uid()` (046, 047).
+
+`mockups` still has **no DELETE policy**, so `.remove()` deletes nothing and
+returns `{data: [], error: null}` — not an error, which is why it went unnoticed.
+Paths are flat with no per-brand folder, so a safe DELETE policy needs the
+namespacing work first.
+
 ## Invariants that break things quietly
 
 **AI credits live in two files.** `api/config/aiCredits.js` is authoritative;
