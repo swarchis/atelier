@@ -1683,21 +1683,34 @@ app.post('/api/send-campaign', requireAuth, async (req, res) => {
   }
 });
 
+// Brand-scoped for the same reason as /api/send-invite and /api/send-campaign:
+// arbitrary recipient + arbitrary body sent from our own verified domain is a
+// phishing relay wearing our SPF and DKIM. requireAuth alone wasn't enough —
+// signup is open, so "signed in" is a formality.
 app.post('/api/send-vendor-email', requireAuth, async (req, res) => {
   console.log("📥 Received vendor email send request...");
   if (!resend) {
     return res.status(400).json({ ok: false, error: 'RESEND_API_KEY is missing from api/.env — cannot send email.' });
   }
   try {
-    const { to, subject, body, vendorName } = req.body;
+    const { to, subject, body, vendorName, brandId } = req.body;
     if (!to || !subject || !body) {
       return res.status(400).json({ ok: false, error: 'Missing recipient email (to), subject, or body.' });
     }
+    if (!brandId) return res.status(400).json({ ok: false, error: 'brandId is required.' });
+    if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
+      return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
+    }
 
-    // Format plain text line breaks into HTML for clean rendering in email clients
+    // Format plain text line breaks into HTML for clean rendering in email
+    // clients. The body is always plain text (QuoteTracker composes it, and
+    // /api/draft-vendor-email is prompted for plain text with \n breaks), so
+    // escaping first costs nothing visually and stops the caller from putting
+    // its own markup — a fake link, say — into mail sent from our domain.
+    // Escape BEFORE the newline substitution, or the <br/> tags get escaped too.
     const htmlBody = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 20px; color: #16181D; line-height: 1.6; font-size: 15px;">
-        ${body.replace(/\n/g, '<br/>')}
+        ${escapeHtml(body).replace(/\n/g, '<br/>')}
       </div>
     `;
 

@@ -65,7 +65,9 @@ export default function QuoteTracker() {
   const urlProductId = searchParams.get('productId');
 
   const { vendors, quotes, loading, updateQuote, createRFQ } = useVendors();
-  const { products } = useProducts();
+  // activeBrand: /api/send-vendor-email is brand-scoped, so the RFQ dispatch
+  // below has to say which brand it's sending on behalf of.
+  const { products, activeBrand } = useProducts();
   const [filter, setFilter] = useState('All');
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'compare'
   const [compareProductId, setCompareProductId] = useState('');
@@ -118,6 +120,7 @@ export default function QuoteTracker() {
               },
               body: JSON.stringify({
                 to: vendor.email,
+                brandId: activeBrand?.id,
                 subject: `Request for Quote: ${rfqProduct?.name || 'New Design'}`,
                 body: `Hello ${vendor.name},\n\nWe would like to request a formal quote for our product: ${rfqProduct?.name || 'Garment Design'}.\n\nDetails:\n- Target Quantity: ${rfqForm.quantity || 'Standard MOQ'}\n- Target Unit Cost: ${rfqForm.targetUnitCost ? '$' + rfqForm.targetUnitCost : 'Open for negotiation'}\n- Target Deadline: ${rfqForm.deadline || 'Standard lead time'}\n\nAdditional Notes:\n${rfqForm.message || 'None'}\n\nPlease reply with your pricing and availability.\n\nBest regards,\nAtelier Studio`,
                 vendorName: vendor.name
