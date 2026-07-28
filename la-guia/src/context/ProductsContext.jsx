@@ -424,6 +424,25 @@ export function ProductsProvider({ children }) {
     return withRole;
   };
 
+  // Re-read the active brand without writing anything. Billing columns
+  // (plan_tier, stripe_customer_id, stripe_subscription_id) are set server-side
+  // by /api/confirm-checkout and /api/subscription-status once they've verified
+  // with Stripe, so the client's only job is to pick the result up — it must not
+  // write them itself. See BillingTab.
+  const refreshActiveBrand = async () => {
+    if (!activeBrand) return null;
+    const { data, error } = await supabase
+      .from('brands')
+      .select('*')
+      .eq('id', activeBrand.id)
+      .single();
+    if (error) throw error;
+    const withRole = { ...data, memberRole: activeBrand.memberRole };
+    setActiveBrandState(withRole);
+    setBrands(prev => prev.map(b => (b.id === withRole.id ? withRole : b)));
+    return withRole;
+  };
+
   const createDesign = async ({ garmentType, baseType, silhouette, colorway, file, collectionId, aiPaths, name }) => {
     if (!activeBrand) throw new Error("No active brand found");
 
@@ -601,7 +620,7 @@ export function ProductsProvider({ children }) {
   return (
     <ProductsContext.Provider value={{
       products, collections, moveProduct, updateProduct, deleteProduct, toggleFavorite, designs, createDesign, createCollection,
-      deleteCollection, updateBrand, getUploadedFile, activeBrand, brands, switchBrand, createBrand,
+      deleteCollection, updateBrand, refreshActiveBrand, getUploadedFile, activeBrand, brands, switchBrand, createBrand,
       brandMockups, saveBrandMockup, deleteBrandMockup,
       categories, createCategory, deleteCategory,
       archivedProducts, loadArchivedProducts, duplicateProduct, setProductStatus, archiveProduct,

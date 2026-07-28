@@ -7,7 +7,7 @@ import { useAIUsage } from '../context/AIUsageContext.jsx';
 import { apiPost } from '../lib/aiApi.js';
 
 export default function BillingTab() {
-  const { activeBrand, updateBrand } = useProducts();
+  const { activeBrand, refreshActiveBrand } = useProducts();
   const { user } = useAuth();
   const { credits, topupCredits, buyPack, topupLoading, topupError, refresh } = useAIUsage();
 
@@ -16,14 +16,16 @@ export default function BillingTab() {
   const [checkoutLoading, setCheckoutLoading] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [expanded, setExpanded] = useState(null);
-  const [devSwitching, setDevSwitching] = useState(null);
 
   const currentTier = activeBrand?.plan_tier || 'free';
   const currentPlan = getPlan(currentTier);
 
-  // On return from Stripe Checkout, verify the session server-side, then
-  // write the new plan under the user's own session (RLS-respecting) —
-  // never trust the redirect URL alone.
+  // On return from Stripe Checkout, verify the session server-side. The API
+  // persists plan_tier and the Stripe ids itself once it has confirmed the
+  // session with Stripe — the browser only re-reads the result. It used to do
+  // that write here, which meant anyone could set their own tier to premium, or
+  // point their brand at another customer's subscription and collect its
+  // credits. Those columns are not client-writable any more.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get('billing');
@@ -36,7 +38,7 @@ export default function BillingTab() {
         .then(r => r.json())
         .then(async (data) => {
           if (!data.ok) throw new Error(data.error);
-          await updateBrand({ plan_tier: data.plan, stripe_customer_id: data.customerId, stripe_subscription_id: data.subscriptionId });
+          await refreshActiveBrand();
           setBanner({ type: 'success', text: `You're now on the ${getPlan(data.plan).name} plan.` });
         })
         .catch(err => setBanner({ type: 'error', text: 'Could not confirm your upgrade: ' + err.message }))
@@ -69,17 +71,19 @@ export default function BillingTab() {
   // portal, so reconcile against the real subscription status whenever this
   // tab loads for a brand that has one on file — catches "cancelled last
   // week, still shows Premium" within one page load instead of never.
+  // The endpoint writes the corrected tier itself (it is the side that just
+  // asked Stripe); this only refreshes local state to match.
   useEffect(() => {
     if (!activeBrand?.stripe_subscription_id || activeBrand.plan_tier === 'free') return;
     apiPost('/api/subscription-status', { subscriptionId: activeBrand.stripe_subscription_id })
       .then(r => r.json())
-      .then(data => {
+      .then(async (data) => {
         if (!data.ok) return;
         if (!data.active && activeBrand.plan_tier !== 'free') {
-          updateBrand({ plan_tier: 'free' });
+          await refreshActiveBrand();
           setBanner({ type: 'info', text: 'Your subscription is no longer active — you\'ve been moved back to the Free plan.' });
         } else if (data.active && data.plan && data.plan !== activeBrand.plan_tier) {
-          updateBrand({ plan_tier: data.plan });
+          await refreshActiveBrand();
         }
       })
       .catch(() => {}); // best-effort — don't block the page on this
@@ -99,20 +103,16 @@ export default function BillingTab() {
     }
   };
 
-  // Local-testing-only shortcut to try every plan's gating without paying
-  // Stripe for it — writes plan_tier directly, bypassing Checkout entirely.
-  // Never rendered in a production build (see import.meta.env.DEV guard below).
-  const devSetPlan = async (planId) => {
-    setDevSwitching(planId);
-    try {
-      await updateBrand({ plan_tier: planId });
-      setBanner({ type: 'info', text: `Dev override: plan set to ${getPlan(planId).name} (no Stripe involved).` });
-    } catch (err) {
-      setBanner({ type: 'error', text: err.message });
-    } finally {
-      setDevSwitching(null);
-    }
-  };
+  // The DEV-only "Force plan" override used to live here. It set plan_tier
+  // straight from the browser to test tier gating without paying Stripe — the
+  // same write an attacker would use to grant themselves Premium, which is why
+  // that column is no longer client-writable (migration 044). Local dev shares
+  // the production Supabase project, so there is no environment where the grant
+  // survives and it could only have errored.
+  //
+  // To test a tier locally now, set it in the Supabase SQL editor, which runs as
+  // postgres and is unaffected by the revoke:
+  //   update public.brands set plan_tier = 'premium' where id = '<brand-id>';
 
   const openPortal = async () => {
     setPortalLoading(true);
@@ -233,31 +233,6 @@ export default function BillingTab() {
       </div>
       {topupError && (
         <div className="form-hint" style={{ color: 'var(--red)' }}>{topupError}</div>
-      )}
-
-      {import.meta.env.DEV && (
-        <div className="card-raised" style={{ marginTop: 22, padding: 18, border: '1px dashed var(--amber-border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
-            <i className="ph ph-flask" style={{ color: 'var(--amber)' }} />
-            <span className="card-title">Developer tools</span>
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
-            Local dev build only — jumps this brand straight to a plan tier so you can test its gating without going through Stripe. Never shown in production.
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {PLANS.map(p => (
-              <button
-                key={p.id}
-                className="btn btn-sm"
-                disabled={devSwitching === p.id || currentTier === p.id}
-                onClick={() => devSetPlan(p.id)}
-                style={{ opacity: currentTier === p.id ? 0.5 : 1 }}
-              >
-                {devSwitching === p.id ? 'Setting…' : `Force ${p.name}`}
-              </button>
-            ))}
-          </div>
-        </div>
       )}
     </div>
   );

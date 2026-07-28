@@ -1,0 +1,40 @@
+-- Stop the browser from writing the columns that decide entitlement and billing.
+--
+-- ⚠️ DO NOT APPLY THIS UNTIL THE MATCHING CODE IS DEPLOYED AND VERIFIED.
+--    Order matters: deploy api/index.js + BillingTab.jsx first, run one real
+--    upgrade end to end, confirm plan_tier lands, and only then run this. In the
+--    other order, upgrades break for as long as the old bundle is live.
+--
+-- The brands UPDATE policy from 007 is row-level, which is correct as far as it
+-- goes — a user can only update their own brand. But it has no column scope, and
+-- brands holds three columns that are not the user's business to set:
+--
+--   plan_tier              — what they are entitled to. One update = free Premium.
+--   stripe_customer_id     — what the invoice.paid webhook matches on when it
+--                            grants a cycle's AI credits. Setting this to a real
+--                            paying customer's cus_… makes that subscription
+--                            fund YOUR brand's credits, every cycle, with nothing
+--                            in Stripe tying it to you.
+--   stripe_subscription_id — resolves the brand in /api/subscription-status.
+--
+-- Column-level REVOKE is the fix: RLS decides which ROWS a user may touch, and
+-- these grants decide which COLUMNS. Both are needed; neither substitutes for
+-- the other.
+--
+-- Everything else on brands stays writable — name, the brand-profile fields
+-- (quality_tier, budget_philosophy, sustainability, global_risk),
+-- notification_settings, owner_display_name — so Settings keeps working
+-- unchanged. Only these three move server-side.
+--
+-- After this, the only writers are /api/confirm-checkout and
+-- /api/subscription-status, both of which verify with Stripe first and use the
+-- service-role key (unaffected by grants to anon/authenticated), plus the
+-- customer.subscription.deleted and invoice.paid webhook handlers.
+--
+-- KNOWN BREAKAGE, accepted: BillingTab's DEV-only "Force plan" button writes
+-- plan_tier directly and will start erroring. Local dev shares this database, so
+-- there is no environment where it still works. It is dev-only and never
+-- rendered in a production build.
+
+revoke update (plan_tier, stripe_customer_id, stripe_subscription_id)
+  on public.brands from authenticated, anon;

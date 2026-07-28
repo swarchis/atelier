@@ -881,9 +881,38 @@ app.post('/api/confirm-checkout', requireAuth, async (req, res) => {
     if (!(await verifyBrandAccess(req.user && req.user.id, confirmBrandId))) {
       return res.status(403).json({ ok: false, error: 'You do not have access to this checkout.' });
     }
+
+    // Write the plan here rather than handing it back for the browser to save.
+    // plan_tier decides what the user is entitled to, and stripe_customer_id is
+    // what the invoice.paid webhook matches on when granting a cycle's AI
+    // credits — so a client able to set them could hand itself Premium, or point
+    // its own brand at someone else's paying customer and collect their credits.
+    // This is the only code path that has just verified the session with Stripe,
+    // so it is the right place to persist the result.
+    const confirmedPlan = session.metadata?.plan;
+    if (!PRICE_IDS[confirmedPlan]) {
+      // Unrecognised plan in metadata — refuse rather than writing a tier that
+      // doesn't map to a real price.
+      return res.status(400).json({ ok: false, error: 'This checkout is not for a recognised plan.' });
+    }
+    const { error: persistError } = await supabase
+      .from('brands')
+      .update({
+        plan_tier: confirmedPlan,
+        stripe_customer_id: session.customer,
+        stripe_subscription_id: session.subscription,
+      })
+      .eq('id', confirmBrandId);
+    if (persistError) {
+      // The payment already succeeded, so failing silently here would leave a
+      // paying customer on the free tier with no signal. Say so plainly.
+      console.error('Failed to persist plan after checkout:', persistError.message);
+      return res.status(500).json({ ok: false, error: 'Your payment went through, but we could not activate the plan. Contact support and we will sort it out.' });
+    }
+
     res.json({
       ok: true,
-      plan: session.metadata?.plan,
+      plan: confirmedPlan,
       brandId: session.client_reference_id,
       customerId: session.customer,
       subscriptionId: session.subscription,
@@ -977,6 +1006,22 @@ app.post('/api/subscription-status', requireAuth, async (req, res) => {
       const priceId = sub.items.data[0]?.price?.id;
       plan = Object.entries(PRICE_IDS).find(([, id]) => id === priceId)?.[0] || null;
     }
+
+    // Reconcile the stored tier here too. This is BillingTab's catch-all for a
+    // cancellation made in the Stripe portal (no webhook covers that), and it
+    // used to work by having the browser write plan_tier back — the same hole
+    // as confirm-checkout. Only update when Stripe gave a definite answer: an
+    // active subscription on a price we don't recognise leaves the tier alone
+    // rather than silently downgrading a paying customer.
+    const reconciledPlan = !isActive ? 'free' : plan;
+    if (reconciledPlan) {
+      const { error: reconcileError } = await supabase
+        .from('brands')
+        .update({ plan_tier: reconciledPlan })
+        .eq('id', subBrand.id);
+      if (reconcileError) console.error('Plan reconcile failed:', reconcileError.message);
+    }
+
     res.json({ ok: true, active: isActive, plan, status: sub.status });
   } catch (error) {
     console.error('❌ Endpoint Error:', error.message);
