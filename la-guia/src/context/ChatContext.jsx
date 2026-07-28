@@ -14,7 +14,8 @@ const ChatContext = createContext(null);
 // fetch-on-mount + manual refresh) — this follows that same convention with
 // a light poll while the chat panel is open, instead of introducing
 // Supabase Realtime as a one-off for this single feature.
-const POLL_MS = 8000;
+const POLL_MS = 8000;        // open thread, fallback behind Realtime
+const LIST_POLL_MS = 20000;  // chat list/unread, fallback behind Realtime
 
 export function ChatProvider({ children }) {
   const { user } = useAuth();
@@ -96,6 +97,58 @@ export function ChatProvider({ children }) {
   };
 
   useEffect(() => { loadChats(); }, [activeBrand?.id, user?.id]);
+
+  // ── Live updates ───────────────────────────────────────────────────────────
+  // Chat used to only change on page reload: the message poll ran solely while
+  // a thread was open, and the chat LIST never refreshed at all, so new chats
+  // and unread badges never appeared. Realtime pushes inserts over a websocket
+  // (RLS still applies, so you only receive rows you could already read), and
+  // a slow poll stays behind it as a safety net — without that, a silent
+  // realtime failure would look exactly like the original bug.
+  useEffect(() => {
+    if (!activeBrand?.id || !user?.id) return undefined;
+
+    // New messages arrive constantly during a conversation; refreshing the
+    // whole chat list on each one would hammer the database, so coalesce.
+    let listRefresh = null;
+    const refreshListSoon = () => {
+      if (listRefresh) return;
+      listRefresh = setTimeout(() => { listRefresh = null; loadChats(); }, 1500);
+    };
+
+    const channel = supabase
+      .channel(`chat-brand-${activeBrand.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload) => {
+        const msg = payload.new;
+        if (!msg?.chat_id) return;
+        setMessagesByChat(prev => {
+          const thread = prev[msg.chat_id];
+          if (!thread) return prev;                              // not loaded — the list refresh covers it
+          if (thread.some(m => m.id === msg.id)) return prev;    // already have it (e.g. our own send)
+          return { ...prev, [msg.chat_id]: [...thread, msg] };
+        });
+        refreshListSoon();
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chats' }, refreshListSoon)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_participants' }, refreshListSoon)
+      .subscribe();
+
+    return () => {
+      if (listRefresh) clearTimeout(listRefresh);
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrand?.id, user?.id]);
+
+  // Fallback poll for the chat list (new chats, unread badges, ordering) in
+  // case Realtime isn't available — the table isn't published, or a network
+  // blocks websockets.
+  useEffect(() => {
+    if (!activeBrand?.id || !user?.id) return undefined;
+    const timer = setInterval(() => { loadChats(); }, LIST_POLL_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrand?.id, user?.id]);
 
   const loadMessages = async (chatId) => {
     if (!chatId) return [];
