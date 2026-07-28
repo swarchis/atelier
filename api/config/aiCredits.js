@@ -15,8 +15,8 @@
 //
 // Worst case per product (all credits spent on high-quality silhouettes, the
 // priciest action at $0.25 each; Stripe taken as 2.9% + $0.30):
-//     Basic    $29 -> net $27.86, 1200 cr -> max cost $6.00  (21.5%) -> 78.5% margin
-//     Premium  $79 -> net $76.41, 3500 cr -> max cost $17.50 (22.9%) -> 77.1% margin
+//     Basic    $29.99 -> net $28.82, 1200 cr -> max cost $6.00  (20.8%) -> 79.2% margin
+//     Premium  $79.99 -> net $77.37, 3500 cr -> max cost $17.50 (22.6%) -> 77.4% margin
 //     Top-up S $10 -> net $9.41,   300 cr -> max cost $1.50  (15.9%) -> 84.1% margin
 //     Top-up M $25 -> net $23.98,  800 cr -> max cost $4.00  (16.7%) -> 83.3% margin
 //     Top-up L $50 -> net $48.25, 1750 cr -> max cost $8.75  (18.1%) -> 81.9% margin
@@ -71,8 +71,8 @@ function silhouetteFeature(q) {
 // rational choice for a heavy user.
 const TIER_CREDITS = {
   free: 0,
-  basic: 1200,   // $29  -> 41.4 credits per dollar
-  premium: 3500, // $79  -> 44.3 credits per dollar
+  basic: 1200,   // $29.99 -> 40.0 credits per dollar
+  premium: 3500, // $79.99 -> 43.8 credits per dollar
 };
 
 // One-time top-up packs. Priced ABOVE the subscription rate per credit on
