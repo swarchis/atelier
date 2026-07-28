@@ -1179,7 +1179,18 @@ app.post('/api/stripe/webhook', async (req, res) => {
     const invoice = event.data.object;
     const customerId = invoice.customer;
     const line = (invoice.lines && invoice.lines.data && invoice.lines.data[0]) || null;
-    const priceId = line && line.price ? line.price.id : null;
+    // Stripe REMOVED `price` from invoice lines in the 2025+ API versions (this
+    // account is on 2026-06-24.dahlia); the id moved to
+    // pricing.price_details.price. Reading only the old shape left priceId null,
+    // so `tier` was null, so a paid subscription skipped the grant entirely —
+    // the plan flipped (confirm-checkout writes that) but no credits arrived.
+    // Both shapes are read so this survives whichever version the account is
+    // pinned to, including older accounts still sending `price`.
+    const priceId = line
+      ? ((line.pricing && line.pricing.price_details && line.pricing.price_details.price)
+          || (line.price && line.price.id)
+          || null)
+      : null;
     const tier = priceId ? (Object.entries(PRICE_IDS).find(([, id]) => id === priceId) || [])[0] : null;
 
     // An unrecognised price id means STRIPE_PRICE_BASIC/PREMIUM don't match the
