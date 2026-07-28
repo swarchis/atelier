@@ -214,9 +214,13 @@ export default function Home() {
 
   const now = new Date();
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
-  const displayName = user?.email
+  // preferences.full_name first, email prefix only as a fallback — same order as
+  // Sidebar, HistoryTab, SuggestionInbox and TechPackDetail. This was the one
+  // consumer reading the email directly, so a name saved in Settings appeared
+  // everywhere except the greeting.
+  const displayName = preferences.full_name || (user?.email
     ? user.email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-    : 'Founder';
+    : 'Founder');
 
   const inProduction = products.filter(p => !['concept', 'launched'].includes(p.stage)).length;
   const avgReadiness = products.length ? Math.round(products.reduce((s, p) => s + p.readiness, 0) / products.length) : 0;

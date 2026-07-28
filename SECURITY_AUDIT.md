@@ -10,7 +10,15 @@
 
 **Bottom line (original pass):** one Critical and one High finding, both in the billing/credits path, both reachable by anyone who can sign up. Everything else Medium or below. The parts hardened previously (SSRF helpers, OAuth state signing, email auth, AI metering) held up under a second read. The gaps were in the database layer, which that earlier pass did not reach.
 
-**Bottom line (current, after three rounds):** thirteen findings, all Critical/High/Medium ones fixed and verified against production. Two of the most serious were only findable with direct database access — the credit RPCs and the signup outage — which is the main lesson from this engagement: reading migrations tells you what *should* be true, and only querying the database tells you what *is*. Twice the repo and the live schema disagreed (`sales_data`'s SELECT policy, and migration 044's silent no-op), and both times the database was right.
+**Bottom line (current, after five rounds):** seventeen findings. Every Critical and High is fixed and verified against production; 15 MEDIUM and 1 LOW from the final scan remain untriaged.
+
+Three lessons, in the order they cost the most:
+
+1. **The repo is not the database.** Reading migrations tells you what *should* be true; only querying tells you what *is*. They disagreed three times — `sales_data`'s live SELECT policy was the owner-only variant rather than the member-inclusive one in `INITIAL_SCHEMA`, migration `044` reported success and changed nothing, and `045`'s revoke left INSERT untouched. The database was right every time. Two of the most serious findings (the credit RPCs, the signup outage) were only reachable with direct database access.
+2. **Check the columns a policy does *not* pin.** Finding 14 — a full cross-tenant takeover — sat in a policy this audit read and approved, because the question asked was "can `user_id` be changed?" rather than "what else can?".
+3. **Verify, don't reason.** Every fix verified against production held. The one reasoned about instead — dropping storage policies because "timestamped filenames never collide" — broke all image uploads for three hours and cost a user 15 credits. `ON CONFLICT DO UPDATE` requires SELECT and UPDATE at plan time regardless of whether a conflict occurs.
+
+An automated multi-agent scan (Round 5) found three issues this audit missed and one hole in a fix it had already called done. Adversarial review by an independent party earned its cost.
 
 ---
 
@@ -20,6 +28,10 @@
 
 | # | Sev | Finding | Status |
 |---|---|---|---|
+| 14 | **Critical** | Cross-tenant takeover — `brand_members` UPDATE policies pin only `user_id`, so any account can rewrite its own row to `role: 'owner'` on any brand | ✅ **Fixed & verified in production** (048) |
+| 15 | **High** | Invite-acceptance policy leaves `role`/`brand_id` unconstrained — independent path to the same escalation | ✅ **Fixed & verified in production** (048) |
+| 16 | **High** | 045 revoked UPDATE on `brands` but not INSERT — billing columns still settable at creation | ✅ **Fixed & verified in production** (049) |
+| 17 | **High** | Redirect SSRF — `safeStoreUrl` validated only the first hop; WooCommerce returns the upstream body verbatim | ✅ **Fixed & deployed** |
 | 10 | **Critical** | Signup broken in production — `handle_new_user` referenced a non-existent column | ✅ **Fixed & verified end to end in production** |
 | 9 | **High** | Storage: anonymous enumeration + cross-tenant overwrite of `mockups` | ✅ **Fixed & verified in production** (phase 1) |
 | 1 | **Critical** | AI credit RPCs callable by any user | ✅ **Fixed & verified in production** |
@@ -474,9 +486,73 @@ The sweep covered every write path against the policies changed this session and
 
 ---
 
+## Round 5 — automated multi-agent scan (2026-07-28)
+
+Run with the `claude-security` plugin at high effort over the whole repository, report-only. 82 raw candidates from 17 research passes, deduplicated to 48 distinct sites, each challenged by a three-voter adversarial panel — 144 votes, 28 candidates rejected (13 unanimously). **20 survived: 4 HIGH, 15 MEDIUM, 1 LOW.** Full report in `CLAUDE-SECURITY-20260728-220105/` (carries its own `.gitignore`, so it is not committed).
+
+Every HIGH was re-verified against the live database before acting, per the lesson from `042` and `044`. All four confirmed. **Three were findings this audit missed; the fourth was a hole in a fix this audit had already called done.** That is the headline result and it is worth stating plainly.
+
+### Finding 14 — Critical: full cross-tenant takeover via `brand_members`
+
+Two UPDATE policies constrain who owns a row but not what the row may become. Live text:
+
+```
+"Member sets own display name"   using (user_id = auth.uid())  with check (user_id = auth.uid())
+```
+
+Neither `brand_id` nor `role` is pinned. Chain from a fresh signup, needing only the victim's brand UUID:
+
+1. Sign up — you own a brand, so `is_brand_admin(your_brand)` is true
+2. `INSERT` a `brand_members` row into your own brand — "Admins invite members" permits it
+3. `UPDATE` that row to `brand_id = <victim>, role = 'owner', status = 'active'` — `user_id` never changes, so `USING` and `WITH CHECK` both still pass
+
+`has_brand_access(<victim>)` now returns true, handing over every brand-scoped table through RLS, and the API's `verifyBrandAccess()` returns true, handing over their AI credits and outbound email. It also defeats removal: deleting the row does not stop it being recreated. Combined with `social_accounts` — which gates SELECT on `has_brand_access` while storing OAuth `access_token` and `refresh_token` — it reaches connected store and social credentials too.
+
+**Why this audit missed it:** the policy was read during the original pass and checked for whether it could change `user_id`. It could not. The question never asked was what *else* the row could change. Checking the pinned column instead of the unpinned ones is the specific error.
+
+### Finding 15 — High: the same escalation through invite acceptance
+
+`"Invited users accept their own invite"` pins `user_id` and `status` in its `WITH CHECK`, but not `role` or `brand_id`, so an invitee can accept as `owner`. Independent of 14 — closing one does not close the other.
+
+**Both fixed in `048`** with a `BEFORE UPDATE` trigger rather than tighter policies. The rule is "these columns must not *change*", and an RLS `WITH CHECK` sees only the new row; reading the old value back via a subquery re-enters RLS and is fragile. A column-level `GRANT` cannot express it either, since `role` must stay writable for "Admins manage member roles" and grants apply per role, not per policy. The trigger allows admins of the row's *current* brand through (checked against `old.brand_id` — checking `new.brand_id` would let a user move a row into a brand they administer and call that authorisation), and otherwise refuses changes to `brand_id`, `role`, and reassignment of an already-claimed `user_id`.
+
+**Enforcement for `brand_members` is now split between RLS policies and a trigger. Reading `pg_policies` alone will not tell you what the table permits.**
+
+Preserved and checked against live callers: `TeamContext.setMyDisplayName` (touches only `display_name`), `TeamContext.claimInvites` and the `link_pending_invites` trigger (set `user_id` only where it is still NULL, which the guard explicitly allows), and admin role management.
+
+### Finding 16 — High: `045` closed UPDATE and left INSERT open
+
+The live ACL still read `authenticated=ardDxtm` — the `a` is INSERT — and `has_column_privilege(…,'plan_tier','INSERT')` returned true. So the billing columns could not be *changed* but could still be *set at creation*:
+
+```js
+supabase.from('brands').insert({ user_id: me, name: 'x',
+                                 plan_tier: 'premium',
+                                 stripe_customer_id: '<a real cus_…>' })
+```
+
+The insert policy only checks `user_id = auth.uid()`, so it passes. Free Premium on the first half; on the second, the `invoice.paid` handler grants to *every* brand matching a customer id with no cardinality check, and brand creation is unlimited — so one subscription can fund arbitrarily many brands' allowances. Fixed in `049`, same shape as `045`: revoke the table-wide INSERT, grant back the nine columns plus `user_id`.
+
+### Finding 17 — High: redirect SSRF, not the blind probe previously catalogued
+
+`safeStoreUrl` validates the hostname as written, but the fetch used Node's default `redirect: 'follow'` and nothing re-checked the `Location`. Any public HTTPS host the caller controls can answer with a 302 to `169.254.169.254` or `127.0.0.1`, and `/api/woocommerce/fetch-orders` returns the upstream body verbatim — a full read, not a probe. The original audit documented `safeStoreUrl` as closing SSRF and caveated only DNS rebinding; redirect-following is a considerably easier bypass and was not considered.
+
+Fixed with `safeFetchFollow`, which follows by hand with `redirect: 'manual'`, re-validates every hop through the same https-only / no-private-host rules, and caps the chain at 3. `isLikelyAlive` — which fetches URLs derived from Tavily results filtered by Gemini — was tightened the same way: private hosts refused, redirects not followed at all.
+
+Validator unit-checked: public HTTPS allowed with path and query preserved; http, cloud metadata, loopback, RFC1918 and localhost all refused.
+
+### What the panel rejected
+
+Worth recording, because rejections carry information too. The `metered()` auto-refund race was rejected — no verifier could confirm an attacker-forced failure landing after upstream spend. The Photopea script-injection mechanism was real but rejected 2-of-3: the code lands in the photopea.com origin and no caller supplies a quote-bearing string. The OAuth handoff store, state replay, and the uninstall-webhook header all failed verification. **The secrets pass found nothing**, matching this audit's own full-history scan.
+
+---
+
 ## Remaining work
 
 Nothing below is exploitable today. Ordered by when it will actually matter.
+
+**0. The 15 MEDIUM and 1 LOW findings from the Round 5 scan.** Not yet triaged or verified against the live database. Full text in `CLAUDE-SECURITY-20260728-220105/CLAUDE-SECURITY-RESULTS.md`. The ones called out as most substantive: an uncapped prompt on the 1-credit `/api/chat-reply` route (cost amplification — a caller pays 1 credit regardless of how much text they send), a `mode` type-confusion that under-charges credits, untrusted web text reaching a server-side fetch, and unauthenticated OAuth connect endpoints that will sign any supplied `brandId`. Each needs the same treatment the HIGHs got: confirm against `pg_policies`/live code before acting, since a scan of migration files cannot tell you which policy is actually live.
+
+**0b. `social_accounts` holds OAuth `access_token` and `refresh_token` behind a `has_brand_access` SELECT gate.** Flagged in passing by two verifiers during Round 5 but never itself paneled, so it is unassessed rather than cleared. Finding 14 turned that gate into token theft; with 048 applied the immediate path is closed, but storing live third-party credentials in a table readable by every brand member deserves its own review — at minimum, whether members below admin should see them at all.
 
 **1. Autosave churn — operational, not security, and the most time-sensitive item here.**
 `DesignDetail.jsx:232-241` updates a single rolling `design_versions` row and never removes the files it supersedes. Measured against production: 2344 MB total in `mockups`, of which **2312 MB (98.6%) is superseded autosave churn**, growing at ~117 MB/day from three active users — roughly 39 MB/user/day. At thirty beta users that is ~1.2 GB/day, ~35 GB/month. This does not require the phase 2 namespacing: a cleanup job on the backend using the service-role key bypasses RLS entirely and can delete superseded files against the current flat paths.
