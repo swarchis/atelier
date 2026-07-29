@@ -54,6 +54,7 @@ you the wrong thing.
 | `tech_packs` | `BEFORE UPDATE` trigger (052) | The four `approval_*` columns are admin-only |
 | `brands` | Column `GRANT`s (045, 049) | Only 9 columns are client-writable; `plan_tier` and the `stripe_*` ids are not, on INSERT **or** UPDATE |
 | `chat_participants` | Column `GRANT` (051) | Only `last_read_at` is client-writable, so a row can't be moved into another chat |
+| `social_accounts` | Column `GRANT` (054) | `access_token`/`refresh_token` are not client-**readable**; INSERT/UPDATE are revoked entirely, so the backend owns every write except the client's DELETE (Disconnect) |
 
 Plus **111 restrictive policies** across 37 tables (050) that require
 `has_brand_write_access()` — owner/admin/editor — for INSERT/UPDATE/DELETE.
@@ -122,6 +123,15 @@ SSRF through the WooCommerce endpoints.
 **Anything that sends email requires `requireAuth` + `verifyBrandAccess`.**
 It sends from our verified domain, so an open version is a phishing relay
 wearing our SPF and DKIM. Escape every interpolated value into email HTML.
+
+**Social platform tokens never reach the browser.** `social_accounts` rows are
+written by the backend in the OAuth callback (`persistSocialAccount`), and
+`/api/social/publish/:platform` takes a `brandId` and looks the token up itself
+via `getSocialAccessToken`, which also refreshes it when it's within 5 minutes of
+expiry. Don't add a client-side read of a token column — 054 revoked SELECT on
+them, so it returns a permission error, not a null. `sales_connections` (Shopify/
+Etsy/Woo) still holds tokens the client reads; that's the same shape and is *not*
+fixed yet.
 
 **Frontend never raw-`fetch`es the API.** Use `aiPost()` for metered AI routes
 (injects JWT + brandId + brand profile) or `apiPost()` for authenticated

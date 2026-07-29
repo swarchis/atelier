@@ -51,7 +51,7 @@ export default function ContentHub() {
   const [calView, setCalView] = useState('timeline'); // 'timeline' | 'month'
   const { products, activeBrand, updateProduct } = useProducts();
   const { orders } = useProduction();
-  const { accounts, posts, loading, connectAccount, disconnectAccount, schedulePost, updatePostStatus, refresh: refreshContent } = useContent();
+  const { accounts, posts, loading, disconnectAccount, schedulePost, updatePostStatus, refresh: refreshContent } = useContent();
   const { influencers, loading: influencersLoading, createInfluencer, updateInfluencer, deleteInfluencer, dealsByInfluencer, loadDeals, addDeal } = useInfluencers();
 
   const [form, setForm] = useState({ platform: 'instagram', scheduledFor: '', caption: '', productId: '' });
@@ -72,8 +72,11 @@ export default function ContentHub() {
       const brandId = params.get('brandId');
 
       if (brandId === activeBrand.id && handoffCode) {
+        // The backend has already written the connected row with its service-role
+        // key, and the handoff no longer carries tokens, so this only has to
+        // confirm the handoff was real and reload. See migration 054.
         consumeOAuthHandoff(handoffCode)
-          .then(({ handle, accessToken, refreshToken }) => connectAccount(platform, handle, accessToken, refreshToken))
+          .then(() => refreshContent())
           .then(() => {
             window.history.replaceState({}, '', '/content');
             setTab('accounts');
@@ -161,8 +164,11 @@ export default function ContentHub() {
   const publishNow = async (post) => {
     setPublishError(null);
     const account = accounts.find(a => a.platform === post.platform);
-    if (!account?.access_token) {
-      setPublishError(`No connected ${post.platform} account with a stored access token.`);
+    // `connected` rather than access_token: 054 makes the token columns
+    // unreadable from the client, so whether one exists is the backend's answer
+    // to give, not something to check here.
+    if (!account?.connected) {
+      setPublishError(`No connected ${post.platform} account.`);
       return;
     }
     let boardId;
@@ -173,7 +179,7 @@ export default function ContentHub() {
     setPublishingId(post.id);
     try {
       const res = await apiPost(`/api/social/publish/${post.platform}`, {
-        accessToken: account.access_token, caption: post.caption, imageUrl: post.image_url, boardId,
+        brandId: activeBrand.id, caption: post.caption, imageUrl: post.image_url, boardId,
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);

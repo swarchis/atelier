@@ -30,24 +30,16 @@ export function ContentProvider({ children }) {
 
   useEffect(() => { loadData(); }, [activeBrand]);
 
-  // Stores the real OAuth token now (it used to be discarded entirely —
-  // see api/index.js's social OAuth rebuild). No follower count is
-  // fabricated; each platform's real count would need its own extra API
-  // call/scope this doesn't make yet, so it's left unset rather than
-  // showing a made-up number.
-  const connectAccount = async (platform, handle, accessToken, refreshToken) => {
-    const { data, error } = await supabase.from('social_accounts').upsert({
-      brand_id: activeBrand.id,
-      platform: platform.toLowerCase(),
-      handle,
-      connected: true,
-      access_token: accessToken || null,
-      refresh_token: refreshToken || null,
-    }, { onConflict: 'brand_id, platform' }).select().single();
-    if (error) throw error;
-    setAccounts(prev => [...prev.filter(a => a.platform !== platform.toLowerCase()), data]);
-  };
-
+  // connectAccount() used to live here and upsert the row with the tokens the
+  // browser had just been handed. It is gone deliberately: migration 054 revokes
+  // the client's INSERT/UPDATE on social_accounts and makes the token columns
+  // unreadable, and the backend now writes the row in the OAuth callback with the
+  // service-role key. Anything calling this from the client could only fail with
+  // a permission error, so there is nothing to keep. The connect flow reloads via
+  // refresh() instead.
+  //
+  // No follower count is fabricated. `followers` stays at its default until a
+  // platform read actually populates it.
   const disconnectAccount = async (id) => {
     await supabase.from('social_accounts').delete().eq('id', id);
     setAccounts(prev => prev.filter(a => a.id !== id));
@@ -68,7 +60,7 @@ export function ContentProvider({ children }) {
   };
 
   return (
-    <ContentContext.Provider value={{ accounts, posts, loading, connectAccount, disconnectAccount, schedulePost, updatePostStatus, refresh: loadData }}>
+    <ContentContext.Provider value={{ accounts, posts, loading, disconnectAccount, schedulePost, updatePostStatus, refresh: loadData }}>
       {children}
     </ContentContext.Provider>
   );

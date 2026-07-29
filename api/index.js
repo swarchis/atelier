@@ -2386,7 +2386,22 @@ const SOCIAL_OAUTH = {
       const response = await fetch('https://open.tiktokapis.com/v2/oauth/token/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' }, body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'TikTok token exchange failed');
-      return { accessToken: data.access_token };
+      // refresh_token and expires_in were both being dropped here, so every
+      // TikTok connection died 24 hours later with no way to renew it.
+      return { accessToken: data.access_token, refreshToken: data.refresh_token || null, expiresIn: data.expires_in };
+    },
+    // TikTok is the only platform with a refresh path today because it is the
+    // only one whose token expires fast enough to matter (24h). Pinterest and
+    // YouTube hand back refresh tokens that are stored but not yet used; adding
+    // them here is a one-liner each when their own reads land.
+    refresh: async (refreshToken) => {
+      const form = new URLSearchParams({ client_key: process.env.TIKTOK_CLIENT_KEY, client_secret: process.env.TIKTOK_CLIENT_SECRET, grant_type: 'refresh_token', refresh_token: refreshToken });
+      const response = await fetch('https://open.tiktokapis.com/v2/oauth/token/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' }, body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error_description || data.message || 'TikTok token refresh failed');
+      // TikTok rotates the refresh token on use, so the new one must replace the
+      // old or the next refresh fails against a spent credential.
+      return { accessToken: data.access_token, refreshToken: data.refresh_token || refreshToken, expiresIn: data.expires_in };
     },
     getHandle: async ({ accessToken }) => {
       const response = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=display_name', { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -2429,6 +2444,66 @@ const SOCIAL_OAUTH = {
   },
 };
 
+// The connected row is written here, with the service-role key, rather than
+// handed to the browser for the client to insert. Migration 054 revokes SELECT on
+// access_token/refresh_token and INSERT/UPDATE entirely, so this is now the only
+// way a social account gets connected.
+//
+// Written to degrade rather than fail if 054 hasn't run yet: token_expires_at is
+// dropped and the write retried, same pattern as psd_url elsewhere. An
+// out-of-date database should lose the expiry tracking, not the connection.
+async function persistSocialAccount(brandId, platform, handle, tokenData) {
+  const base = {
+    brand_id: brandId,
+    platform: platform.toLowerCase(),
+    handle,
+    connected: true,
+    access_token: tokenData.accessToken || null,
+    refresh_token: tokenData.refreshToken || null,
+  };
+  const expiresAt = tokenData.expiresIn
+    ? new Date(Date.now() + Number(tokenData.expiresIn) * 1000).toISOString()
+    : null;
+
+  let { error } = await supabase
+    .from('social_accounts')
+    .upsert({ ...base, token_expires_at: expiresAt }, { onConflict: 'brand_id, platform' });
+
+  if (error && /token_expires_at/.test(error.message || '')) {
+    ({ error } = await supabase
+      .from('social_accounts')
+      .upsert(base, { onConflict: 'brand_id, platform' }));
+  }
+  if (error) throw new Error(error.message);
+}
+
+// Loads a connected account and returns a usable access token, refreshing first
+// if it is within the skew window. Refresh failure is surfaced rather than
+// swallowed — a dead connection the user can reconnect beats a confusing 400
+// from the platform two calls later.
+const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000;
+
+async function getSocialAccessToken(brandId, platform) {
+  const cfg = SOCIAL_OAUTH[platform];
+  const { data: account, error } = await supabase
+    .from('social_accounts')
+    .select('*')
+    .eq('brand_id', brandId)
+    .eq('platform', platform.toLowerCase())
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!account || !account.access_token) return null;
+
+  const expiresAt = account.token_expires_at ? new Date(account.token_expires_at).getTime() : null;
+  const expiringSoon = expiresAt !== null && expiresAt - Date.now() < TOKEN_REFRESH_SKEW_MS;
+  if (!expiringSoon || !cfg?.refresh || !account.refresh_token) return account.access_token;
+
+  const refreshed = await cfg.refresh(account.refresh_token);
+  await persistSocialAccount(brandId, platform, account.handle, refreshed);
+  return refreshed.accessToken;
+}
+
 app.get('/api/social/auth/:platform', (req, res) => {
   const { platform } = req.params;
   const { brandId } = req.query;
@@ -2459,7 +2534,15 @@ app.get('/api/social/callback/:platform', async (req, res) => {
     const tokenData = await cfg.getToken(code, redirectUri);
     const handle = await cfg.getHandle(tokenData).catch(() => 'Connected');
 
-    const handoffCode = createOAuthHandoff({ platform, handle, accessToken: tokenData.accessToken, refreshToken: tokenData.refreshToken || null, brandId });
+    // brandId came out of the HMAC-signed state, so it is safe to write against
+    // without a user JWT — there isn't one on a platform redirect.
+    await persistSocialAccount(brandId, platform, handle, tokenData);
+
+    // The handoff still exists so the frontend learns the connection succeeded
+    // and can refresh, but it no longer carries the tokens. /api/oauth/consume is
+    // unauthenticated, so anything in this payload is readable by whoever holds
+    // the code; a handle is fine, a bearer token was not.
+    const handoffCode = createOAuthHandoff({ platform, handle, brandId });
     res.redirect(`${appUrl}/content?social_success=true&platform=${platform}&handoff=${handoffCode}&brandId=${brandId}`);
   } catch (err) {
     console.error(`${platform} OAuth Error:`, err);
@@ -2476,12 +2559,36 @@ app.get('/api/social/callback/:platform', async (req, res) => {
 // a call guaranteed to fail, this says so plainly. YouTube did request an
 // upload scope, but content_posts only stores an image_url — there's no
 // video file to upload, so there's genuinely nothing to publish yet.
+//
+// The access token is no longer accepted from the client. It used to arrive in
+// the request body, read straight out of social_accounts in the browser, which
+// meant every member of a brand — including viewers — held the brand's platform
+// credential. It is now looked up server-side from brandId. See migration 054.
 app.post('/api/social/publish/:platform', requireAuth, async (req, res) => {
   const { platform } = req.params;
-  const { accessToken, caption, imageUrl, boardId } = req.body;
+  const { brandId, caption, imageUrl, boardId } = req.body;
+
+  if (!SOCIAL_OAUTH[platform]) return res.status(400).json({ ok: false, error: 'Unsupported platform' });
+  if (!brandId) return res.status(400).json({ ok: false, error: 'brandId is required.' });
+  if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
+    return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
+  }
+
+  let accessToken;
+  try {
+    accessToken = await getSocialAccessToken(brandId, platform);
+  } catch (err) {
+    // A refresh that fails is a connection the user has to re-establish, so say
+    // that instead of leaking the platform's own error text back.
+    console.error(`${platform} token refresh failed:`, err.message);
+    return res.status(400).json({ ok: false, error: `Your ${platform} connection has expired. Reconnect the account and try again.` });
+  }
+  if (!accessToken) {
+    return res.status(400).json({ ok: false, error: `No connected ${platform} account for this brand.` });
+  }
 
   if (platform === 'pinterest') {
-    if (!accessToken || !imageUrl) return res.status(400).json({ ok: false, error: 'Missing accessToken or imageUrl' });
+    if (!imageUrl) return res.status(400).json({ ok: false, error: 'Missing imageUrl' });
     if (!boardId) return res.status(400).json({ ok: false, error: 'Pinterest requires a board ID to pin to — add one in the post composer.' });
     try {
       const response = await fetch('https://api.pinterest.com/v5/pins', {
