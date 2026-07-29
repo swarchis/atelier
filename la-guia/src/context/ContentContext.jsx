@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { apiPost } from '../lib/aiApi.js';
 import { useProducts } from './ProductsContext.jsx';
 
 const ContentContext = createContext(null);
@@ -8,11 +9,15 @@ export function ContentProvider({ children }) {
   const { activeBrand } = useProducts();
   const [accounts, setAccounts] = useState([]);
   const [posts, setPosts] = useState([]);
+  // The brand's real posts pulled from the platforms, as opposed to `posts`,
+  // which is what they planned in here. Two different things that used to get
+  // conflated in Analytics.
+  const [syncedPosts, setSyncedPosts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
     if (!activeBrand) {
-      setAccounts([]); setPosts([]); setLoading(false); return;
+      setAccounts([]); setPosts([]); setSyncedPosts([]); setLoading(false); return;
     }
     setLoading(true);
     try {
@@ -21,15 +26,32 @@ export function ContentProvider({ children }) {
       // table-level privilege — per-column grants do not satisfy it. With '*'
       // this returns a permission error, which loadData swallows, so every
       // connected account silently renders as "Not connected".
-      const { data: accData, error: accError } = await supabase
+      //
+      // stats_synced_at arrives in 055 and is dropped on retry if it isn't there
+      // yet — an out-of-date database should lose the "synced at" label, not the
+      // whole accounts list. Same pattern as psd_url elsewhere.
+      const ACCOUNT_COLUMNS = 'id, brand_id, platform, handle, followers, connected, created_at, token_expires_at';
+      let { data: accData, error: accError } = await supabase
         .from('social_accounts')
-        .select('id, brand_id, platform, handle, followers, connected, created_at, token_expires_at')
+        .select(`${ACCOUNT_COLUMNS}, stats_synced_at`)
         .eq('brand_id', activeBrand.id);
+      if (accError && /stats_synced_at/.test(accError.message || '')) {
+        ({ data: accData, error: accError } = await supabase
+          .from('social_accounts')
+          .select(ACCOUNT_COLUMNS)
+          .eq('brand_id', activeBrand.id));
+      }
       if (accError) throw accError;
       const { data: postData } = await supabase.from('content_posts').select('*, products(name)').eq('brand_id', activeBrand.id).order('scheduled_for', { ascending: false });
+      const { data: syncedData } = await supabase
+        .from('social_posts_synced')
+        .select('*')
+        .eq('brand_id', activeBrand.id)
+        .order('posted_at', { ascending: false });
 
       setAccounts(accData || []);
       setPosts(postData || []);
+      setSyncedPosts(syncedData || []);
     } catch (err) {
       console.error('Error loading content:', err);
     } finally {
@@ -50,8 +72,27 @@ export function ContentProvider({ children }) {
   // No follower count is fabricated. `followers` stays at its default until a
   // platform read actually populates it.
   const disconnectAccount = async (id) => {
+    const account = accounts.find(a => a.id === id);
     await supabase.from('social_accounts').delete().eq('id', id);
+    // Drop the cached metrics too. Leaving them means Analytics keeps reporting
+    // on an account the user just disconnected, which reads as us still being
+    // connected to it.
+    if (account) {
+      await supabase.from('social_posts_synced').delete()
+        .eq('brand_id', account.brand_id).eq('platform', account.platform);
+      setSyncedPosts(prev => prev.filter(p => p.platform !== account.platform));
+    }
     setAccounts(prev => prev.filter(a => a.id !== id));
+  };
+
+  // Pulls the real numbers from the platform. The backend holds the token and
+  // does the fetching; this only asks and then reloads.
+  const syncAccount = async (platform) => {
+    const res = await apiPost(`/api/social/sync/${platform}`, { brandId: activeBrand.id });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not sync that account.');
+    await loadData();
+    return data;
   };
 
   const schedulePost = async (postData) => {
@@ -69,7 +110,7 @@ export function ContentProvider({ children }) {
   };
 
   return (
-    <ContentContext.Provider value={{ accounts, posts, loading, disconnectAccount, schedulePost, updatePostStatus, refresh: loadData }}>
+    <ContentContext.Provider value={{ accounts, posts, syncedPosts, loading, disconnectAccount, syncAccount, schedulePost, updatePostStatus, refresh: loadData }}>
       {children}
     </ContentContext.Provider>
   );

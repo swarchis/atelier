@@ -101,6 +101,18 @@ const emailLimiter = rateLimit({
   message: { error: 'Too many email requests — please wait a few minutes.' },
 });
 
+// Social platform reads. The limit that matters here isn't ours — TikTok's
+// Display API is rate-limited PER API CLIENT, so one founder holding down "Sync
+// now" degrades the feature for every brand on the platform. Capped well below
+// what a person could plausibly need.
+const socialSyncLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many sync requests — platform metrics update slowly, so give it a few minutes.' },
+});
+
 // The metered AI/generation endpoints — rate-limited, JWT-authenticated, and
 // credit-charged (see requireAuth registration + metered() below).
 const AI_PATHS = [
@@ -2408,6 +2420,52 @@ const SOCIAL_OAUTH = {
       const data = await response.json();
       return data.data?.user?.display_name || 'Connected';
     },
+    // ── Display API reads ────────────────────────────────────────────────────
+    // Both of these need scopes the app has NOT been granted yet
+    // (user.info.stats, video.list), so until the TikTok revision is approved
+    // they fail with scope_not_authorized. tiktokDisplayCall turns that into a
+    // sentence a founder can act on rather than a raw platform error.
+    fetchStats: async (accessToken) => {
+      const data = await tiktokDisplayCall(
+        'https://open.tiktokapis.com/v2/user/info/?fields=display_name,follower_count',
+        accessToken,
+      );
+      return {
+        handle: data.user?.display_name || null,
+        followers: Number.isFinite(data.user?.follower_count) ? data.user.follower_count : null,
+      };
+    },
+    fetchPosts: async (accessToken) => {
+      const fields = [
+        'id', 'create_time', 'cover_image_url', 'share_url', 'embed_link',
+        'video_description', 'title',
+        'like_count', 'comment_count', 'share_count', 'view_count',
+      ].join(',');
+      const data = await tiktokDisplayCall(
+        `https://open.tiktokapis.com/v2/video/list/?fields=${fields}`,
+        accessToken,
+        // max_count's ceiling is 20. One page per sync on purpose: the limit is
+        // per API client, not per user, so paging through one brand's whole
+        // history would spend everybody's budget. Newest 20 is what the UI shows.
+        { method: 'POST', body: JSON.stringify({ max_count: 20 }) },
+      );
+      const videos = Array.isArray(data.videos) ? data.videos : [];
+      return {
+        hasMore: !!data.has_more,
+        posts: videos.map(v => ({
+          externalId: String(v.id),
+          caption: v.title || v.video_description || null,
+          coverImageUrl: v.cover_image_url || null,
+          shareUrl: v.share_url || null,
+          embedLink: v.embed_link || null,
+          postedAt: v.create_time ? new Date(v.create_time * 1000).toISOString() : null,
+          likeCount: v.like_count ?? null,
+          commentCount: v.comment_count ?? null,
+          shareCount: v.share_count ?? null,
+          viewCount: v.view_count ?? null,
+        })),
+      };
+    },
   },
   youtube: {
     envId: 'YOUTUBE_CLIENT_ID', envSecret: 'YOUTUBE_CLIENT_SECRET',
@@ -2443,6 +2501,43 @@ const SOCIAL_OAUTH = {
     },
   },
 };
+
+// TikTok's Display API answers HTTP 200 with a non-'ok' error.code on failure,
+// so response.ok alone will happily hand you an empty result and call it success.
+// Every read goes through here so that check can't be forgotten.
+//
+// The scope errors are translated because they are the expected state right now,
+// not an edge case: the app has user.info.basic and nothing else until the
+// revision is approved, so "not authorised" is what a founder will actually hit.
+async function tiktokDisplayCall(url, accessToken, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  });
+  const payload = await response.json().catch(() => ({}));
+  const code = payload.error?.code;
+
+  if (code && code !== 'ok') {
+    if (code === 'scope_not_authorized' || code === 'scope_permission_missed') {
+      throw new Error('TikTok has not approved the permissions this needs yet (video.list and user.info.stats). Nothing to sync until that review passes.');
+    }
+    if (code === 'access_token_invalid' || code === 'access_token_expired') {
+      throw new Error('This TikTok connection is no longer valid. Reconnect the account and try again.');
+    }
+    if (code === 'rate_limit_exceeded') {
+      throw new Error('TikTok is rate-limiting us right now. Try again in a few minutes.');
+    }
+    // Deliberately not echoing payload.error.message — it is an upstream body,
+    // and the audit's rule is that those don't get reflected back to a client.
+    console.error('TikTok Display API error:', code, payload.error?.message, payload.error?.log_id);
+    throw new Error('TikTok refused that request.');
+  }
+  if (!response.ok) {
+    console.error('TikTok Display API HTTP error:', response.status);
+    throw new Error('TikTok refused that request.');
+  }
+  return payload.data || {};
+}
 
 // The connected row is written here, with the service-role key, rather than
 // handed to the browser for the client to insert. Migration 054 revokes SELECT on
@@ -2559,6 +2654,99 @@ app.get('/api/social/callback/:platform', async (req, res) => {
 // a call guaranteed to fail, this says so plainly. YouTube did request an
 // upload scope, but content_posts only stores an image_url — there's no
 // video file to upload, so there's genuinely nothing to publish yet.
+// Pull the brand's own posts and follower count from the platform into
+// social_posts_synced. Not metered — no AI model is involved, so it costs no
+// credits; the rate limiter is what protects the shared platform quota.
+app.post('/api/social/sync/:platform', requireAuth, socialSyncLimiter, async (req, res) => {
+  const { platform } = req.params;
+  const { brandId } = req.body;
+  const cfg = SOCIAL_OAUTH[platform];
+
+  if (!cfg) return res.status(400).json({ ok: false, error: 'Unsupported platform' });
+  if (!brandId) return res.status(400).json({ ok: false, error: 'brandId is required.' });
+  if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
+    return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
+  }
+  if (!cfg.fetchPosts) {
+    return res.status(400).json({ ok: false, error: `Reading posts from ${platform} isn't built yet — only TikTok is, and only once its review passes.` });
+  }
+
+  try {
+    const accessToken = await getSocialAccessToken(brandId, platform);
+    if (!accessToken) {
+      return res.status(400).json({ ok: false, error: `No connected ${platform} account for this brand.` });
+    }
+
+    const { posts, hasMore } = await cfg.fetchPosts(accessToken);
+    // Stats are secondary — a follower count we couldn't read shouldn't lose the
+    // posts we could. Left null rather than guessed at.
+    const stats = cfg.fetchStats ? await cfg.fetchStats(accessToken).catch(() => null) : null;
+
+    if (posts.length) {
+      const { error: upsertError } = await supabase.from('social_posts_synced').upsert(
+        posts.map(p => ({
+          brand_id: brandId,
+          platform,
+          external_id: p.externalId,
+          caption: p.caption,
+          cover_image_url: p.coverImageUrl,
+          share_url: p.shareUrl,
+          embed_link: p.embedLink,
+          posted_at: p.postedAt,
+          like_count: p.likeCount,
+          comment_count: p.commentCount,
+          share_count: p.shareCount,
+          view_count: p.viewCount,
+          synced_at: new Date().toISOString(),
+        })),
+        { onConflict: 'brand_id, platform, external_id' },
+      );
+      if (upsertError) throw new Error(upsertError.message);
+    }
+
+    // Prune posts the user has since deleted on the platform — but ONLY when this
+    // sync saw their whole list. With has_more true we're looking at the newest
+    // page, and anything older would be deleted for being absent from a window it
+    // was never in.
+    if (!hasMore) {
+      // Digits only: these go into a PostgREST `in.(...)` list, which is a string
+      // filter, so an id carrying a comma or a quote would change the query's
+      // shape rather than just failing. TikTok ids are numeric; anything that
+      // isn't gets left out of the keep-list rather than trusted.
+      const keptIds = posts.map(p => p.externalId).filter(id => /^\d+$/.test(id));
+      let prune = supabase.from('social_posts_synced').delete()
+        .eq('brand_id', brandId).eq('platform', platform);
+      if (keptIds.length) prune = prune.not('external_id', 'in', `(${keptIds.join(',')})`);
+      const { error: pruneError } = await prune;
+      if (pruneError) console.error('Pruning removed posts failed:', pruneError.message);
+    }
+
+    const accountUpdate = { stats_synced_at: new Date().toISOString() };
+    if (stats?.followers !== null && stats?.followers !== undefined) accountUpdate.followers = stats.followers;
+    if (stats?.handle) accountUpdate.handle = stats.handle;
+
+    let { error: accountError } = await supabase.from('social_accounts')
+      .update(accountUpdate).eq('brand_id', brandId).eq('platform', platform);
+    // Degrade rather than fail if 055 hasn't run — the posts are already saved,
+    // and losing the "synced at" stamp is a smaller loss than losing the sync.
+    if (accountError && /stats_synced_at/.test(accountError.message || '')) {
+      const { stats_synced_at, ...withoutStamp } = accountUpdate;
+      if (Object.keys(withoutStamp).length) {
+        ({ error: accountError } = await supabase.from('social_accounts')
+          .update(withoutStamp).eq('brand_id', brandId).eq('platform', platform));
+      } else {
+        accountError = null;
+      }
+    }
+    if (accountError) console.error('Updating synced account failed:', accountError.message);
+
+    res.json({ ok: true, synced: posts.length, followers: stats?.followers ?? null });
+  } catch (err) {
+    console.error(`${platform} sync failed:`, err.message);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 //
 // The access token is no longer accepted from the client. It used to arrive in
 // the request body, read straight out of social_accounts in the browser, which

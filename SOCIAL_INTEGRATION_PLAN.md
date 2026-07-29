@@ -100,7 +100,41 @@ up with the service-role key. That removes `accessToken` from the
 `/api/social/publish/:platform` request body — a **request-shape change**, so
 Pinterest's existing publish path has to move at the same time or it breaks.
 
-## Phase 1 — read (Display API)
+## Phase 1 — DONE (code written, migration 055 not yet run)
+
+`node --check` passes, the API boots clean, `vite build` succeeds. **Nothing here
+returns real data until TikTok approves `video.list` + `user.info.stats`** — the
+sync endpoint exists and will answer `scope_not_authorized` with a sentence
+saying exactly that until the revision passes.
+
+- `055_social_post_metrics_cache.sql` — `social_posts_synced` (SELECT on brand
+  access, DELETE on write access, INSERT/UPDATE revoked so only the service role
+  writes it) + `stats_synced_at` on `social_accounts`, **granted by name**
+  because 054 revoked table SELECT.
+- `tiktokDisplayCall()` — one chokepoint for the fact that TikTok answers HTTP
+  200 with a non-`ok` `error.code`; translates scope/token/rate-limit errors and
+  never echoes the upstream body.
+- `fetchStats` / `fetchPosts` on the TikTok config; one page of 20, deliberately
+  not paged, because the quota is per API client and not per user.
+- `POST /api/social/sync/:platform` — `requireAuth` + `verifyBrandAccess` +
+  a dedicated 10-per-5-min limiter. Not metered; no AI is involved.
+- Prunes posts deleted on the platform, but **only when `has_more` is false**, so
+  older posts aren't deleted for being absent from a window they were never in.
+- `ContentContext` — `syncedPosts`, `syncAccount()`, disconnect now clears cached
+  metrics, and the `stats_synced_at` read degrades if 055 hasn't run.
+- Accounts tab — follower count, "synced 2h ago", Sync now. Followers render only
+  once a sync returned a number, since the column defaults to `0` and that reads
+  as "no followers" rather than "unknown".
+- Analytics tab — real views/likes/comments/followers and top posts by views, in
+  a section kept **separate** from the planning counts. Cover images are dropped
+  after 6 hours rather than rendered as broken images.
+- `ComingSoonNotice` on Analytics disappears once real numbers exist.
+
+**Not verified:** no signed-in session, and no platform call has ever succeeded
+because the scopes aren't granted. The first real test is only possible in
+Sandbox or post-approval.
+
+Original write-up:
 
 ### Schema
 

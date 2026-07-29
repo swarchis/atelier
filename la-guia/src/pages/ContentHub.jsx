@@ -44,6 +44,20 @@ const PLATFORM_ICON = { instagram: 'ph-instagram-logo', tiktok: 'ph-tiktok-logo'
 const STATUS_TAG = { Scheduled: 'tag-blue', Posted: 'tag-green', Draft: 'tag-neutral', Failed: 'tag-red' };
 const DEFAULT_PLATFORMS = ['instagram', 'tiktok', 'youtube', 'pinterest'];
 
+// Only TikTok has a read path built (api/index.js SOCIAL_OAUTH.tiktok.fetchPosts).
+// The others need their own platform review before there's anything to call, so
+// they get no Sync button rather than one that always errors.
+const SYNC_SUPPORTED = ['tiktok'];
+
+function timeAgo(iso) {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
 export default function ContentHub() {
   const location = useLocation();
   const [tab, setTab] = useState('hub');
@@ -51,7 +65,8 @@ export default function ContentHub() {
   const [calView, setCalView] = useState('timeline'); // 'timeline' | 'month'
   const { products, activeBrand, updateProduct } = useProducts();
   const { orders } = useProduction();
-  const { accounts, posts, loading, disconnectAccount, schedulePost, updatePostStatus, refresh: refreshContent } = useContent();
+  const { accounts, posts, syncedPosts, loading, disconnectAccount, syncAccount, schedulePost, updatePostStatus, refresh: refreshContent } = useContent();
+  const [syncingPlatform, setSyncingPlatform] = useState(null);
   const { influencers, loading: influencersLoading, createInfluencer, updateInfluencer, deleteInfluencer, dealsByInfluencer, loadDeals, addDeal } = useInfluencers();
 
   const [form, setForm] = useState({ platform: 'instagram', scheduledFor: '', caption: '', productId: '' });
@@ -96,6 +111,18 @@ export default function ContentHub() {
     const dbAcc = accounts.find(a => a.platform === p);
     return dbAcc || { platform: p, connected: false, handle: '', followers: 0 };
   });
+
+  const handleSync = async (platform) => {
+    setSyncingPlatform(platform);
+    try {
+      const { synced } = await syncAccount(platform);
+      toast.success(synced ? `Synced ${synced} post${synced === 1 ? '' : 's'} from ${platform}.` : `No posts found on ${platform}.`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSyncingPlatform(null);
+    }
+  };
 
   const handleConnect = async (platform) => {
     // If keys are missing, we prompt manually. If you add the keys to .env, this redirects to real OAuth
@@ -429,7 +456,19 @@ export default function ContentHub() {
         )}
 
         {tab === 'email' && <EmailCampaignsTab activeBrand={activeBrand} />}
-        {tab === 'analytics' && <><ComingSoonNotice what="Post analytics" platforms="Instagram, TikTok, YouTube and Pinterest">Reach and engagement numbers come from the platforms. Your planning is saved either way.</ComingSoonNotice><CampaignAnalyticsTab posts={posts} activeBrand={activeBrand} /></>}
+        {/* The notice drops away once real platform numbers exist — leaving it up
+            over live data would be its own kind of lie. Until then it still names
+            what's pending, which is TikTok's review. */}
+        {tab === 'analytics' && (
+          <>
+            {syncedPosts.length === 0 && (
+              <ComingSoonNotice what="Post analytics" platforms="Instagram, TikTok, YouTube and Pinterest">
+                Reach and engagement numbers come from the platforms. TikTok's read permissions are built and waiting on review; the other three need their own. Your planning is saved either way.
+              </ComingSoonNotice>
+            )}
+            <CampaignAnalyticsTab posts={posts} syncedPosts={syncedPosts} accounts={accounts} activeBrand={activeBrand} />
+          </>
+        )}
 
         {tab === 'accounts' && (
           <div className="card">
@@ -442,11 +481,33 @@ export default function ContentHub() {
                   <i className={`ph ${PLATFORM_ICON[a.platform]}`} style={{ fontSize: 18, color: 'var(--c-content)' }} />
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 500, textTransform: 'capitalize' }}>{a.platform}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{a.connected ? a.handle : 'Not connected'}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
+                      {!a.connected ? 'Not connected' : (
+                        <>
+                          {a.handle}
+                          {/* Followers only once a sync actually returned a number.
+                              The column defaults to 0, and rendering that reads as
+                              "you have no followers" rather than "we don't know". */}
+                          {a.stats_synced_at && typeof a.followers === 'number' && (
+                            <> · {a.followers.toLocaleString()} followers</>
+                          )}
+                          {a.stats_synced_at
+                            ? <> · synced {timeAgo(a.stats_synced_at)}</>
+                            : SYNC_SUPPORTED.includes(a.platform) && <> · never synced</>}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
                 {a.connected ? (
-                  <button className="btn btn-sm" onClick={() => disconnectAccount(a.id)}>Disconnect</button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {SYNC_SUPPORTED.includes(a.platform) && (
+                      <button className="btn btn-sm" disabled={syncingPlatform === a.platform} onClick={() => handleSync(a.platform)}>
+                        {syncingPlatform === a.platform ? <i className="ph ph-circle-notch ph-spin" /> : 'Sync now'}
+                      </button>
+                    )}
+                    <button className="btn btn-sm" onClick={() => disconnectAccount(a.id)}>Disconnect</button>
+                  </div>
                 ) : (
                   <button className="btn btn-sm" style={{ background: 'var(--accent-bg)', color: 'var(--accent)', borderColor: 'var(--accent-border)' }} onClick={() => handleConnect(a.platform)}>
                     Connect
@@ -893,7 +954,17 @@ function EmailCampaignsTab({ activeBrand }) {
   );
 }
 
-function CampaignAnalyticsTab({ posts, activeBrand }) {
+// Six hours is TikTok's stated TTL on cover_image_url. Past that the CDN link
+// 403s, so a stale row renders as a broken image unless we stop trusting it —
+// the same mistake the PSD thumbnails made before ba48098.
+const COVER_URL_TTL_MS = 6 * 60 * 60 * 1000;
+
+function coverIsFresh(post) {
+  return !!post.cover_image_url && post.synced_at
+    && Date.now() - new Date(post.synced_at).getTime() < COVER_URL_TTL_MS;
+}
+
+function CampaignAnalyticsTab({ posts, syncedPosts = [], accounts = [], activeBrand }) {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -902,6 +973,24 @@ function CampaignAnalyticsTab({ posts, activeBrand }) {
     supabase.from('email_campaigns').select('*').eq('brand_id', activeBrand.id).eq('status', 'Sent')
       .then(({ data }) => { setCampaigns(data || []); setLoading(false); });
   }, [activeBrand]);
+
+  // Real platform numbers, kept strictly separate from the planning counts below.
+  // Conflating "12 posts scheduled" with "12 posts live" was the old bug here.
+  const reach = syncedPosts.reduce((acc, p) => ({
+    views: acc.views + (p.view_count || 0),
+    likes: acc.likes + (p.like_count || 0),
+    comments: acc.comments + (p.comment_count || 0),
+    shares: acc.shares + (p.share_count || 0),
+  }), { views: 0, likes: 0, comments: 0, shares: 0 });
+
+  const followers = accounts.reduce((sum, a) => sum + (a.stats_synced_at ? (a.followers || 0) : 0), 0);
+  const lastSynced = accounts
+    .map(a => a.stats_synced_at).filter(Boolean)
+    .sort().reverse()[0];
+
+  const topPosts = [...syncedPosts]
+    .sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
+    .slice(0, 5);
 
   const byPlatform = {};
   posts.forEach(p => {
@@ -917,6 +1006,71 @@ function CampaignAnalyticsTab({ posts, activeBrand }) {
 
   return (
     <>
+      {syncedPosts.length > 0 && (
+        <>
+          <div className="card-header" style={{ paddingLeft: 0, marginBottom: 10 }}>
+            <span className="card-title">From your connected accounts</span>
+            {lastSynced && <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>synced {timeAgo(lastSynced)}</span>}
+          </div>
+          <div className="stats-row">
+            <div className="stat-card" style={{ '--stat-accent': 'var(--c-content)' }}>
+              <div className="stat-label">Views</div>
+              <div className="stat-value">{reach.views.toLocaleString()}</div>
+            </div>
+            <div className="stat-card" style={{ '--stat-accent': 'var(--green)' }}>
+              <div className="stat-label">Likes</div>
+              <div className="stat-value">{reach.likes.toLocaleString()}</div>
+            </div>
+            <div className="stat-card" style={{ '--stat-accent': 'var(--c-content)' }}>
+              <div className="stat-label">Comments</div>
+              <div className="stat-value">{reach.comments.toLocaleString()}</div>
+            </div>
+            <div className="stat-card" style={{ '--stat-accent': 'var(--c-content)' }}>
+              <div className="stat-label">{followers > 0 ? 'Followers' : 'Shares'}</div>
+              <div className="stat-value">{(followers > 0 ? followers : reach.shares).toLocaleString()}</div>
+            </div>
+          </div>
+          <div className="form-hint" style={{ marginBottom: 16 }}>
+            Real numbers from the platform, covering your {syncedPosts.length} most recently synced post{syncedPosts.length === 1 ? '' : 's'}. They update when you press Sync, not continuously.
+          </div>
+
+          {topPosts.length > 0 && (
+            <div className="card" style={{ marginBottom: 18 }}>
+              <div className="card-header"><span className="card-title">Top posts by views</span></div>
+              {topPosts.map(p => (
+                <div className="list-row" key={p.id}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    {/* Cover links expire after 6h, so an older row shows the icon
+                        instead of a guaranteed-broken image. */}
+                    {coverIsFresh(p) ? (
+                      <img src={p.cover_image_url} alt="" style={{ width: 32, height: 42, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />
+                    ) : (
+                      <i className={`ph ${PLATFORM_ICON[p.platform] || 'ph-share-network'}`} style={{ fontSize: 18, color: 'var(--c-content)', width: 32, textAlign: 'center' }} />
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.share_url
+                          ? <a href={p.share_url} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>{p.caption || 'Untitled post'}</a>
+                          : (p.caption || 'Untitled post')}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{p.posted_at ? new Date(p.posted_at).toLocaleDateString() : '—'}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 14, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)', flexShrink: 0 }}>
+                    <span>{(p.view_count || 0).toLocaleString()} views</span>
+                    <span>{(p.like_count || 0).toLocaleString()} likes</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="card-header" style={{ paddingLeft: 0, marginBottom: 10 }}>
+            <span className="card-title">Your planning in Atelier</span>
+          </div>
+        </>
+      )}
+
       <div className="stats-row">
         <div className="stat-card" style={{ '--stat-accent': 'var(--c-content)' }}>
           <div className="stat-label">Posts Scheduled</div>
@@ -936,7 +1090,11 @@ function CampaignAnalyticsTab({ posts, activeBrand }) {
         </div>
       </div>
 
-      <div className="form-hint" style={{ marginBottom: 16 }}>These are real counts from what's actually been scheduled/posted/sent — there's no click, open, or engagement tracking wired up yet, so nothing beyond volume is shown here.</div>
+      <div className="form-hint" style={{ marginBottom: 16 }}>
+        {syncedPosts.length > 0
+          ? "Counts of what you've planned and sent from Atelier. Email campaigns have no open or click tracking wired up, so only volume is shown for those."
+          : "These are real counts from what's actually been scheduled/posted/sent — there's no click, open, or engagement tracking wired up yet, so nothing beyond volume is shown here."}
+      </div>
 
       {Object.keys(byPlatform).length === 0 ? (
         <EmptyState icon="ph-chart-bar" color="var(--c-content)" title="No content activity yet" sub="Schedule a post or send a campaign to see real numbers here." />

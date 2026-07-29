@@ -130,6 +130,13 @@ SSRF through the WooCommerce endpoints.
 It sends from our verified domain, so an open version is a phishing relay
 wearing our SPF and DKIM. Escape every interpolated value into email HTML.
 
+**TikTok's Display API answers HTTP 200 on failure.** A non-`ok` `error.code` in
+the body is how errors arrive, so `response.ok` will hand you an empty result and
+call it success. Every read goes through `tiktokDisplayCall()` so that check can't
+be skipped. `social_posts_synced` is a cache written only by the service role;
+`cover_image_url` in it expires after **6 hours** and must never be rendered
+without a freshness check.
+
 **Social platform tokens never reach the browser.** `social_accounts` rows are
 written by the backend in the OAuth callback (`persistSocialAccount`), and
 `/api/social/publish/:platform` takes a `brandId` and looks the token up itself
