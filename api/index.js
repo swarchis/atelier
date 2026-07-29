@@ -2564,10 +2564,21 @@ async function tiktokDisplayCall(url, accessToken, options = {}, requiredScope =
     if (code === 'rate_limit_exceeded') {
       throw new Error('TikTok is rate-limiting us right now. Try again in a few minutes.');
     }
-    // Deliberately not echoing payload.error.message — it is an upstream body,
-    // and the audit's rule is that those don't get reflected back to a client.
-    console.error('TikTok Display API error:', code, payload.error?.message, payload.error?.log_id);
-    throw new Error('TikTok refused that request.');
+    // Expected until the audit passes, and the fix is on the user's side, so it
+    // gets a real instruction rather than a raw code. TikTok requires BOTH halves
+    // from an unaudited client: the account private at the time of posting, and
+    // SELF_ONLY viewership (which we already send). Only the account is theirs to
+    // change. Unaudited clients are also capped at 5 posting users per 24h.
+    if (code === 'unaudited_client_can_only_post_to_private_accounts') {
+      throw new Error('TikTok requires your account to be set to private while this app is unaudited. In TikTok: Settings and privacy → Privacy → Private account, then try again. Posts will be visible only to you until the audit passes.');
+    }
+    // The CODE is surfaced, the message and log_id are not. The rule about not
+    // reflecting upstream bodies is about not turning a server-side fetch into a
+    // readable one; error.code is a fixed enum from a known host, and withholding
+    // it just means "TikTok refused that request" and a trip to the logs — which
+    // is exactly what happened. The free-text message stays server-side.
+    console.error('TikTok API error:', code, payload.error?.message, payload.error?.log_id);
+    throw new Error(`TikTok refused that request (${code}).`);
   }
   if (!response.ok) {
     console.error('TikTok Display API HTTP error:', response.status);
