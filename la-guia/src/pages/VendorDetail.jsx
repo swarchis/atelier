@@ -207,7 +207,10 @@ export default function VendorDetail() {
 
   const openInMailClient = () => {
     if (!draft) return;
-    const mailto = `mailto:?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`;
+    // Addresses the draft to the vendor when one is on file. This used to be a
+    // bare `mailto:?…` — the recipient was always empty, because vendors.email
+    // was read all over the app but never existed as a column until 053.
+    const mailto = `mailto:${encodeURIComponent(vendor.email || '')}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`;
     window.location.href = mailto;
   };
 

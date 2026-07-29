@@ -53,7 +53,7 @@ export function VendorsProvider({ children }) {
     }
   }
 
-  const addVendor = async ({ name, category, location, specialties, sourceNote, moq, leadTime, label, certifications, capabilities, priceRange }) => {
+  const addVendor = async ({ name, category, location, specialties, sourceNote, moq, leadTime, label, certifications, capabilities, priceRange, email }) => {
     const baseRow = {
       brand_id: activeBrand.id,
       name,
@@ -67,7 +67,9 @@ export function VendorsProvider({ children }) {
     };
     let { data, error } = await supabase
       .from('vendors')
-      .insert([{ ...baseRow, certifications: certifications || [], capabilities: capabilities || [], price_range: priceRange || null }])
+      // email rides with the 015 columns so an un-migrated DB (053) falls back
+      // to baseRow and still saves the vendor, minus the address.
+      .insert([{ ...baseRow, certifications: certifications || [], capabilities: capabilities || [], price_range: priceRange || null, email: email || null }])
       .select()
       .single();
     if (error) {

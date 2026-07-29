@@ -4,7 +4,9 @@ import { useVendors } from '../context/VendorsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { trustTagClass } from '../lib/format.js';
 import { toast } from '../lib/toast.js';
-import { supabase } from '../lib/supabase.js';
+import { apiPost, aiPost } from '../lib/aiApi.js';
+import { useAIUsage } from '../context/AIUsageContext.jsx';
+import CreditCost from '../components/CreditCost.jsx';
 import FlowStepper from '../components/FlowStepper.jsx';
 
 const STATUSES = ['All', 'Requested', 'Received', 'Accepted', 'Declined'];
@@ -59,15 +61,46 @@ function QuoteRow({ q, onUpdate, onOpen }) {
 
 const EMPTY_RFQ = { productId: '', vendorIds: [], quantity: '', targetUnitCost: '', deadline: '', message: '' };
 
+// The shared RFQ body. {{vendor}} is substituted per recipient at send time, so
+// one edited draft covers every vendor on the request — which is the point of an
+// RFQ: the same ask to everyone, so the quotes that come back are comparable.
+const VENDOR_TOKEN = '{{vendor}}';
+
+function defaultRfqSubject(productName) {
+  return `Request for Quote: ${productName || 'New Design'}`;
+}
+
+function defaultRfqBody({ productName, brandName, quantity, targetUnitCost, deadline, message }) {
+  return `Hello ${VENDOR_TOKEN},
+
+We would like to request a formal quote for our product: ${productName || 'Garment Design'}.
+
+Details:
+- Target Quantity: ${quantity || 'Standard MOQ'}
+- Target Unit Cost: ${targetUnitCost ? '$' + targetUnitCost : 'Open for negotiation'}
+- Target Deadline: ${deadline || 'Standard lead time'}
+
+Additional Notes:
+${message || 'None'}
+
+Please reply with your pricing and availability.
+
+Best regards,
+${brandName || 'Atelier Studio'}`;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function QuoteTracker() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const urlProductId = searchParams.get('productId');
 
-  const { vendors, quotes, loading, updateQuote, createRFQ } = useVendors();
+  const { vendors, quotes, loading, updateQuote, createRFQ, updateVendor } = useVendors();
   // activeBrand: /api/send-vendor-email is brand-scoped, so the RFQ dispatch
   // below has to say which brand it's sending on behalf of.
   const { products, activeBrand } = useProducts();
+  const { canAfford, openTopup } = useAIUsage();
   const [filter, setFilter] = useState('All');
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'compare'
   const [compareProductId, setCompareProductId] = useState('');
@@ -77,6 +110,15 @@ export default function QuoteTracker() {
   const [rfqOverrideGate, setRfqOverrideGate] = useState(false);
   const [rfqSending, setRfqSending] = useState(false);
   const [rfqError, setRfqError] = useState(null);
+  // The shared draft. `draftTouched` stops the live prefill below from
+  // overwriting an edit the moment the user changes quantity or a deadline.
+  const [rfqSubject, setRfqSubject] = useState('');
+  const [rfqBody, setRfqBody] = useState('');
+  const [draftTouched, setDraftTouched] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  // Addresses typed in for vendors that have none on file, keyed by vendor id.
+  // Saved back onto the vendor row on a successful send so it is asked once.
+  const [vendorEmails, setVendorEmails] = useState({});
 
   const techPackProducts = products.filter(p => TECHPACK_STAGES.includes(p.stage));
   const rfqProduct = products.find(p => p.id === rfqForm.productId);
@@ -95,6 +137,63 @@ export default function QuoteTracker() {
 
   const toggleRfqVendor = vendorId => setRfqForm(f => ({ ...f, vendorIds: f.vendorIds.includes(vendorId) ? f.vendorIds.filter(x => x !== vendorId) : [...f.vendorIds, vendorId] }));
 
+  const selectedVendors = vendors.filter(v => rfqForm.vendorIds.includes(v.id));
+  // What each selected vendor will actually be mailed at: the stored address,
+  // or whatever was typed for it in this form.
+  const emailFor = v => (v.email || vendorEmails[v.id] || '').trim();
+  const missingEmail = selectedVendors.filter(v => !emailFor(v));
+  const invalidEmail = selectedVendors.filter(v => emailFor(v) && !EMAIL_RE.test(emailFor(v)));
+  const sendableCount = selectedVendors.length - missingEmail.length - invalidEmail.length;
+
+  // Keep the draft in step with the form until the user edits it, so opening the
+  // compose box never shows a stale quantity or the wrong product name.
+  useEffect(() => {
+    if (draftTouched) return;
+    setRfqSubject(defaultRfqSubject(rfqProduct?.name));
+    setRfqBody(defaultRfqBody({
+      productName: rfqProduct?.name,
+      brandName: activeBrand?.name,
+      quantity: rfqForm.quantity,
+      targetUnitCost: rfqForm.targetUnitCost,
+      deadline: rfqForm.deadline,
+      message: rfqForm.message,
+    }));
+  }, [draftTouched, rfqProduct?.name, activeBrand?.name, rfqForm.quantity, rfqForm.targetUnitCost, rfqForm.deadline, rfqForm.message]);
+
+  const resetRfq = () => {
+    setRfqForm(EMPTY_RFQ);
+    setRfqOverrideGate(false);
+    setVendorEmails({});
+    setDraftTouched(false);
+  };
+
+  // Optional AI pass over the draft. Charged once for the whole RFQ, not per
+  // vendor — it is one shared message.
+  const draftWithAI = async () => {
+    if (!rfqProduct) { setRfqError('Choose a tech pack first.'); return; }
+    if (!canAfford('draft-vendor-email')) { openTopup(); return; }
+    setDrafting(true);
+    setRfqError(null);
+    try {
+      const res = await aiPost('/api/draft-vendor-email', {
+        vendorName: VENDOR_TOKEN,
+        productName: rfqProduct.name,
+        garmentType: rfqProduct.category,
+        preferences: { quantity: rfqForm.quantity, targetUnitCost: rfqForm.targetUnitCost, deadline: rfqForm.deadline },
+        ask: rfqForm.message || 'Request a formal production quote with pricing, MOQ and lead time.',
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      setDraftTouched(true);
+      if (data.draft?.subject) setRfqSubject(data.draft.subject);
+      if (data.draft?.body) setRfqBody(data.draft.body);
+    } catch (err) {
+      setRfqError(err.message || 'Could not draft that email.');
+    } finally {
+      setDrafting(false);
+    }
+  };
+
   const submitRFQ = async e => {
     e.preventDefault();
     if (!rfqForm.productId || rfqForm.vendorIds.length === 0 || rfqBlocked) return;
@@ -103,39 +202,46 @@ export default function QuoteTracker() {
     try {
       await createRFQ(rfqForm);
 
-      // Dispatch emails to selected vendors if they have email addresses
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-      const selectedVendors = vendors.filter(v => rfqForm.vendorIds.includes(v.id));
+      // The RFQ row is saved either way — a vendor with no address still gets
+      // tracked, you just have to reach them yourself. Only the mail is skipped.
+      const sent = [];
+      const failed = [];
+      const skipped = [];
 
       for (const vendor of selectedVendors) {
-        if (vendor.email) {
-          try {
-            await fetch(`${API_URL}/api/send-vendor-email`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                to: vendor.email,
-                brandId: activeBrand?.id,
-                subject: `Request for Quote: ${rfqProduct?.name || 'New Design'}`,
-                body: `Hello ${vendor.name},\n\nWe would like to request a formal quote for our product: ${rfqProduct?.name || 'Garment Design'}.\n\nDetails:\n- Target Quantity: ${rfqForm.quantity || 'Standard MOQ'}\n- Target Unit Cost: ${rfqForm.targetUnitCost ? '$' + rfqForm.targetUnitCost : 'Open for negotiation'}\n- Target Deadline: ${rfqForm.deadline || 'Standard lead time'}\n\nAdditional Notes:\n${rfqForm.message || 'None'}\n\nPlease reply with your pricing and availability.\n\nBest regards,\nAtelier Studio`,
-                vendorName: vendor.name
-              })
-            });
-          } catch (emailErr) {
-            console.error(`Failed to dispatch email to ${vendor.name}:`, emailErr);
-          }
+        const to = emailFor(vendor);
+        if (!to || !EMAIL_RE.test(to)) { skipped.push(vendor.name); continue; }
+        try {
+          const res = await apiPost('/api/send-vendor-email', {
+            to,
+            brandId: activeBrand?.id,
+            subject: rfqSubject,
+            body: rfqBody.split(VENDOR_TOKEN).join(vendor.name),
+            vendorName: vendor.name,
+          });
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data?.ok) throw new Error(data?.error || `Send failed (${res.status})`);
+          sent.push(vendor.name);
+          // Remember an address that just worked, so the next RFQ doesn't ask.
+          if (!vendor.email) updateVendor(vendor.id, { email: to }).catch(() => {});
+        } catch (emailErr) {
+          failed.push(`${vendor.name} (${emailErr.message})`);
         }
       }
 
-      toast.success('RFQ created and emails dispatched!');
+      // Report what actually happened. This used to be an unconditional
+      // "emails dispatched!" fired outside the loop, which was wrong every
+      // single time: vendors.email did not exist, so nothing was ever sent.
+      const parts = [`RFQ saved for ${selectedVendors.length} vendor${selectedVendors.length === 1 ? '' : 's'}`];
+      if (sent.length) parts.push(`emailed ${sent.length}`);
+      if (skipped.length) parts.push(`no address for ${skipped.join(', ')}`);
+      if (failed.length) parts.push(`failed: ${failed.join('; ')}`);
+      const summary = parts.join(' · ');
+      if (failed.length) toast.error(summary);
+      else toast.success(summary);
+
       setShowNewRFQ(false);
-      setRfqForm(EMPTY_RFQ);
-      setRfqOverrideGate(false);
+      resetRfq();
     } catch (err) {
       setRfqError(err.message || 'Could not send that RFQ.');
     } finally {
@@ -242,6 +348,73 @@ export default function QuoteTracker() {
                 <textarea className="form-textarea" placeholder="Optional notes" value={rfqForm.message} onChange={e => setRfqForm(f => ({ ...f, message: e.target.value }))} />
               </div>
 
+              {selectedVendors.length > 0 && (
+                <>
+                  {missingEmail.length > 0 && (
+                    <div className="form-group">
+                      <label className="form-label">Where should this go?</label>
+                      <div className="form-hint" style={{ marginBottom: 8 }}>
+                        {missingEmail.length === 1 ? 'This vendor has' : `These ${missingEmail.length} vendors have`} no email on file. Add one to send now — we'll save it to the vendor. Leave blank and the RFQ is still tracked, just not emailed.
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {missingEmail.map(v => (
+                          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 12.5, color: 'var(--ink-2)', minWidth: 130 }}>{v.name}</span>
+                            <input
+                              className="form-input"
+                              type="email"
+                              placeholder="sales@factory.com"
+                              value={vendorEmails[v.id] || ''}
+                              onChange={e => setVendorEmails(m => ({ ...m, [v.id]: e.target.value }))}
+                              style={{ flex: 1 }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>The email they'll receive</label>
+                      <button type="button" className="btn btn-sm" onClick={draftWithAI} disabled={drafting || !rfqProduct}>
+                        <i className={drafting ? 'ph ph-circle-notch ph-spin' : 'ph ph-sparkle'} />
+                        {drafting ? 'Drafting…' : 'Draft with AI'}
+                        {!drafting && <CreditCost feature="draft-vendor-email" style={{ marginLeft: 6, color: 'inherit', opacity: 0.8 }} />}
+                      </button>
+                    </div>
+                    <input
+                      className="form-input"
+                      value={rfqSubject}
+                      onChange={e => { setDraftTouched(true); setRfqSubject(e.target.value); }}
+                      placeholder="Subject"
+                      style={{ marginBottom: 8 }}
+                    />
+                    <textarea
+                      className="form-textarea"
+                      value={rfqBody}
+                      onChange={e => { setDraftTouched(true); setRfqBody(e.target.value); }}
+                      rows={12}
+                      style={{ fontFamily: 'var(--mono)', fontSize: 12.5, lineHeight: 1.6 }}
+                    />
+                    <div className="form-hint" style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                      <span><code>{VENDOR_TOKEN}</code> becomes each vendor's name. One message goes to everyone, so the quotes come back comparable.</span>
+                      {draftTouched && (
+                        <button type="button" className="btn btn-sm" style={{ background: 'none', border: 'none', color: 'var(--ink-3)', textDecoration: 'underline', boxShadow: 'none', padding: 0 }} onClick={() => setDraftTouched(false)}>
+                          Reset to template
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {invalidEmail.length > 0 && (
+                    <div className="form-hint" style={{ color: 'var(--red)', marginBottom: 12 }}>
+                      Not a valid email address for {invalidEmail.map(v => v.name).join(', ')} — fix it or clear it to skip that vendor.
+                    </div>
+                  )}
+                </>
+              )}
+
               {rfqBelowThreshold && (
                 <div className="form-hint" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--red-bg)', border: '1px solid var(--red-border)', color: 'var(--red)', marginBottom: 14 }}>
                   <i className="ph ph-lock-key" style={{ marginRight: 4 }} />
@@ -253,8 +426,15 @@ export default function QuoteTracker() {
                 </div>
               )}
               {rfqError && <div className="form-hint" style={{ color: 'var(--red)', marginBottom: 12 }}>{rfqError}</div>}
-              <button className="btn btn-primary" type="submit" disabled={rfqSending || !rfqForm.productId || rfqForm.vendorIds.length === 0 || rfqBlocked}>
-                <i className="ph ph-paper-plane-tilt" /> {rfqSending ? 'Sending…' : `Send to ${rfqForm.vendorIds.length || 0} vendor${rfqForm.vendorIds.length === 1 ? '' : 's'}`}
+              {/* The label says what will actually happen — how many get an
+                  email, not just how many vendors are ticked. */}
+              <button className="btn btn-primary" type="submit" disabled={rfqSending || !rfqForm.productId || rfqForm.vendorIds.length === 0 || rfqBlocked || invalidEmail.length > 0}>
+                <i className="ph ph-paper-plane-tilt" />
+                {rfqSending
+                  ? 'Sending…'
+                  : sendableCount > 0
+                    ? `Send to ${sendableCount} vendor${sendableCount === 1 ? '' : 's'}${missingEmail.length ? ` (${missingEmail.length} without an address)` : ''}`
+                    : `Save RFQ for ${rfqForm.vendorIds.length} vendor${rfqForm.vendorIds.length === 1 ? '' : 's'} — no emails to send`}
               </button>
             </div>
           </form>

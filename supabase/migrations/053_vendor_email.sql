@@ -1,0 +1,14 @@
+-- Vendor contact email — the column the RFQ dispatch has always assumed existed.
+--
+-- QuoteTracker guarded its send loop on `if (vendor.email)` and VendorDetail
+-- built `mailto:${...}` from the same field, but no migration ever created it.
+-- The read returned undefined every time, so the guard was never true: the RFQ
+-- reported "emails dispatched" while sending nothing, and the AI-drafted vendor
+-- email opened the user's mail client with an empty To: line.
+--
+-- Deliberately nullable and unvalidated at the DB level. Vendors get added by
+-- pasting a directory listing or from AI search results, and most arrive with
+-- no contact address at all — requiring one would block the far more common
+-- "found a factory, no email yet" case. The RFQ compose step asks for the
+-- address when it actually needs one, and saves it back here.
+alter table public.vendors add column if not exists email text;

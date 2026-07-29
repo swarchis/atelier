@@ -37,7 +37,7 @@ const TABS = [
   { key: 'blocked', label: 'Blocked', icon: 'ph-prohibit' },
 ];
 
-const EMPTY_FORM = { name: '', category: '', location: '', specialties: '', sourceNote: '', moq: '', leadTime: '', certifications: '', capabilities: '', priceRange: '' };
+const EMPTY_FORM = { name: '', category: '', location: '', email: '', specialties: '', sourceNote: '', moq: '', leadTime: '', certifications: '', capabilities: '', priceRange: '' };
 const EMPTY_FILTERS = { keywords: '', category: '', location: '', quantity: '', moq: '', targetPrice: '', certifications: '' };
 
 const COMPARE_ROWS = [
@@ -305,6 +305,7 @@ export default function VendorDiscovery() {
         name: form.name.trim(),
         category: form.category.trim(),
         location: form.location.trim(),
+        email: form.email.trim() || null,
         specialties: form.specialties.split(',').map(s => s.trim()).filter(Boolean),
         sourceNote: form.sourceNote.trim(),
         moq: form.moq ? Number(form.moq) : null,
@@ -437,6 +438,11 @@ export default function VendorDiscovery() {
                         <label className="form-label">Location</label>
                         <input className="form-input" placeholder="e.g. Guadalajara, MX" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
                       </div>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Contact email</label>
+                      <input className="form-input" type="email" placeholder="e.g. sales@nortetextile.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+                      <div className="form-hint">Optional. With an address on file, an RFQ can be emailed straight from the quote tracker.</div>
                     </div>
                     <div className="grid-3">
                       <div className="form-group">
