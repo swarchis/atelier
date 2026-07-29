@@ -3274,11 +3274,25 @@ app.use((err, req, res, next) => {
 // database by claim_due_content_posts (FOR UPDATE SKIP LOCKED), not by assuming
 // there is only one instance.
 //
-// ── WHY OPT-IN ──────────────────────────────────────────────────────────────
-// api/.env points a laptop at the production database. If this defaulted to on,
-// running the server locally would publish real posts to real accounts from a dev
-// machine. It requires ENABLE_PUBLISH_SCHEDULER=true, which is set on Railway and
-// nowhere else.
+// ── ON WHEN DEPLOYED, OFF ON A LAPTOP ───────────────────────────────────────
+// The thing worth preventing is real: api/.env points a local machine at the
+// production database, so a default-on scheduler would publish real posts to real
+// accounts from a laptop running `node index.js`.
+//
+// But that does NOT need a hand-set variable, which was the first version of this
+// and was simply over-engineered — it made a deployment step out of something the
+// platform already tells us. Railway injects RAILWAY_ENVIRONMENT into every
+// deploy and nothing sets it locally, so "am I deployed?" is already answerable.
+//
+// ENABLE_PUBLISH_SCHEDULER is still honoured when explicitly set, in either
+// direction: 'true' to run it locally on purpose, 'false' to stop it in
+// production without a code change. Unset — the normal case — it just works.
+function schedulerEnabled() {
+  const override = process.env.ENABLE_PUBLISH_SCHEDULER;
+  if (override === 'true') return true;
+  if (override === 'false') return false;
+  return !!process.env.RAILWAY_ENVIRONMENT;
+}
 const SCHEDULER_INTERVAL_MS = 60 * 1000;
 const SCHEDULER_BATCH = 5;
 let schedulerRunning = false;
@@ -3329,10 +3343,10 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🧠 Backend running on port ${PORT}`);
 
-  if (process.env.ENABLE_PUBLISH_SCHEDULER === 'true') {
+  if (schedulerEnabled()) {
     setInterval(runScheduledPublishes, SCHEDULER_INTERVAL_MS);
     console.log(`📆 Scheduled publishing on, checking every ${SCHEDULER_INTERVAL_MS / 1000}s`);
   } else {
-    console.log('📆 Scheduled publishing off (set ENABLE_PUBLISH_SCHEDULER=true to enable)');
+    console.log('📆 Scheduled publishing off — not a deployed environment (ENABLE_PUBLISH_SCHEDULER=true overrides)');
   }
 });

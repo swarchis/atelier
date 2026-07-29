@@ -138,9 +138,11 @@ the route can't require auth. `image_url` is client-written — if you loosen th
 exact-prefix check against our own `content_media` bucket, this becomes an open
 SSRF proxy.
 
-**Scheduled publishing is opt-in via `ENABLE_PUBLISH_SCHEDULER=true`.** `api/.env`
-points a laptop at production, so a default-on scheduler would publish real posts
-from a dev machine. Concurrency is handled in the database by
+**Scheduled publishing runs when `RAILWAY_ENVIRONMENT` is set** — on in any
+deploy, off on a laptop, no configuration. That matters because `api/.env` points
+a local machine at production, so a default-on scheduler would publish real posts
+from a dev machine. `ENABLE_PUBLISH_SCHEDULER=true|false` overrides either way.
+Concurrency is handled in the database by
 `claim_due_content_posts` (`FOR UPDATE SKIP LOCKED`), not by assuming one instance.
 **Gate "already published" on `published_at`, never on `status`** — the status tag
 is user-editable, so a published post can be cycled back to `Scheduled` and
