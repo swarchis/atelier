@@ -16,6 +16,9 @@ import { aiPost } from '../lib/aiApi.js';
 import { toast } from '../lib/toast.js';
 
 const TECHPACK_STAGES = ['techpack', 'sourcing', 'sampling', 'production', 'launched'];
+// Same shape check the RFQ compose step uses. A typo here doesn't fail loudly —
+// it just makes the vendor quietly unreachable at send time — so catch it now.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SEVERITY_ICON = { amber: 'ph-warning', blue: 'ph-info', green: 'ph-check-circle', red: 'ph-x-circle' };
 const ORDER_STAGE_TAG = { Sampling: 'tag-blue', 'In production': 'tag-amber', Shipped: 'tag-accent', Delivered: 'tag-green' };
 
@@ -80,6 +83,8 @@ export default function VendorDetail() {
   const [draftError, setDraftError] = useState(null);
 
   const [priceDraft, setPriceDraft] = useState(null);
+  const [emailDraft, setEmailDraft] = useState(null);
+  const [emailError, setEmailError] = useState(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyNotes, setVerifyNotes] = useState('');
 
@@ -128,6 +133,23 @@ export default function VendorDetail() {
       toast.error('Could not save notes: ' + err.message);
     } finally {
       setSavingNotes(false);
+    }
+  };
+
+  const saveEmail = async () => {
+    const next = (emailDraft || '').trim();
+    // Clearing it is legitimate — plenty of vendors are found before a contact
+    // is. Anything else has to look like an address.
+    if (next && !EMAIL_RE.test(next)) {
+      setEmailError("That doesn't look like an email address.");
+      return;
+    }
+    setEmailError(null);
+    try {
+      await updateVendor(vendor.id, { email: next || null });
+      setEmailDraft(null);
+    } catch (err) {
+      toast.error('Could not save email: ' + err.message);
     }
   };
 
@@ -306,6 +328,22 @@ export default function VendorDetail() {
             />
           </div>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 230 }}>
+              <div className="form-label" style={{ marginBottom: 6 }}>Contact email</div>
+              <input
+                className="form-input"
+                type="email"
+                placeholder="sales@factory.com"
+                value={emailDraft === null ? (vendor.email || '') : emailDraft}
+                onChange={e => { setEmailDraft(e.target.value); setEmailError(null); }}
+                onBlur={() => emailDraft !== null && emailDraft.trim() !== (vendor.email || '') && saveEmail()}
+              />
+              {emailError ? (
+                <div style={{ fontSize: 11.5, color: 'var(--red)', marginTop: 4 }}>{emailError}</div>
+              ) : !vendor.email ? (
+                <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 4 }}>No address on file — RFQs to this vendor can't be emailed.</div>
+              ) : null}
+            </div>
             <div>
               <div className="form-label" style={{ marginBottom: 6 }}>Onboarding</div>
               <select
