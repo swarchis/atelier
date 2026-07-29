@@ -115,6 +115,7 @@ const AI_PATHS = [
   '/api/design/generate-element',
   '/api/design/color-palette',
   '/api/design/trend-inspiration',
+  '/api/research-materials',
   '/api/chat-reply',
   '/api/quote-economics',
   '/api/cost-simulator',
@@ -2156,6 +2157,83 @@ Return 3 to 6 entries.`;
     const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
     console.log("✅ Trend inspiration successful");
     res.json({ ok: true, trends: result.trends || [] });
+  } catch (error) {
+    console.error('❌ Endpoint Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Researches materials named in a tech pack's bill of materials so they can be
+// added to the Materials Library with real information rather than a bare name.
+//
+// One Tavily search PER MATERIAL (they share no facts — "12oz cotton twill" and
+// "YKK #5 zipper" have nothing to say about each other), then a SINGLE Gemini
+// pass over all of them. That keeps this at one metered charge per save no
+// matter how many materials are on the row, which is why it takes an array
+// rather than being called in a loop from the client.
+const MATERIAL_RESEARCH_CAP = 8;
+
+app.post('/api/research-materials', metered('research-materials'), async (req, res) => {
+  console.log("📥 Received material research request...");
+  try {
+    const { materials, garmentType } = req.body;
+    if (!Array.isArray(materials) || materials.length === 0) {
+      return res.status(400).json({ ok: false, error: 'No materials provided' });
+    }
+    const names = materials
+      .map(m => String(m || '').trim())
+      .filter(Boolean)
+      .slice(0, MATERIAL_RESEARCH_CAP);
+    if (names.length === 0) return res.status(400).json({ ok: false, error: 'No usable material names provided' });
+
+    if (!process.env.TAVILY_API_KEY || process.env.TAVILY_API_KEY.startsWith('get_a_free_key')) {
+      return res.status(400).json({ ok: false, error: 'TAVILY_API_KEY is not set in api/.env — get a free key at tavily.com' });
+    }
+
+    // In parallel: the searches are independent and this runs while someone is
+    // watching a save spinner. A failed search yields no results for that
+    // material rather than failing the whole batch — the others still get filled.
+    const searches = await Promise.all(names.map(async name => {
+      try {
+        const r = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: process.env.TAVILY_API_KEY,
+            query: `${name} textile material properties composition weight care handling sustainability certifications`,
+            search_depth: 'advanced',
+            max_results: 5,
+          }),
+        }).then(x => x.json());
+        return { name, results: r.error ? [] : (r.results || []) };
+      } catch {
+        return { name, results: [] };
+      }
+    }));
+
+    const block = searches.map(s => (
+      `MATERIAL: ${s.name}\n${s.results.length
+        ? s.results.map((r, i) => `  [${i}] ${r.title}\n  ${(r.content || '').slice(0, 500)}`).join('\n')
+        : '  (no search results found)'}`
+    )).join('\n\n');
+
+    const prompt = `A clothing brand is building a materials library${garmentType ? ` for a ${garmentType}` : ''}. For each material below, extract what the real web search results actually support.
+
+${block}
+
+Rules that matter more than completeness:
+- Use ONLY what the search results support. If a field isn't supported, return null for it. Do not guess a fibre content, a certification, or a supplier.
+- A material with no search results should come back with its name and nulls, not invented facts.
+- "certifications" must list only certifications named in the results (e.g. GOTS, OEKO-TEX). Empty array if none are mentioned.
+- "warning" is for genuine production risks (shrinkage, colour bleeding, needing a specific needle or temperature), not marketing copy.
+- "availability" must be one of: "In Stock", "Low Stock", "Backordered", "Discontinued", "Unknown". Use "Unknown" unless the results clearly say otherwise — you cannot know this brand's supplier stock.
+
+Return a JSON object with exactly this structure, one entry per material, in the same order:
+{ "materials": [ { "name": "exactly the material name given", "category": "short fibre/material family e.g. Cotton, Polyester, Metal hardware, or null", "type": "fabric" | "trim" | "notion", "riskLevel": "Low" | "Medium" | "High" | null, "warning": "string or null", "handlingNotes": "string or null", "sustainabilityInfo": "string or null", "certifications": [], "availability": "Unknown" } ] }`;
+
+    const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
+    console.log(`✅ Material research successful (${names.length} material${names.length === 1 ? '' : 's'})`);
+    res.json({ ok: true, materials: result.materials || [] });
   } catch (error) {
     console.error('❌ Endpoint Error:', error.message);
     res.status(500).json({ ok: false, error: error.message });

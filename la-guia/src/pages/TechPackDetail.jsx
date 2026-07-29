@@ -6,6 +6,8 @@ import { useTeam } from '../context/TeamContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUserPreferences } from '../context/UserPreferencesContext.jsx';
 import { useAIUsage } from '../context/AIUsageContext.jsx';
+import { useMaterials } from '../context/MaterialsContext.jsx';
+import { aiPost } from '../lib/aiApi.js';
 import { supabase } from '../lib/supabase.js';
 import FlowStepper from '../components/FlowStepper.jsx';
 import TabBar from '../components/TabBar.jsx';
@@ -72,7 +74,9 @@ export default function TechPackDetail() {
   const { canManage } = useTeam();
   const { user } = useAuth();
   const { preferences } = useUserPreferences();
-  const { logUsage } = useAIUsage();
+  const { logUsage, canAfford } = useAIUsage();
+  const { createMaterial, findMaterialByName } = useMaterials();
+  const [researchingMaterials, setResearchingMaterials] = useState(false);
   const product = products.find(p => p.id === id);
 
   const [imageUrl, setImageUrl] = useState(null);
@@ -239,10 +243,80 @@ export default function TechPackDetail() {
       await updateProduct(id, { readiness: newReadiness });
       setHasTechPack(true);
       toast.success('Tech pack saved.');
+      // Deliberately after the save has already been reported: the library is a
+      // convenience, and a failure here must not make a saved tech pack look
+      // unsaved. Its own errors are surfaced separately.
+      syncBomToMaterialsLibrary();
     } catch (err) {
       toast.error("Error saving tech pack: " + err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Every material named in the BOM should end up in the Materials Library
+  // without anyone re-typing it. Adding the row is free and always happens;
+  // filling it in costs credits, so that part degrades to a bare name rather
+  // than blocking the material from being recorded at all.
+  const syncBomToMaterialsLibrary = async () => {
+    const named = [...new Set(
+      bom.map(b => (b.material || '').trim()).filter(Boolean)
+    )];
+    const missing = named.filter(name => !findMaterialByName(name));
+    if (missing.length === 0) return;
+
+    setResearchingMaterials(true);
+    try {
+      let researched = [];
+      if (canAfford('research-materials')) {
+        try {
+          const res = await aiPost('/api/research-materials', {
+            materials: missing,
+            garmentType: product?.category,
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error);
+          researched = data.materials || [];
+          logUsage('research-materials');
+        } catch (err) {
+          // Research failed — say so, then still record the names below. A
+          // half-filled library beats losing the material entirely.
+          toast.error(`Added to Materials Library without details: ${err.message}`);
+        }
+      }
+
+      const byName = new Map(
+        researched.map(r => [String(r.name || '').trim().toLowerCase(), r])
+      );
+      let added = 0;
+      for (const name of missing) {
+        const info = byName.get(name.toLowerCase()) || {};
+        try {
+          await createMaterial({
+            name,
+            category: info.category,
+            type: info.type,
+            riskLevel: info.riskLevel,
+            warning: info.warning,
+            handlingNotes: info.handlingNotes,
+            sustainabilityInfo: info.sustainabilityInfo,
+            certifications: info.certifications,
+            availability: info.availability,
+          });
+          added++;
+        } catch (err) {
+          console.error(`Could not add "${name}" to the materials library:`, err.message);
+        }
+      }
+
+      if (added > 0) {
+        const enriched = researched.length > 0;
+        toast.success(
+          `${added} material${added === 1 ? '' : 's'} added to your Materials Library${enriched ? ' with researched details' : ' (names only — no AI credits)'}.`
+        );
+      }
+    } finally {
+      setResearchingMaterials(false);
     }
   };
 
@@ -347,8 +421,10 @@ export default function TechPackDetail() {
             <button className="btn" onClick={handleExportPDF} disabled={loadingData}>
               <i className="ph ph-file-pdf" /> Export PDF
             </button>
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving || loadingData}>
-              <i className="ph ph-check" /> {saving ? 'Saving...' : 'Save Tech Pack'}
+            {/* The library sync runs after the save is already reported, so it
+                gets its own label rather than silently extending "Saving...". */}
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving || loadingData || researchingMaterials}>
+              <i className="ph ph-check" /> {saving ? 'Saving...' : researchingMaterials ? 'Researching materials…' : 'Save Tech Pack'}
             </button>
           </div>
         </div>

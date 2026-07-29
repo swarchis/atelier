@@ -29,15 +29,44 @@ export function MaterialsProvider({ children }) {
     load();
   }, []);
 
-  const createMaterial = async ({ name, category, type, riskLevel, warning, handlingNotes }) => {
-    const { data, error } = await supabase
+  const createMaterial = async ({ name, category, type, riskLevel, warning, handlingNotes, sustainabilityInfo, certifications, availability }) => {
+    const baseRow = {
+      name,
+      category: category || null,
+      type: type || 'fabric',
+      risk_level: riskLevel || null,
+      warning: warning || null,
+      handling_notes: handlingNotes || null,
+    };
+    // The 020 columns are attempted first and dropped on failure, the same
+    // graceful-degradation pattern addVendor uses: an out-of-date database
+    // should cost you the sustainability fields, not the whole material.
+    let { data, error } = await supabase
       .from('materials')
-      .insert([{ name, category: category || null, type: type || 'fabric', risk_level: riskLevel || null, warning: warning || null, handling_notes: handlingNotes || null }])
+      .insert([{
+        ...baseRow,
+        sustainability_info: sustainabilityInfo || null,
+        certifications: certifications || [],
+        availability: availability || 'Unknown',
+      }])
       .select()
       .single();
+    if (error) {
+      ({ data, error } = await supabase.from('materials').insert([baseRow]).select().single());
+    }
     if (error) throw error;
     setMaterials(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
     return data;
+  };
+
+  // Case-insensitive lookup against the library already in memory. `materials`
+  // is a shared table capped at 500 rows on load, so this can miss a match that
+  // exists beyond the cap — a duplicate row is the acceptable failure here,
+  // versus refusing to record a material the founder actually uses.
+  const findMaterialByName = (name) => {
+    const needle = String(name || '').trim().toLowerCase();
+    if (!needle) return null;
+    return materials.find(m => (m.name || '').trim().toLowerCase() === needle) || null;
   };
 
   const updateMaterial = async (id, updates) => {
@@ -110,7 +139,7 @@ export function MaterialsProvider({ children }) {
 
   return (
     <MaterialsContext.Provider value={{
-      materials, loading, createMaterial, updateMaterial, deleteMaterial,
+      materials, loading, createMaterial, updateMaterial, deleteMaterial, findMaterialByName,
       costLogByMaterial, loadCostLog, addCostLogEntry,
       vendorLinksByMaterial, loadVendorLinks, linkVendor, unlinkVendor,
     }}>

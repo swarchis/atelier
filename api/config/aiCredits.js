@@ -40,6 +40,7 @@ const FEATURE_COST = {
   'generate-tech-pack-full': 10,
   'search-vendors': 10,
   'design-trend-inspiration': 10,
+  'research-materials': 10,   // one Tavily search per material + a single Gemini pass, charged per save not per material
 
   // ── Images (OpenAI gpt-image-1): the real cost centre ────────────────────
   'design-generate-element': 10,  // logo/pattern, medium 1024x1024 ~$0.042 -> $0.0042/cr

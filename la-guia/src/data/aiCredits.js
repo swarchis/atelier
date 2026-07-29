@@ -17,6 +17,7 @@ export const FEATURE_COST = {
   'generate-tech-pack-full': 10,
   'search-vendors': 10,
   'design-trend-inspiration': 10,
+  'research-materials': 10,
   'design-generate-element': 10,
   'design-ai-image': 15,
   'design-silhouette-low': 5,
