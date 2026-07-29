@@ -71,6 +71,12 @@ policy. `SELECT` is deliberately unrestricted: viewers read everything.
 - **A column-level `REVOKE` cannot subtract from a table-level grant.** Migration
   044 tried, reported success, and changed nothing. To restrict columns you must
   revoke the table-wide privilege and grant back the allowed list (045, 049, 051).
+- **`select('*')` needs table-level SELECT — per-column grants do not satisfy
+  it.** 054 is the only migration that revokes SELECT, and it makes
+  `social_accounts` the one table you must query with an explicit column list.
+  A `select('*')` there returns a permission error, and because `loadData`
+  destructures `{ data }` without checking `error`, the symptom is every connected
+  account silently rendering as "Not connected" — not an error anyone sees.
 - **RLS `WITH CHECK` cannot see the old row**, so "this column may not *change*"
   is not expressible as a policy. That's why 048 and 052 are triggers.
 

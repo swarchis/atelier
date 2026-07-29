@@ -51,6 +51,14 @@ alter table public.social_accounts
   add column if not exists token_expires_at timestamptz;
 
 -- A. Tokens out of reach of the client. Every other column stays readable.
+--
+-- CALLER REQUIREMENT, learned the hard way: `select('*')` requires the
+-- TABLE-level SELECT privilege, which this revokes. Granting the columns back
+-- individually does not satisfy it. Every client read of social_accounts must
+-- name its columns, or it fails with a permission error — and since
+-- ContentContext.loadData ignores the error, the visible symptom is a connected
+-- account rendering as "Not connected" rather than anything that looks like a
+-- fault. ContentContext was updated alongside this; check any new caller.
 revoke select on public.social_accounts from authenticated, anon;
 grant select (
   id, brand_id, platform, handle, followers, connected, created_at,

@@ -16,7 +16,16 @@ export function ContentProvider({ children }) {
     }
     setLoading(true);
     try {
-      const { data: accData } = await supabase.from('social_accounts').select('*').eq('brand_id', activeBrand.id);
+      // Columns listed explicitly, NOT select('*'). 054 revoked table-level
+      // SELECT and granted it back per column, and `select *` requires the
+      // table-level privilege — per-column grants do not satisfy it. With '*'
+      // this returns a permission error, which loadData swallows, so every
+      // connected account silently renders as "Not connected".
+      const { data: accData, error: accError } = await supabase
+        .from('social_accounts')
+        .select('id, brand_id, platform, handle, followers, connected, created_at, token_expires_at')
+        .eq('brand_id', activeBrand.id);
+      if (accError) throw accError;
       const { data: postData } = await supabase.from('content_posts').select('*, products(name)').eq('brand_id', activeBrand.id).order('scheduled_for', { ascending: false });
 
       setAccounts(accData || []);
