@@ -75,18 +75,27 @@ export default function ContentHub() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const fileInputRef = useRef(null);
 
+  // Handoff codes are single-use, and window.history.replaceState below does NOT
+  // update React Router's location — so location.search still holds the code on a
+  // re-render. Any change to activeBrand's identity re-fires this effect, the code
+  // gets consumed a second time, and the user is told the connection "expired or
+  // was already used" on a connect that actually succeeded. This remembers what
+  // has been redeemed.
+  const redeemedHandoffs = useRef(new Set());
+
   // Catch OAuth Returns from Social Platforms
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const success = params.get('social_success');
     const error = params.get('social_error');
-    
+
     if (success === 'true' && activeBrand) {
       const platform = params.get('platform');
       const handoffCode = params.get('handoff');
       const brandId = params.get('brandId');
 
-      if (brandId === activeBrand.id && handoffCode) {
+      if (brandId === activeBrand.id && handoffCode && !redeemedHandoffs.current.has(handoffCode)) {
+        redeemedHandoffs.current.add(handoffCode);
         // The backend has already written the connected row with its service-role
         // key, and the handoff no longer carries tokens, so this only has to
         // confirm the handoff was real and reload. See migration 054.

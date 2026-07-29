@@ -2392,7 +2392,20 @@ const SOCIAL_OAUTH = {
   },
   tiktok: {
     envId: 'TIKTOK_CLIENT_KEY', envSecret: 'TIKTOK_CLIENT_SECRET',
-    authUrl: (redirectUri, state) => `https://www.tiktok.com/v2/auth/authorize/?client_key=${process.env.TIKTOK_CLIENT_KEY}&response_type=code&scope=user.info.basic&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`,
+    // Scopes come from the env, NOT hardcoded, because the safe value differs by
+    // environment: Sandbox grants the read scopes immediately, while production
+    // rejects the whole authorize request for any scope the app hasn't been
+    // approved for. Hardcoding the wide set would break connecting in production
+    // until the review passes; hardcoding the narrow set is what made the reads
+    // fail with scope_not_authorized no matter what the portal said.
+    //
+    // Set TIKTOK_SCOPES=user.info.basic,user.info.stats,video.list in Sandbox, and
+    // in production only once TikTok has approved them. The default is the
+    // approved-today set, so an unset variable degrades to what already works.
+    authUrl: (redirectUri, state) => {
+      const scopes = process.env.TIKTOK_SCOPES || 'user.info.basic';
+      return `https://www.tiktok.com/v2/auth/authorize/?client_key=${process.env.TIKTOK_CLIENT_KEY}&response_type=code&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+    },
     getToken: async (code, redirectUri) => {
       const form = new URLSearchParams({ client_key: process.env.TIKTOK_CLIENT_KEY, client_secret: process.env.TIKTOK_CLIENT_SECRET, code, grant_type: 'authorization_code', redirect_uri: redirectUri });
       const response = await fetch('https://open.tiktokapis.com/v2/oauth/token/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' }, body: form });
