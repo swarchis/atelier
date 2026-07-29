@@ -2670,6 +2670,180 @@ app.get('/api/social/callback/:platform', async (req, res) => {
 // a call guaranteed to fail, this says so plainly. YouTube did request an
 // upload scope, but content_posts only stores an image_url — there's no
 // video file to upload, so there's genuinely nothing to publish yet.
+// ── TikTok photo publishing ────────────────────────────────────────────────
+// Photo posts go through /v2/post/publish/content/init/ with media_type PHOTO and
+// post_mode DIRECT_POST. The call returns a publish_id and completes
+// asynchronously, so the result has to be polled — a 200 from init means "TikTok
+// accepted the job", not "the post is live".
+//
+// PRIVACY: an unaudited client can only post SELF_ONLY (private). Requesting
+// PUBLIC_TO_EVERYONE before the audit passes gets the call rejected outright, so
+// the default here is the honest one and the env var is what widens it once the
+// audit is done. The UI tells the user which of the two they're getting — quietly
+// posting privately while implying public is the exact dishonesty this codebase
+// is built to avoid.
+const TIKTOK_PUBLISH_POLL_ATTEMPTS = 10;
+const TIKTOK_PUBLISH_POLL_DELAY_MS = 3000;
+
+async function publishTikTokPhoto(accessToken, { caption, mediaUrl }) {
+  const privacyLevel = process.env.TIKTOK_PRIVACY_LEVEL || 'SELF_ONLY';
+  const title = (caption || '').slice(0, 90);       // 90 UTF-16 runes, per spec
+  const description = (caption || '').slice(0, 4000);
+
+  const init = await tiktokDisplayCall(
+    'https://open.tiktokapis.com/v2/post/publish/content/init/',
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        post_info: { title, description, privacy_level: privacyLevel },
+        source_info: {
+          source: 'PULL_FROM_URL',
+          photo_images: [mediaUrl],
+          photo_cover_index: 0,
+        },
+        post_mode: 'DIRECT_POST',
+        media_type: 'PHOTO',
+      }),
+    },
+  );
+
+  const publishId = init.publish_id;
+  if (!publishId) throw new Error('TikTok accepted the request but returned no publish id.');
+
+  // Poll until TikTok reports the post published or failed. Bounded, because a
+  // job that never resolves must not hold a request (or a scheduler tick) open.
+  for (let attempt = 0; attempt < TIKTOK_PUBLISH_POLL_ATTEMPTS; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, TIKTOK_PUBLISH_POLL_DELAY_MS));
+    const status = await tiktokDisplayCall(
+      'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
+      accessToken,
+      { method: 'POST', body: JSON.stringify({ publish_id: publishId }) },
+    );
+
+    if (status.status === 'PUBLISH_COMPLETE') {
+      // TikTok does not return a permalink here. Reporting the post as published
+      // without a link is accurate; inventing a URL from the publish id would not
+      // be. The next Sync picks the real post up with its share_url.
+      return { externalUrl: Array.isArray(status.publicaly_available_post_id) && status.publicaly_available_post_id.length
+        ? `https://www.tiktok.com/video/${status.publicaly_available_post_id[0]}`
+        : null, privacyLevel };
+    }
+    if (status.status === 'FAILED') {
+      throw new Error(`TikTok could not publish that post${status.fail_reason ? ` (${status.fail_reason})` : ''}.`);
+    }
+  }
+
+  throw new Error('TikTok is still processing that post. It may still go live — check the app before retrying.');
+}
+
+// One publish path, used by BOTH the manual button and the scheduler, so the two
+// can't drift into behaving differently. Throws with a user-facing message;
+// returns { externalUrl } on success.
+async function publishPost(platform, brandId, post) {
+  const cfg = SOCIAL_OAUTH[platform];
+  if (!cfg) throw new Error('Unsupported platform');
+
+  const accessToken = await getSocialAccessToken(brandId, platform);
+  if (!accessToken) throw new Error(`No connected ${platform} account for this brand.`);
+
+  if (platform === 'tiktok') {
+    if (!post.image_url) throw new Error('That post has no image to publish.');
+    if (!process.env.API_URL) throw new Error('API_URL is not set, so TikTok has no verified address to pull the image from.');
+    // TikTok pulls from our verified domain, not from Supabase directly.
+    const mediaUrl = `${process.env.API_URL.replace(/\/+$/, '')}/api/media/content/${post.id}`;
+    return publishTikTokPhoto(accessToken, { caption: post.caption, mediaUrl });
+  }
+
+  if (platform === 'pinterest') {
+    if (!post.image_url) throw new Error('That post has no image to publish.');
+    if (!post.board_id) throw new Error('Pinterest requires a board ID to pin to — add one in the post composer.');
+    const response = await fetch('https://api.pinterest.com/v5/pins', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        board_id: post.board_id,
+        title: (post.caption || '').slice(0, 100),
+        description: post.caption || '',
+        media_source: { source_type: 'image_url', url: post.image_url },
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Pinterest rejected the pin');
+    return { externalUrl: `https://www.pinterest.com/pin/${data.id}/` };
+  }
+
+  // Still honestly unsupported. Same wording as before — these need their own
+  // platform review, and a call built to fail would just fail more confusingly.
+  if (platform === 'instagram') {
+    throw new Error("This Instagram connection only has read-only access (user_profile, user_media) — publishing needs Instagram's separate Business Login flow with a content-publish scope, which requires Meta App Review. Not attempted.");
+  }
+  if (platform === 'youtube') {
+    throw new Error("This YouTube connection has upload access, but Content Hub only stores an image per post — there's no video file to upload yet, so there's nothing to publish.");
+  }
+  throw new Error('Unsupported platform');
+}
+
+// ── Media proxy for PULL_FROM_URL ──────────────────────────────────────────
+// TikTok's photo posting supports ONLY PULL_FROM_URL — FILE_UPLOAD is video-only
+// — and it will only pull from a domain the app has verified in the developer
+// portal. Post media lives on *.supabase.co, which we don't own, so TikTok cannot
+// fetch it directly. This serves the same bytes from api.atelierlabs.app, which is
+// verified as a URL property.
+//
+// Deliberately unauthenticated: TikTok's servers do the fetching and carry no
+// session. That is not a new exposure — content_media is a public bucket and
+// these images already had public URLs — but it does mean the ONLY thing that
+// makes this safe is the validation below.
+//
+// SSRF is the real risk here. image_url is written by the client, so without a
+// check this route would fetch any URL a user could store and hand back the body,
+// which is exactly the hole safeStoreUrl() exists to prevent elsewhere. So the
+// stored URL is required to be the public object path of our own content_media
+// bucket, matched against SUPABASE_URL — not merely "https", not "looks like
+// Supabase". Anything else is refused without fetching it.
+function contentMediaPrefix() {
+  if (!process.env.SUPABASE_URL) return null;
+  return `${process.env.SUPABASE_URL.replace(/\/+$/, '')}/storage/v1/object/public/content_media/`;
+}
+
+app.get('/api/media/content/:postId', async (req, res) => {
+  if (!supabase) return res.status(503).send('Storage is not configured.');
+  const prefix = contentMediaPrefix();
+  if (!prefix) return res.status(503).send('Storage is not configured.');
+
+  try {
+    const { data: post, error } = await supabase
+      .from('content_posts').select('image_url').eq('id', req.params.postId).maybeSingle();
+    if (error || !post || !post.image_url) return res.status(404).send('Not found.');
+
+    // Exact-prefix match against our own bucket. A stored URL pointing anywhere
+    // else — another host, another bucket, a private address — is refused here
+    // rather than fetched and proxied.
+    if (!post.image_url.startsWith(prefix)) {
+      console.error('Refusing to proxy off-bucket media for post', req.params.postId);
+      return res.status(400).send('Unsupported media location.');
+    }
+
+    const objectPath = decodeURIComponent(post.image_url.slice(prefix.length));
+    // Downloaded through the service-role client rather than re-fetched over HTTP,
+    // so there is no outbound request to a client-influenced URL at all.
+    const { data: file, error: downloadError } = await supabase.storage
+      .from('content_media').download(objectPath);
+    if (downloadError || !file) return res.status(404).send('Not found.');
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    res.setHeader('Content-Type', file.type || 'image/png');
+    res.setHeader('Content-Length', buffer.length);
+    // TikTok may fetch more than once while a post initialises.
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buffer);
+  } catch (err) {
+    console.error('Media proxy failed:', err.message);
+    res.status(500).send('Could not read that media.');
+  }
+});
+
 // Pull the brand's own posts and follower count from the platform into
 // social_posts_synced. Not metered — no AI model is involved, so it costs no
 // credits; the rate limiter is what protects the shared platform quota.
@@ -2763,63 +2937,78 @@ app.post('/api/social/sync/:platform', requireAuth, socialSyncLimiter, async (re
   }
 });
 
+// Writes the outcome onto the post. Kept in one place so the manual button and
+// the scheduler record a publish identically — a status the two paths disagreed
+// about would be worse than either being wrong.
 //
+// Media is deliberately NOT deleted after publishing. An earlier version of this
+// plan said it should be, on the grounds that the file was only needed until the
+// post went up. That was wrong: image_url is also what renders the post in the
+// user's own calendar and history, so deleting it saves cents and breaks the
+// screen they planned in. Revisit when video lands and the numbers are real.
+async function recordPublishResult(postId, { externalUrl = null, error = null }) {
+  const update = error
+    ? { status: 'Failed', publish_error: error }
+    : { status: 'Posted', published_at: new Date().toISOString(), external_url: externalUrl, publish_error: null };
+
+  const { error: writeError } = await supabase
+    .from('content_posts').update(update).eq('id', postId);
+
+  // Degrade if 056 hasn't run: the status still has to land, or a published post
+  // sits in 'Publishing' forever and gets retried.
+  if (writeError && /external_url|published_at|publish_error/.test(writeError.message || '')) {
+    const { error: fallbackError } = await supabase
+      .from('content_posts').update({ status: update.status }).eq('id', postId);
+    if (fallbackError) console.error('Recording publish result failed:', fallbackError.message);
+    return;
+  }
+  if (writeError) console.error('Recording publish result failed:', writeError.message);
+}
+
 // The access token is no longer accepted from the client. It used to arrive in
 // the request body, read straight out of social_accounts in the browser, which
 // meant every member of a brand — including viewers — held the brand's platform
 // credential. It is now looked up server-side from brandId. See migration 054.
+//
+// Takes a postId rather than loose caption/imageUrl fields, so the server reads
+// what it is publishing from the row it will then stamp — the client cannot
+// publish one thing and have a different thing recorded.
 app.post('/api/social/publish/:platform', requireAuth, async (req, res) => {
   const { platform } = req.params;
-  const { brandId, caption, imageUrl, boardId } = req.body;
+  const { brandId, postId, boardId } = req.body;
 
   if (!SOCIAL_OAUTH[platform]) return res.status(400).json({ ok: false, error: 'Unsupported platform' });
   if (!brandId) return res.status(400).json({ ok: false, error: 'brandId is required.' });
+  if (!postId) return res.status(400).json({ ok: false, error: 'postId is required.' });
   if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
     return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
   }
 
-  let accessToken;
+  const { data: post, error: postError } = await supabase
+    .from('content_posts').select('*').eq('id', postId).eq('brand_id', brandId).maybeSingle();
+  if (postError || !post) return res.status(404).json({ ok: false, error: 'That post no longer exists.' });
+  // published_at, not status: the status tag is user-editable, so it can be cycled
+  // away from 'Posted' and would let the same post go out twice. Same reasoning as
+  // the claim in 056.
+  if (post.published_at || post.status === 'Posted') {
+    return res.status(400).json({ ok: false, error: 'That post has already been published.' });
+  }
+
   try {
-    accessToken = await getSocialAccessToken(brandId, platform);
+    const result = await publishPost(platform, brandId, { ...post, board_id: boardId });
+    await recordPublishResult(post.id, { externalUrl: result.externalUrl });
+    res.json({
+      ok: true,
+      externalUrl: result.externalUrl,
+      // Surfaced so the UI can say "posted privately" rather than let the user
+      // assume it went out publicly while the app is still unaudited.
+      privacyLevel: result.privacyLevel || null,
+    });
   } catch (err) {
-    // A refresh that fails is a connection the user has to re-establish, so say
-    // that instead of leaking the platform's own error text back.
-    console.error(`${platform} token refresh failed:`, err.message);
-    return res.status(400).json({ ok: false, error: `Your ${platform} connection has expired. Reconnect the account and try again.` });
+    console.error(`${platform} publish failed:`, err.message);
+    await recordPublishResult(post.id, { error: err.message });
+    res.status(400).json({ ok: false, error: err.message });
   }
-  if (!accessToken) {
-    return res.status(400).json({ ok: false, error: `No connected ${platform} account for this brand.` });
-  }
-
-  if (platform === 'pinterest') {
-    if (!imageUrl) return res.status(400).json({ ok: false, error: 'Missing imageUrl' });
-    if (!boardId) return res.status(400).json({ ok: false, error: 'Pinterest requires a board ID to pin to — add one in the post composer.' });
-    try {
-      const response = await fetch('https://api.pinterest.com/v5/pins', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ board_id: boardId, title: (caption || '').slice(0, 100), description: caption || '', media_source: { source_type: 'image_url', url: imageUrl } }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Pinterest rejected the pin');
-      res.json({ ok: true, externalUrl: `https://www.pinterest.com/pin/${data.id}/` });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-    return;
-  }
-
-  if (platform === 'instagram') {
-    return res.status(400).json({ ok: false, error: "This Instagram connection only has read-only access (user_profile, user_media) — publishing needs Instagram's separate Business Login flow with a content-publish scope, which requires Meta App Review. Not attempted." });
-  }
-  if (platform === 'tiktok') {
-    return res.status(400).json({ ok: false, error: "This TikTok connection only has read-only access (user.info.basic) — TikTok's Content Posting API needs video.publish/photo.publish scopes, which require an audited app. Not attempted." });
-  }
-  if (platform === 'youtube') {
-    return res.status(400).json({ ok: false, error: 'This YouTube connection has upload access, but Content Hub only stores an image per post — there\'s no video file to upload yet, so there\'s nothing to publish.' });
-  }
-
-  res.status(400).json({ ok: false, error: 'Unsupported platform' });
 });
 
 // ---------------------------------------------------------
@@ -3056,8 +3245,82 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: status === 500 ? 'Internal server error' : (err.message || 'Error') });
 });
 
+// ---------------------------------------------------------
+// SCHEDULED PUBLISHING
+// ---------------------------------------------------------
+// What makes `scheduled_for` mean something. Ticks, claims whatever is due, and
+// publishes it.
+//
+// ── WHY IN-PROCESS, NOT pg_cron ─────────────────────────────────────────────
+// The earlier plan called for pg_cron + pg_net on the grounds that a Railway
+// restart would drop due posts. That reasoning was wrong: due posts are found by
+// querying content_posts, not held in memory, so a restart misses one tick and
+// the next one picks the same rows up. Given that, an in-process ticker needs no
+// extensions, no stored secret, and no second system to keep in sync.
+//
+// The genuine risk — two instances publishing the same post — is handled in the
+// database by claim_due_content_posts (FOR UPDATE SKIP LOCKED), not by assuming
+// there is only one instance.
+//
+// ── WHY OPT-IN ──────────────────────────────────────────────────────────────
+// api/.env points a laptop at the production database. If this defaulted to on,
+// running the server locally would publish real posts to real accounts from a dev
+// machine. It requires ENABLE_PUBLISH_SCHEDULER=true, which is set on Railway and
+// nowhere else.
+const SCHEDULER_INTERVAL_MS = 60 * 1000;
+const SCHEDULER_BATCH = 5;
+let schedulerRunning = false;
+let schedulerMigrationWarned = false;
+
+async function runScheduledPublishes() {
+  // A tick that overruns the interval must not stack up behind itself; the rows
+  // it claimed are already marked 'Publishing', so skipping is safe.
+  if (schedulerRunning || !supabase) return;
+  schedulerRunning = true;
+
+  try {
+    const { data: claimed, error } = await supabase.rpc('claim_due_content_posts', { p_limit: SCHEDULER_BATCH });
+
+    if (error) {
+      // Migration 056 not run yet. Say so once rather than every minute.
+      if (!schedulerMigrationWarned) {
+        console.warn('⚠️  Scheduled publishing is idle:', error.message, '— run migration 056.');
+        schedulerMigrationWarned = true;
+      }
+      return;
+    }
+    schedulerMigrationWarned = false;
+    if (!claimed || !claimed.length) return;
+
+    console.log(`📆 Publishing ${claimed.length} due post(s)...`);
+    for (const post of claimed) {
+      try {
+        const result = await publishPost(post.platform, post.brand_id, post);
+        await recordPublishResult(post.id, { externalUrl: result.externalUrl });
+        console.log(`✅ Published ${post.id} to ${post.platform}`);
+      } catch (err) {
+        // Recorded on the row, not just logged, so the user sees why in the UI.
+        // publish_attempts caps the retries; after that it stays Failed.
+        console.error(`❌ Publish failed for ${post.id} (${post.platform}):`, err.message);
+        await recordPublishResult(post.id, { error: err.message });
+      }
+    }
+  } catch (err) {
+    console.error('Scheduler tick failed:', err.message);
+  } finally {
+    schedulerRunning = false;
+  }
+}
+
 const PORT = process.env.PORT || 3001;
 // Explicitly bind to '0.0.0.0' so Railway's proxy can route traffic to it
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🧠 Backend running on port ${PORT}`);
+
+  if (process.env.ENABLE_PUBLISH_SCHEDULER === 'true') {
+    setInterval(runScheduledPublishes, SCHEDULER_INTERVAL_MS);
+    console.log(`📆 Scheduled publishing on, checking every ${SCHEDULER_INTERVAL_MS / 1000}s`);
+  } else {
+    console.log('📆 Scheduled publishing off (set ENABLE_PUBLISH_SCHEDULER=true to enable)');
+  }
 });

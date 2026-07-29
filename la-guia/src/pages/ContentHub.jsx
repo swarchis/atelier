@@ -41,7 +41,10 @@ const LAUNCH_TEMPLATE = [
 ];
 
 const PLATFORM_ICON = { instagram: 'ph-instagram-logo', tiktok: 'ph-tiktok-logo', youtube: 'ph-youtube-logo', pinterest: 'ph-pinterest-logo' };
-const STATUS_TAG = { Scheduled: 'tag-blue', Posted: 'tag-green', Draft: 'tag-neutral', Failed: 'tag-red' };
+// 'Publishing' is set by the scheduler while a post is in flight with the
+// platform (migration 056). It is transient — a tick either completes it or marks
+// it Failed — but it has to be visible, or a post sits in an unexplained state.
+const STATUS_TAG = { Scheduled: 'tag-blue', Publishing: 'tag-amber', Posted: 'tag-green', Draft: 'tag-neutral', Failed: 'tag-red' };
 const DEFAULT_PLATFORMS = ['instagram', 'tiktok', 'youtube', 'pinterest'];
 
 // Only TikTok has a read path built (api/index.js SOCIAL_OAUTH.tiktok.fetchPosts).
@@ -194,9 +197,10 @@ export default function ContentHub() {
   const [publishingId, setPublishingId] = useState(null);
   const [publishError, setPublishError] = useState(null);
 
-  // Real attempt — only succeeds where the connected account actually has
-  // write access (Pinterest today; see api/index.js for why Instagram/
-  // TikTok/YouTube honestly can't yet). Failure is shown, not hidden.
+  // Real attempt. Only the post's id goes over the wire — the server reads what
+  // it's publishing from the row it will then stamp, so the two can't disagree.
+  // It also writes the status itself, which is why this reloads rather than
+  // setting a status locally: the row is the record of what happened, not us.
   const publishNow = async (post) => {
     setPublishError(null);
     const account = accounts.find(a => a.platform === post.platform);
@@ -215,16 +219,21 @@ export default function ContentHub() {
     setPublishingId(post.id);
     try {
       const res = await apiPost(`/api/social/publish/${post.platform}`, {
-        brandId: activeBrand.id, caption: post.caption, imageUrl: post.image_url, boardId,
+        brandId: activeBrand.id, postId: post.id, boardId,
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
-      await updatePostStatus(post.id, 'Posted');
+      // Said plainly rather than left to be assumed: until TikTok's audit passes,
+      // a published post is visible only to the account owner.
+      toast.success(data.privacyLevel === 'SELF_ONLY'
+        ? 'Published — but privately. TikTok keeps posts from unaudited apps visible only to you until the audit passes.'
+        : 'Published.');
     } catch (err) {
       setPublishError(err.message);
-      await updatePostStatus(post.id, 'Failed').catch(() => {});
     } finally {
       setPublishingId(null);
+      // The server owns the status either way, including on failure.
+      await refreshContent().catch(() => {});
     }
   };
 
@@ -412,14 +421,36 @@ export default function ContentHub() {
                                      </div>
                                      <div style={{ fontSize: 13.5, color: 'var(--ink-2)' }}>{data.caption}</div>
                                      {data.products?.name && <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 4 }}><i className="ph ph-tag" /> Promoting: {data.products.name}</div>}
+                                     {/* The real reason a publish failed, on the row it failed on.
+                                         Buried in a log it may as well not exist. */}
+                                     {data.status === 'Failed' && data.publish_error && (
+                                       <div style={{ fontSize: 11.5, color: 'var(--red)', marginTop: 4 }}>
+                                         <i className="ph ph-warning-circle" /> {data.publish_error}
+                                       </div>
+                                     )}
+                                     {data.external_url && (
+                                       <div style={{ fontSize: 11.5, marginTop: 4 }}>
+                                         <a href={data.external_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
+                                           <i className="ph ph-arrow-square-out" /> View on {data.platform}
+                                         </a>
+                                       </div>
+                                     )}
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-                                    <button className={`tag ${STATUS_TAG[data.status]}`} style={{ cursor: 'pointer', outline: 'none' }} onClick={() => toggleStatus(data.id, data.status)} title="Click to change status">
-                                       {data.status}
-                                    </button>
-                                    {data.status === 'Scheduled' && (
+                                    {/* Publishing is the scheduler's state, not a status a person
+                                        should be able to click themselves into or out of. */}
+                                    {data.status === 'Publishing' ? (
+                                      <span className={`tag ${STATUS_TAG.Publishing}`}>
+                                        <i className="ph ph-circle-notch ph-spin" /> Publishing
+                                      </span>
+                                    ) : (
+                                      <button className={`tag ${STATUS_TAG[data.status]}`} style={{ cursor: 'pointer', outline: 'none' }} onClick={() => toggleStatus(data.id, data.status)} title="Click to change status">
+                                        {data.status}
+                                      </button>
+                                    )}
+                                    {(data.status === 'Scheduled' || data.status === 'Failed') && (
                                       <button className="btn btn-sm" disabled={publishingId === data.id} onClick={() => publishNow(data)}>
-                                        {publishingId === data.id ? 'Publishing…' : 'Publish Now'}
+                                        {publishingId === data.id ? 'Publishing…' : data.status === 'Failed' ? 'Retry' : 'Publish Now'}
                                       </button>
                                     )}
                                   </div>

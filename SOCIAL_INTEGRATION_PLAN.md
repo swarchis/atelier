@@ -189,7 +189,52 @@ clients need SELECT alone.
   approved. It stays for the others; that component exists so a founder knows
   which connections are real.
 
-## Phase 2 — publish + the scheduler
+## Phase 2 — DONE (code written, migration 056 not yet run)
+
+`node --check` passes, the API boots clean, `vite build` passes, and the scheduler
+tick was observed running with 056 unrun: it warns once with an actionable message
+and does not crash.
+
+- `056_scheduled_publishing.sql` — `external_url`, `published_at`,
+  `publish_error`, `publish_attempts`, `publish_started_at` on `content_posts`,
+  plus `claim_due_content_posts()`: one atomic statement using
+  `FOR UPDATE SKIP LOCKED`, so two workers can't publish the same post. EXECUTE
+  revoked from everyone but `service_role`, as 035 did for the credit RPCs.
+- `publishTikTokPhoto()` — `/v2/post/publish/content/init/` with `media_type
+  PHOTO` + `DIRECT_POST`, then polls `status/fetch/`, because a 200 from init means
+  "job accepted", not "post is live".
+- `publishPost()` — one path shared by the manual button and the scheduler, so
+  they cannot drift.
+- `GET /api/media/content/:postId` — the verified-domain media proxy.
+- In-process ticker, **opt-in via `ENABLE_PUBLISH_SCHEDULER=true`**.
+- Publish endpoint now takes `postId`, not loose caption/imageUrl — the server
+  reads what it publishes from the row it then stamps.
+- UI: `Publishing` status (not user-clickable), the real failure reason on the
+  row, a "View on TikTok" link, Retry on failure, and an explicit "published
+  privately" message while unaudited.
+
+### Three corrections this phase produced
+
+1. **`FILE_UPLOAD` is video-only** — see Media delivery above. Cost a portal step
+   I had said was unnecessary.
+2. **`pg_cron` was not needed.** The stated reason for it — "a Railway restart
+   drops due posts" — was wrong. Due posts are found by querying the table, so a
+   restart misses one tick and the next picks them up. The real risk, two
+   instances double-publishing, is handled by the claim, not by the choice of
+   trigger. In-process needs no extensions and no stored secret.
+3. **Delete-after-publish was a bad idea.** I had called it free. It isn't:
+   `image_url` is also what renders the post in the user's own calendar and
+   history, so deleting it saves cents and breaks the screen they planned in.
+   Media is kept. Revisit when video lands.
+
+### One hazard worth knowing about
+
+The status tag is user-editable, so a published post can be cycled back to
+`Scheduled`. With a past date the scheduler would have published it **again**.
+Both the claim and the publish endpoint therefore gate on `published_at`, which
+only the backend writes — never on `status`.
+
+Original write-up:
 
 ### The real gap
 
@@ -226,15 +271,26 @@ row survives restarts and lives outside the web process.
   while the UI implies public would be exactly the kind of quiet dishonesty the
   project's conventions rule out.
 
-### Media delivery — decided: Supabase + `FILE_UPLOAD`
+### Media delivery — decided: proxy through `api.atelierlabs.app`
 
-`PULL_FROM_URL` requires verifying ownership of the domain hosting the file.
-Images live on `*.supabase.co` public URLs, which we don't own, so that route
-would need a media proxy on `atelierlabs.app` before it worked at all.
+**CORRECTION.** This section previously said `FILE_UPLOAD`, on the belief that it
+let us skip domain verification. That was wrong: **`FILE_UPLOAD` is video-only.
+Photo posts support `PULL_FROM_URL` and nothing else**, and `PULL_FROM_URL` only
+pulls from a domain verified in the developer portal. Verification is therefore
+unavoidable for photo publishing, which removed the entire advantage the
+`FILE_UPLOAD` route was chosen for.
 
-**Decision: keep media in Supabase and hand TikTok the bytes via `FILE_UPLOAD`.**
-No domain verification, no new provider, and the backend keeps owning the whole
-TikTok integration — which is where every other part of it already lives.
+**Decision: serve post media from our own already-owned domain.**
+`GET /api/media/content/:postId` streams the object out of `content_media` via the
+service-role client, and `api.atelierlabs.app` is verified as a URL property. No
+new provider, and the backend still owns the whole TikTok integration.
+
+That route is deliberately unauthenticated, because TikTok's servers do the
+fetching and carry no session. It is not a new exposure — `content_media` is a
+public bucket and these images already had public URLs — but it means the
+validation is the only thing making it safe: `image_url` is client-written, so
+the stored URL must match the public object prefix of our own bucket exactly, or
+it is refused unfetched. Without that check this is an open SSRF proxy.
 
 **Cloudflare R2 was considered and rejected for now.** It is genuinely cheaper —
 $0.015/GB-month and free egress against Supabase's $0.125/GB and $0.09/GB — and

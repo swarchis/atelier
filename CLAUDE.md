@@ -130,6 +130,22 @@ SSRF through the WooCommerce endpoints.
 It sends from our verified domain, so an open version is a phishing relay
 wearing our SPF and DKIM. Escape every interpolated value into email HTML.
 
+**`/api/media/content/:postId` is an unauthenticated proxy, and its validation is
+load-bearing.** TikTok photo posts only accept `PULL_FROM_URL` (`FILE_UPLOAD` is
+video-only) and only from a verified domain, so post media is served from
+`api.atelierlabs.app` instead of Supabase. TikTok's fetch carries no session, so
+the route can't require auth. `image_url` is client-written — if you loosen the
+exact-prefix check against our own `content_media` bucket, this becomes an open
+SSRF proxy.
+
+**Scheduled publishing is opt-in via `ENABLE_PUBLISH_SCHEDULER=true`.** `api/.env`
+points a laptop at production, so a default-on scheduler would publish real posts
+from a dev machine. Concurrency is handled in the database by
+`claim_due_content_posts` (`FOR UPDATE SKIP LOCKED`), not by assuming one instance.
+**Gate "already published" on `published_at`, never on `status`** — the status tag
+is user-editable, so a published post can be cycled back to `Scheduled` and
+double-posted.
+
 **TikTok's Display API answers HTTP 200 on failure.** A non-`ok` `error.code` in
 the body is how errors arrive, so `response.ok` will hand you an empty result and
 call it success. Every read goes through `tiktokDisplayCall()` so that check can't
