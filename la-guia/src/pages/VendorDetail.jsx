@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useVendors } from '../context/VendorsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
@@ -12,13 +12,36 @@ import PriceHistoryChart from '../components/PriceHistoryChart.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
-import { aiPost } from '../lib/aiApi.js';
+import { aiPost, apiPost } from '../lib/aiApi.js';
 import { toast } from '../lib/toast.js';
 
 const TECHPACK_STAGES = ['techpack', 'sourcing', 'sampling', 'production', 'launched'];
 // Same shape check the RFQ compose step uses. A typo here doesn't fail loudly —
 // it just makes the vendor quietly unreachable at send time — so catch it now.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function vendorEmailSubject(productName) {
+  return `Request for Quote: ${productName || 'New Design'}`;
+}
+
+function vendorEmailBody({ vendorName, productName, brandName, quantity, targetUnitCost, deadline, message }) {
+  return `Hello ${vendorName || 'there'},
+
+We would like to request a formal quote for our product: ${productName || 'Garment Design'}.
+
+Details:
+- Target Quantity: ${quantity || 'Standard MOQ'}
+- Target Unit Cost: ${targetUnitCost ? '$' + targetUnitCost : 'Open for negotiation'}
+- Target Deadline: ${deadline || 'Standard lead time'}
+
+Additional Notes:
+${message || 'None'}
+
+Please reply with your pricing and availability.
+
+Best regards,
+${brandName || 'Atelier Studio'}`;
+}
 const SEVERITY_ICON = { amber: 'ph-warning', blue: 'ph-info', green: 'ph-check-circle', red: 'ph-x-circle' };
 const ORDER_STAGE_TAG = { Sampling: 'tag-blue', 'In production': 'tag-amber', Shipped: 'tag-accent', Delivered: 'tag-green' };
 
@@ -79,7 +102,10 @@ export default function VendorDetail() {
   const [showEmail, setShowEmail] = useState(false);
   const [emailAsk, setEmailAsk] = useState('');
   const [drafting, setDrafting] = useState(false);
-  const [draft, setDraft] = useState(null);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [draftError, setDraftError] = useState(null);
 
   const [priceDraft, setPriceDraft] = useState(null);
@@ -204,22 +230,41 @@ export default function VendorDetail() {
     }
   };
 
+  // Keep the draft in step with the quote form until the user edits it, so the
+  // compose box is usable immediately instead of only existing once an AI pass
+  // has been paid for. AI is an optional improvement here, not the entry fee.
+  const emailProductObj = products.find(p => p.id === selectedProduct);
+  useEffect(() => {
+    if (emailTouched || !vendor) return;
+    setEmailSubject(vendorEmailSubject(emailProductObj?.name));
+    setEmailBody(vendorEmailBody({
+      vendorName: vendor.name,
+      productName: emailProductObj?.name,
+      brandName: activeBrand?.name,
+      quantity,
+      targetUnitCost: targetCost,
+      deadline,
+      message,
+    }));
+  }, [emailTouched, vendor?.name, emailProductObj?.name, activeBrand?.name, quantity, targetCost, deadline, message]);
+
   const draftEmail = async () => {
     if (!canAfford('draft-vendor-email')) { openTopup(); return; }
     setDrafting(true);
     setDraftError(null);
     try {
-      const selectedProductObj = products.find(p => p.id === selectedProduct);
       const res = await aiPost('/api/draft-vendor-email', {
           vendorName: vendor.name,
-          productName: selectedProductObj?.name,
-          garmentType: selectedProductObj?.category,
+          productName: emailProductObj?.name,
+          garmentType: emailProductObj?.category,
           preferences: { quantity, targetUnitCost: targetCost, deadline },
           ask: emailAsk,
         });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
-      setDraft(data.draft);
+      setEmailTouched(true);
+      if (data.draft?.subject) setEmailSubject(data.draft.subject);
+      if (data.draft?.body) setEmailBody(data.draft.body);
     } catch (err) {
       setDraftError(err.message || 'Could not draft that email.');
     } finally {
@@ -227,12 +272,37 @@ export default function VendorDetail() {
     }
   };
 
+  // Sends through Resend, the same path the RFQ uses. Previously this panel
+  // could only hand the draft to a desktop mail client, so an AI-written email
+  // could be composed in the app but never sent from it.
+  const sendEmail = async () => {
+    if (!vendor.email) return;
+    setSendingEmail(true);
+    setDraftError(null);
+    try {
+      const res = await apiPost('/api/send-vendor-email', {
+        to: vendor.email,
+        brandId: activeBrand?.id,
+        subject: emailSubject,
+        body: emailBody,
+        vendorName: vendor.name,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `Send failed (${res.status})`);
+      toast.success(`Email sent to ${vendor.name} at ${vendor.email}.`);
+    } catch (err) {
+      setDraftError(`Could not send to ${vendor.name}: ${err.message}`);
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
   const openInMailClient = () => {
-    if (!draft) return;
+    if (!emailSubject && !emailBody) return;
     // Addresses the draft to the vendor when one is on file. This used to be a
     // bare `mailto:?…` — the recipient was always empty, because vendors.email
     // was read all over the app but never existed as a column until 053.
-    const mailto = `mailto:${encodeURIComponent(vendor.email || '')}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`;
+    const mailto = `mailto:${encodeURIComponent(vendor.email || '')}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
     window.location.href = mailto;
   };
 
@@ -464,35 +534,54 @@ export default function VendorDetail() {
             <div className="corner-fold" style={{ '--fold-color': 'var(--c-vendors)' }} />
             <div className="card-header"><span className="card-title">Draft an email</span></div>
             <div className="card-body">
-              {!draft ? (
-                <>
-                  <div className="form-group" style={{ marginBottom: 16 }}>
-                    <label className="form-label">What do you want to say or ask?</label>
-                    <textarea className="form-textarea" placeholder="e.g. Introduce the brand and ask if they can do a 300-unit run of heavyweight fleece hoodies" value={emailAsk} onChange={e => setEmailAsk(e.target.value)} />
-                    <div className="form-hint">Uses whatever quantity / target cost / deadline you've entered in the quote form above, if any. AI-written — review before sending.</div>
-                  </div>
-                  {draftError && <div className="form-hint" style={{ color: 'var(--red)', marginBottom: 12 }}>{draftError}</div>}
-                  <button className="btn btn-primary" onClick={draftEmail} disabled={drafting} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span><i className="ph ph-magic-wand" /> {drafting ? 'Drafting…' : 'Draft with AI'}</span>
+              <div className="form-group" style={{ marginBottom: 16 }}>
+                <label className="form-label">What do you want to say or ask?</label>
+                <textarea className="form-textarea" placeholder="e.g. Introduce the brand and ask if they can do a 300-unit run of heavyweight fleece hoodies" value={emailAsk} onChange={e => setEmailAsk(e.target.value)} />
+                <div className="form-hint">Optional — only used by the AI draft. Pulls in whatever quantity / target cost / deadline you've entered in the quote form above. AI-written text is a starting point; read it before sending.</div>
+              </div>
+
+              <div className="form-group">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+                  <label className="form-label" style={{ marginBottom: 0 }}>Subject</label>
+                  <button type="button" className="btn btn-sm" onClick={draftEmail} disabled={drafting} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <i className={drafting ? 'ph ph-circle-notch ph-spin' : 'ph ph-magic-wand'} />
+                    {drafting ? 'Drafting…' : 'Draft with AI'}
                     {!drafting && <CreditCost feature="draft-vendor-email" style={{ color: 'inherit', opacity: 0.8 }} />}
                   </button>
-                </>
-              ) : (
-                <>
-                  <div className="form-group">
-                    <label className="form-label">Subject</label>
-                    <input className="form-input" value={draft.subject} onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: 16 }}>
-                    <label className="form-label">Body</label>
-                    <textarea className="form-textarea" style={{ minHeight: 160 }} value={draft.body} onChange={e => setDraft(d => ({ ...d, body: e.target.value }))} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn btn-primary" onClick={openInMailClient}><i className="ph ph-paper-plane-tilt" /> Open in email app</button>
-                    <button className="btn btn-sm" onClick={() => setDraft(null)}>Start over</button>
-                  </div>
-                </>
-              )}
+                </div>
+                <input className="form-input" value={emailSubject} onChange={e => { setEmailTouched(true); setEmailSubject(e.target.value); }} placeholder="Subject" />
+              </div>
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label className="form-label">Body</label>
+                <textarea
+                  className="form-textarea"
+                  style={{ minHeight: 200, fontFamily: 'var(--mono)', fontSize: 12.5, lineHeight: 1.6 }}
+                  value={emailBody}
+                  onChange={e => { setEmailTouched(true); setEmailBody(e.target.value); }}
+                />
+              </div>
+
+              <div className="form-hint" style={{ marginBottom: 12 }}>
+                {vendor.email
+                  ? <>Sends to <strong>{vendor.email}</strong> from your verified Atelier address.</>
+                  : <>No contact email on file for {vendor.name} — add one in <strong>Contact email</strong> at the top of this page to send from here.</>}
+              </div>
+
+              {draftError && <div className="form-hint" style={{ color: 'var(--red)', marginBottom: 12 }}>{draftError}</div>}
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={sendEmail}
+                  disabled={sendingEmail || !vendor.email || !emailSubject.trim() || !emailBody.trim()}
+                >
+                  <i className="ph ph-paper-plane-tilt" /> {sendingEmail ? 'Sending…' : 'Send email'}
+                </button>
+                <button className="btn btn-sm" onClick={openInMailClient}><i className="ph ph-envelope-simple" /> Open in email app</button>
+                {emailTouched && (
+                  <button className="btn btn-sm" onClick={() => setEmailTouched(false)}>Reset to template</button>
+                )}
+              </div>
             </div>
           </div>
         )}
