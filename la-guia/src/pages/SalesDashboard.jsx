@@ -10,6 +10,7 @@ import { exportCSV } from '../lib/csvExport.js';
 import { consumeOAuthHandoff } from '../lib/oauthHandoff.js';
 import { platformAdapters } from '../lib/ecommerceSync.js';
 import TabBar from '../components/TabBar.jsx';
+import ComingSoonNotice from '../components/ComingSoonNotice.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import RevenueChart from '../components/RevenueChart.jsx';
 import { toast } from '../lib/toast.js';
@@ -19,10 +20,10 @@ const TABS = [
   { key: 'vendors', label: 'Vendors', icon: 'ph-handshake' },
   { key: 'manufacturing', label: 'Manufacturing', icon: 'ph-package' },
   { key: 'inventory', label: 'Inventory', icon: 'ph-cube' },
-  { key: 'listings', label: 'Listings', icon: 'ph-storefront' },
+  { key: 'listings', label: 'Listings', icon: 'ph-storefront', comingSoon: true },
   { key: 'marketing', label: 'Marketing', icon: 'ph-megaphone' },
   { key: 'reports', label: 'Reports', icon: 'ph-file-text' },
-  { key: 'connections', label: 'Connections', icon: 'ph-plug' },
+  { key: 'connections', label: 'Connections', icon: 'ph-plug', comingSoon: true },
 ];
 
 const STAGE_TAG = { Sampling: 'tag-blue', 'In production': 'tag-amber', Shipped: 'tag-accent', Delivered: 'tag-green' };
@@ -388,7 +389,7 @@ export default function SalesDashboard() {
         {tab === 'vendors' && <VendorsTab vendors={vendors} quotes={quotes} orders={orders} navigate={navigate} />}
         {tab === 'manufacturing' && <ManufacturingTab orders={orders} />}
         {tab === 'inventory' && <InventoryTab products={products} orders={orders} productSales={productSales} navigate={navigate} connections={connections} />}
-        {tab === 'listings' && <ListingsTab products={products} connections={connections} persistRefreshedEtsyToken={persistRefreshedEtsyToken} />}
+        {tab === 'listings' && <><ComingSoonNotice what="Publishing listings" platforms="Shopify and Etsy" /><ListingsTab products={products} connections={connections} persistRefreshedEtsyToken={persistRefreshedEtsyToken} /></>}
         {tab === 'marketing' && (
           <EmptyState
             icon="ph-megaphone"
@@ -403,6 +404,7 @@ export default function SalesDashboard() {
 
         {tab === 'connections' && (
           <>
+            <ComingSoonNotice what="Store connections" platforms="Shopify, WooCommerce and Etsy" />
             {connection ? (
               <div className="card-raised" style={{ marginBottom: 20 }}>
                 <div className="card-header">

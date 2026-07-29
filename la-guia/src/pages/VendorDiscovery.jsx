@@ -7,6 +7,7 @@ import CreditCost from '../components/CreditCost.jsx';
 import { trustTagClass } from '../lib/format.js';
 import TabBar from '../components/TabBar.jsx';
 import { getPlan } from '../data/plans.js';
+import { hasFeature } from '../data/entitlements.js';
 import HoverPreview from '../components/HoverPreview.jsx';
 import { SkeletonRow } from '../components/Skeleton.jsx';
 import { aiPost } from '../lib/aiApi.js';
@@ -170,8 +171,31 @@ function SearchResultCard({ result, onAdd, adding, added }) {
           <i className="ph ph-info" /> This link goes to a third party talking about the vendor, not the vendor's own page.
         </div>
       )}
+      {/* Contact details, when the search actually found them. An email here
+          has been checked against the source page server-side, so it is shown
+          as fact rather than a suggestion — it is also what makes the vendor
+          RFQ-able the moment it is added. */}
+      {(result.email || result.phone) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 10, fontSize: 12 }}>
+          {result.email && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--green)' }}>
+              <i className="ph ph-envelope-simple" /> {result.email}
+            </span>
+          )}
+          {result.phone && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--ink-3)' }}>
+              <i className="ph ph-phone" /> {result.phone}
+            </span>
+          )}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 14 }}>
+          {result.website && result.website !== result.sourceUrl && (
+            <a href={result.website} target="_blank" rel="noreferrer" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="ph ph-globe" /> Website
+            </a>
+          )}
           {result.sourceUrl && (
             <a href={result.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
               <i className="ph ph-arrow-square-out" /> {isReview ? 'Review source' : 'Vendor site'}
@@ -199,7 +223,9 @@ export default function VendorDiscovery() {
   const techPackProducts = products.filter(p => ['techpack', 'sourcing', 'sampling', 'production', 'launched'].includes(p.stage));
   const { canAfford, openTopup, remaining: aiRemaining, logUsage } = useAIUsage();
   const plan = getPlan(activeBrand?.plan_tier || 'free');
-  const searchLocked = plan.id === 'free';
+  // Was `plan.id === 'free'` inline — now from the shared map, so this can't
+  // drift away from what plans.js advertises.
+  const searchLocked = !hasFeature(plan.id, 'vendor-search');
   const [tab, setTab] = useState('discover');
   const [mode, setMode] = useState('import');
   const [saving, setSaving] = useState(false);
@@ -357,6 +383,10 @@ export default function VendorDiscovery() {
         specialties: result.specialties || [],
         moq: result.moq ?? null,
         leadTime: result.leadTime || null,
+        // The searched-out email is the whole point of the autofill — without
+        // carrying it here it would be shown once and thrown away, and the
+        // founder would have to look it up again to send an RFQ.
+        email: result.email || null,
         sourceNote: result.reviewUrl || result.sourceUrl,
         label: result.sourceType === 'review' ? 'Unverified' : 'External source',
         certifications: result.certifications || [],

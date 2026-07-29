@@ -189,6 +189,42 @@ async function refundCredits(brandId, amount, feature) {
 // whose price depends on the request — e.g. silhouette quality, where low /
 // medium / high each cost a different amount of API spend and so are priced
 // as separate features.
+// Server-side plan gating. The frontend map in la-guia/src/data/entitlements.js
+// decides what the UI offers; this decides what the API will actually do, which
+// is the half that matters — a locked button is a suggestion, and the JWT for a
+// Basic account is enough to call a Premium endpoint by hand.
+//
+// Ordered cheapest-first: a Basic account calling a Premium endpoint is refused
+// BEFORE metered() debits it, so a blocked call never costs credits.
+const TIER_RANK = { free: 0, basic: 1, premium: 2 };
+
+function requireTier(minTier) {
+  return async (req, res, next) => {
+    const brandId = (req.body && (req.body.brandId || req.body.brand_id)) || null;
+    if (!brandId) return res.status(400).json({ ok: false, error: 'brandId is required.' });
+    if (!supabase) return next(); // no DB configured (local dev) — don't lock everything out
+    try {
+      const { data, error } = await supabase.from('brands').select('plan_tier').eq('id', brandId).maybeSingle();
+      if (error) throw error;
+      const tier = (data && data.plan_tier) || 'free';
+      if ((TIER_RANK[tier] ?? 0) < (TIER_RANK[minTier] ?? 0)) {
+        return res.status(403).json({
+          ok: false,
+          code: 'PLAN_REQUIRED',
+          requiredTier: minTier,
+          error: `This feature is part of the ${minTier.charAt(0).toUpperCase() + minTier.slice(1)} plan.`,
+        });
+      }
+      return next();
+    } catch (err) {
+      // Fail CLOSED. An unreadable plan is not a licence to use a paid feature,
+      // and this path is cheap to retry.
+      console.error('Plan check failed:', err.message);
+      return res.status(503).json({ ok: false, error: 'Could not verify your plan — please try again.' });
+    }
+  };
+}
+
 function metered(feature) {
   return async (req, res, next) => {
     const brandId = (req.body && (req.body.brandId || req.body.brand_id)) || null;
@@ -666,7 +702,7 @@ Write a concise, professional email (under 200 words), with a placeholder for th
   }
 });
 
-app.post('/api/search-vendors', metered('search-vendors'), async (req, res) => {
+app.post('/api/search-vendors', requireTier('basic'), metered('search-vendors'), async (req, res) => {
   console.log("📥 Received vendor search request...");
   try {
     const { keywords, category, location, quantity, moq, targetPrice, certifications, imageBase64 } = req.body;
@@ -690,27 +726,49 @@ app.post('/api/search-vendors', metered('search-vendors'), async (req, res) => {
     const tightQuery = tightParts.join(' ');
 
     const MFG_BIAS = 'private label OR white label OR OEM ODM OR contract manufacturer OR wholesale factory -shop -"our collection"';
-    // ONE search, not two. This used to fire a tight `advanced` search (12
-    // results) plus a broad `basic` search (10) and merge them. The tight
-    // query is a strict superset of the broad one's terms and `advanced`
-    // returns the better-quality set, so a single advanced search at Tavily's
-    // max_results ceiling (20) covers the same ground as the ~22 deduped
-    // results the pair produced — at half the search spend and lower latency.
-    const searchRes = await fetch('https://api.tavily.com/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        api_key: process.env.TAVILY_API_KEY,
-        query: `${tightQuery} ${MFG_BIAS}`,
-        search_depth: 'advanced',
-        max_results: 20,
-      }),
-    }).then(r => r.json());
-    if (searchRes.error) throw new Error(searchRes.error);
+
+    // FOUR searches, deduped, not one. Tavily caps max_results at 20 per query,
+    // so a single search set a hard ceiling of 20 candidates — and after the
+    // brand-vs-manufacturer filter and the dead-link check, ~4-5 survived.
+    // Volume has to come from more queries, not a bigger max_results.
+    //
+    // Each angle finds vendors the others miss: the directory query surfaces
+    // aggregator listings (which carry many factories per page), and the
+    // contact query is aimed squarely at pages that publish an email, since
+    // that is the single most valuable field to come back with.
+    const queries = [
+      { q: `${tightQuery} ${MFG_BIAS}`, raw: true },
+      { q: `${coreParts.join(' ') || category || keywords} clothing manufacturer directory list${location ? ` ${location}` : ''}`, raw: false },
+      { q: `${coreParts.join(' ') || category || keywords} apparel factory${location ? ` ${location}` : ''} contact email address "@"`, raw: true },
+      { q: `${coreParts.join(' ') || category || keywords} cut and sew manufacturer small batch${location ? ` ${location}` : ''} minimum order`, raw: false },
+    ];
+
+    // include_raw_content pulls the cleaned page body rather than a snippet.
+    // Contact details live below the fold, so a snippet almost never contains
+    // an email — this is what makes email extraction possible at all. Only the
+    // two queries most likely to carry contact details pay the token cost.
+    const searches = await Promise.all(queries.map(async ({ q, raw }) => {
+      try {
+        const r = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: process.env.TAVILY_API_KEY,
+            query: q,
+            search_depth: 'advanced',
+            max_results: 20,
+            include_raw_content: raw,
+          }),
+        }).then(x => x.json());
+        return r.error ? [] : (r.results || []);
+      } catch {
+        return []; // one failed angle shouldn't lose the other three
+      }
+    }));
 
     const seen = new Set();
-    const results = (searchRes.results || []).filter(r => {
-      if (seen.has(r.url)) return false;
+    const results = searches.flat().filter(r => {
+      if (!r || !r.url || seen.has(r.url)) return false;
       seen.add(r.url);
       return true;
     });
@@ -718,6 +776,34 @@ app.post('/api/search-vendors', metered('search-vendors'), async (req, res) => {
     if (results.length === 0) {
       return res.json({ ok: true, recommended: [], broader: [] });
     }
+
+    // Harvest candidate addresses with a regex rather than asking the model to
+    // spot them in truncated text. An address is a fact that either appears on
+    // the page or doesn't — pulling it out mechanically means the model picks
+    // between real candidates instead of pattern-matching a plausible one, and
+    // an invented vendor email is worse than none (mail to a stranger, or a
+    // bounce the founder reads as our bug).
+    const EMAIL_RX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    // Addresses that are never a vendor's sales contact: asset filenames that
+    // happen to contain @ (retina images), and the platform/tooling addresses
+    // that litter page source.
+    const EMAIL_NOISE = /(\.(png|jpe?g|gif|svg|webp|css|js)$|@(2x|3x)\.|example\.|sentry\.|wixpress\.|godaddy\.|squarespace\.|shopify\.|cloudflare\.|schema\.org|\.png@|sentry-next)/i;
+    function emailsFrom(text) {
+      if (!text) return [];
+      return [...new Set((String(text).match(EMAIL_RX) || [])
+        .map(e => e.trim().toLowerCase())
+        .filter(e => e.length < 80 && !EMAIL_NOISE.test(e)))]
+        .slice(0, 6);
+    }
+
+    // Raw page bodies are large; cap what reaches the prompt. The harvested
+    // emails are passed separately, so truncation can't cost us the address.
+    const MAX_RESULTS_TO_MODEL = 45;
+    const forModel = results.slice(0, MAX_RESULTS_TO_MODEL).map((r, i) => {
+      const body = (r.raw_content || r.content || '').slice(0, 1200);
+      const found = emailsFrom(r.raw_content || r.content);
+      return `[${i}] ${r.title}\nURL: ${r.url}\n${found.length ? `EMAILS FOUND ON THIS PAGE: ${found.join(', ')}\n` : ''}${body}`;
+    }).join('\n\n');
 
     const criteriaLines = [
       keywords && `Material/style keywords: ${keywords}`,
@@ -733,15 +819,18 @@ app.post('/api/search-vendors', metered('search-vendors'), async (req, res) => {
 ${criteriaLines}
 ${imageBase64 ? '\nAn image of the founder\'s own product design is attached — use it only to judge what garment category, fabric weight, and construction complexity this vendor would need to handle (does their stated specialty plausibly cover it?). The image shows the FOUNDER\'S product, not anything belonging to the vendor — never attribute the image itself to a vendor.' : ''}
 
-Here are real web search results (some from a tightly-matched search, some from a broader category search, mixed together):
-${results.map((r, i) => `[${i}] ${r.title}\nURL: ${r.url}\n${(r.content || '').slice(0, 900)}`).join('\n\n')}
+Here are real web search results, gathered from four different searches (a tight match, a directory search, a contact-details search, and a small-batch search) and merged:
+${forModel}
 
 CRITICAL FILTER — apply this before anything else:
 The founder needs a company that will MANUFACTURE GARMENTS FOR THEM based on a design/tech pack they send in — private label, white label, OEM/ODM, contract manufacturing, cut-make-trim, "start your own clothing line" production partners.
 EXCLUDE any company that is itself a clothing BRAND selling finished products under its own name directly to end consumers — even if it mentions organic cotton, sustainable materials, or "manufactured ethically." A brand talking about how ITS OWN products are made is not a match.
 Signals a result IS a manufacturer-for-hire (include): "private label," "white label," "wholesale," "MOQ for your brand," "start your clothing line," "we manufacture for brands," "contract manufacturing," "OEM/ODM," "sample and bulk production," "sourcing agent," "factory partner," pricing/MOQ framed around a business customer.
 Signals a result is a retail BRAND instead (exclude): online shop / storefront language, "shop now," "add to cart," "our collection," a founder's personal story about their own product line, sizing charts for individual customers, no mention of producing for other businesses.
-If you are not reasonably confident a result is a manufacturer-for-hire rather than a retail brand, LEAVE IT OUT — do not guess, and do not include it "just in case." Precision matters more than volume here.
+If a result is clearly a retail brand, drop it. If you are UNSURE whether it is a manufacturer-for-hire, keep it and put it in "broader" — an uncertain lead the founder can check in ten seconds is useful; silently discarding it is not. Only drop what you are confident is wrong.
+
+AIM FOR ABOUT 20 MANUFACTURERS IN TOTAL across the two groups. The searches above deliberately cover several angles, so there is usually enough material — if you are returning fewer than 10, re-read the results for ones you skipped over rather than stopping early. Never pad the list with retail brands or invented companies to reach a number.
+A directory or listicle page that names several manufacturers should yield ONE ENTRY PER MANUFACTURER NAMED, not one entry for the directory itself — the founder wants the factories, not the article about them.
 
 After applying that filter, split what's left into two groups:
 - "recommended": manufacturers that match essentially everything specific the founder gave above (location, MOQ, target price, certifications, category — whichever fields were actually filled in).
@@ -753,7 +842,10 @@ For each manufacturer, figure out the source carefully:
 - If the result IS the manufacturer's own website/page (domain matches the company, or it's their official site/contact page), set "sourceType": "vendor" and "sourceUrl" to that link.
 - If the result is actually a THIRD PARTY talking about the manufacturer (an Instagram account that reviews manufacturers, a blog post, a directory listing, a marketplace aggregator page) rather than their own presence, set "sourceType": "review". If the snippet text itself mentions the manufacturer's own website, email, or handle, put THAT as "sourceUrl" and put the original review/mention link as "reviewUrl". If no direct link can be found anywhere, "sourceUrl" should be the review link itself (still set "sourceType": "review").
 
-Also extract, if the text supports it (leave null/empty/empty-array rather than guessing):
+Fill in as many fields as the text genuinely supports. Leave null/empty/empty-array rather than guessing — but do READ for these, because a vendor that arrives already filled in saves the founder an afternoon:
+- email: THE HIGHEST-VALUE FIELD. Take it from the "EMAILS FOUND ON THIS PAGE" line for that result when present, choosing the best business contact (prefer sales@, info@, contact@, hello@, export@ over a personal name; never pick a careers@, jobs@, press@, privacy@, unsubscribe@, or webmaster@ address). If a result has no such line and no address in its text, return null. NEVER construct, complete, or guess an address — not from the domain, not from a pattern, not "info@" + their website. A wrong address emails a stranger; an empty one just asks the founder to look it up.
+- website: the manufacturer's own domain (homepage), if it can be identified
+- phone: a business phone number if one appears in the text
 - specialties: short phrases describing what they specialize in (materials, garment types, techniques)
 - moq: minimum order quantity as a number
 - leadTime: e.g. "45 days"
@@ -764,12 +856,29 @@ Also extract, if the text supports it (leave null/empty/empty-array rather than 
 Do not invent details not supported by the text. Return a JSON object with exactly this structure:
 {
   "recommended": [
-    { "name": "string", "category": "string", "location": "string or empty", "description": "one sentence on why this matches", "sourceUrl": "string", "sourceType": "vendor" | "review", "reviewUrl": "string or null", "specialties": ["string"], "moq": <number or null>, "leadTime": "string or null", "certifications": ["string"], "capabilities": ["string"], "priceRange": "string or null" }
+    { "name": "string", "category": "string", "location": "string or empty", "description": "one sentence on why this matches", "email": "string or null", "website": "string or null", "phone": "string or null", "sourceUrl": "string", "sourceType": "vendor" | "review", "reviewUrl": "string or null", "specialties": ["string"], "moq": <number or null>, "leadTime": "string or null", "certifications": ["string"], "capabilities": ["string"], "priceRange": "string or null" }
   ],
   "broader": [ same shape as above ]
 }`;
 
     const parsed = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64 || null);
+
+    // Every address the searches actually contained. The prompt forbids
+    // inventing one, but "the prompt says not to" is not a guarantee — and this
+    // field ends up in a To: line, so it gets checked rather than trusted. An
+    // address the model returned that appears nowhere in the source text is
+    // dropped: the vendor still arrives, just without a fabricated contact.
+    const harvestedEmails = new Set(
+      results.flatMap(r => emailsFrom(r.raw_content || r.content))
+    );
+    let discardedEmails = 0;
+    function verifyEmail(v) {
+      if (!v || !v.email) return v;
+      const claimed = String(v.email).trim().toLowerCase();
+      if (harvestedEmails.has(claimed)) return { ...v, email: claimed };
+      discardedEmails++;
+      return { ...v, email: null };
+    }
 
     const PARKING_SIGNALS = ['buy this domain', 'domain is for sale', 'this domain may be for sale', 'domain for sale', 'sedo.com', 'hugedomains', 'afternic', 'dan.com', 'godaddy.com/domainsearch', 'the lease to own', 'inquire about this domain'];
     // These urls come from Tavily results as filtered by Gemini — web text, so
@@ -798,7 +907,7 @@ Do not invent details not supported by the text. Return a JSON object with exact
     }
     async function filterAlive(list) {
       const checks = await Promise.all((list || []).map(async v => ({ v, alive: await isLikelyAlive(v.sourceUrl) })));
-      return checks.filter(c => c.alive).map(c => c.v);
+      return checks.filter(c => c.alive).map(c => verifyEmail(c.v));
     }
 
     const [recommended, broader] = await Promise.all([
@@ -806,7 +915,9 @@ Do not invent details not supported by the text. Return a JSON object with exact
       filterAlive(parsed.broader),
     ]);
 
-    console.log("✅ Vendor search successful");
+    const total = recommended.length + broader.length;
+    const withEmail = [...recommended, ...broader].filter(v => v.email).length;
+    console.log(`✅ Vendor search successful — ${results.length} pages searched, ${total} vendors returned, ${withEmail} with a verified email${discardedEmails ? `, ${discardedEmails} unverifiable email(s) dropped` : ''}`);
     res.json({ ok: true, recommended, broader });
   } catch (error) {
     console.error('❌ Endpoint Error:', error.message);
@@ -814,7 +925,7 @@ Do not invent details not supported by the text. Return a JSON object with exact
   }
 });
 
-app.post('/api/analyze-vendor-fit', metered('analyze-vendor-fit'), async (req, res) => {
+app.post('/api/analyze-vendor-fit', requireTier('basic'), metered('analyze-vendor-fit'), async (req, res) => {
   console.log("📥 Received vendor fit request...");
   try {
     const { vendor, product, brand, quoteHistory, bom } = req.body;
@@ -2173,7 +2284,7 @@ Return 3 to 6 entries.`;
 // rather than being called in a loop from the client.
 const MATERIAL_RESEARCH_CAP = 8;
 
-app.post('/api/research-materials', metered('research-materials'), async (req, res) => {
+app.post('/api/research-materials', requireTier('basic'), metered('research-materials'), async (req, res) => {
   console.log("📥 Received material research request...");
   try {
     const { materials, garmentType } = req.body;
@@ -2409,7 +2520,7 @@ app.post('/api/social/publish/:platform', requireAuth, async (req, res) => {
 // here alongside the message and a short prior-turn transcript. callGemini
 // always asks for JSON back, so a conversational reply gets wrapped in a
 // single { "reply": "..." } object rather than returned as raw text.
-app.post('/api/chat-reply', metered('chat-reply'), async (req, res) => {
+app.post('/api/chat-reply', requireTier('premium'), metered('chat-reply'), async (req, res) => {
   console.log("📥 Received chat message...");
   try {
     const { message, history, brandContext } = req.body;
@@ -2466,7 +2577,7 @@ const COST_LEVERS = [
   { id: 'premium-trim', label: 'Add a premium trim (woven label, metal hardware)', type: 'toggle', hint: '' },
 ];
 
-app.post('/api/quote-economics', metered('quote-economics'), async (req, res) => {
+app.post('/api/quote-economics', requireTier('basic'), metered('quote-economics'), async (req, res) => {
   console.log("📥 Received quote economics request...");
   try {
     const { vendor, product, quote, bom } = req.body;
@@ -2521,7 +2632,7 @@ Return a JSON object with exactly this structure:
   }
 });
 
-app.post('/api/cost-simulator', metered('cost-simulator'), async (req, res) => {
+app.post('/api/cost-simulator', requireTier('premium'), metered('cost-simulator'), async (req, res) => {
   console.log("📥 Received cost simulator request...");
   try {
     const { vendor, product, quote, bom } = req.body;

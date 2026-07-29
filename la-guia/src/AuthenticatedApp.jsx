@@ -8,6 +8,7 @@ import { ProductionProvider } from './context/ProductionContext.jsx';
 import { SamplingProvider } from './context/SamplingContext.jsx';
 import { NotificationsProvider } from './context/NotificationsContext.jsx';
 import { MaterialsProvider } from './context/MaterialsContext.jsx';
+import PlanGate from './components/PlanGate.jsx';
 import { TeamProvider } from './context/TeamContext.jsx';
 import { AIUsageProvider } from './context/AIUsageContext.jsx';
 import { OnboardingProvider } from './context/OnboardingContext.jsx';
@@ -82,11 +83,21 @@ function AppShellInner() {
             <Route path="/sampling/:productId" element={<SampleDetail />} />
             <Route path="/production" element={<ProductionOrders />} />
             <Route path="/production/:id" element={<ProductionOrderDetail />} />
-            <Route path="/readiness" element={<ReadinessReview />} />
-            <Route path="/sales" element={<SalesDashboard />} />
-            <Route path="/financial" element={<FinancialTools />} />
-            <Route path="/products/:id/performance" element={<ProductInsights />} />
-            <Route path="/content" element={<ContentHub />} />
+            <Route path="/readiness" element={<PlanGate feature="readiness-review" title="Readiness Review" blurb="Check every product against the factory-readiness gate at once, and see what is blocking each one.">
+              <ReadinessReview />
+            </PlanGate>} />
+            <Route path="/sales" element={<PlanGate feature="sales-dashboard" title="Sales Dashboard" blurb="Live orders, inventory and per-product break-even, pulled from your connected store.">
+              <SalesDashboard />
+            </PlanGate>} />
+            <Route path="/financial" element={<PlanGate feature="financial-tools" title="Financial Tools" blurb="Cash-flow forecasting, MOQ optimization and the AI cost simulator.">
+              <FinancialTools />
+            </PlanGate>} />
+            <Route path="/products/:id/performance" element={<PlanGate feature="product-insights" title="Product Insights" blurb="Manufacturing cost history and profitability for a single product.">
+              <ProductInsights />
+            </PlanGate>} />
+            <Route path="/content" element={<PlanGate feature="content-hub" title="Content Hub" blurb="Drop calendar, launch planner, grid preview, influencer tracking and email campaigns.">
+              <ContentHub />
+            </PlanGate>} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/notifications" element={<NotificationsInbox />} />
 

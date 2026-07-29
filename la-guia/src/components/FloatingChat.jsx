@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useTeam } from '../context/TeamContext.jsx';
 import { useAIUsage } from '../context/AIUsageContext.jsx';
+import { hasFeature } from '../data/entitlements.js';
 
 function timeLabel(iso) {
   const d = new Date(iso);
@@ -23,6 +24,7 @@ export default function FloatingChat() {
   const { activeBrand } = useProducts();
   const { members } = useTeam();
   const { canAfford, openTopup, costOf, remaining: aiRemaining, logUsage } = useAIUsage();
+  const aiAssistantAllowed = hasFeature(activeBrand?.plan_tier || 'free', 'team-chat');
   const {
     aiChat, groupChats, messagesByChat, sendingAI, hasUnread, loadError,
     addableMembers, loadMessages, sendMessage, createGroupChat, markRead, pollMs, refresh,
@@ -97,6 +99,13 @@ export default function FloatingChat() {
     e.preventDefault();
     const text = draft.trim();
     if (!text || !activeChat) return;
+    // The AI assistant is a Premium feature; team chats are not. The backend
+    // refuses this too (requireTier on /api/chat-reply) — this only keeps a
+    // Basic account from typing a message that was never going to send.
+    if (activeChat.type === 'ai' && !aiAssistantAllowed) {
+      setSendError('The AI assistant is part of the Premium plan. Team chats are included in your plan.');
+      return;
+    }
     if (activeChat.type === 'ai' && !canAfford('chat-reply')) { openTopup(); return; }
     setDraft('');
     setSendError(null);

@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase.js';
 import { consumeOAuthHandoff } from '../lib/oauthHandoff.js';
 import { apiPost } from '../lib/aiApi.js';
 import TabBar from '../components/TabBar.jsx';
+import ComingSoonNotice from '../components/ComingSoonNotice.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { PhotoPanel } from '../components/decor.jsx';
 import CalendarGrid from '../components/CalendarGrid.jsx';
@@ -20,8 +21,8 @@ const TABS = [
   { key: 'launch', label: 'Launch Planner', icon: 'ph-rocket-launch' },
   { key: 'influencers', label: 'Influencers', icon: 'ph-users-three' },
   { key: 'email', label: 'Email Campaigns', icon: 'ph-envelope-simple' },
-  { key: 'analytics', label: 'Analytics', icon: 'ph-chart-bar' },
-  { key: 'accounts', label: 'Accounts', icon: 'ph-link' },
+  { key: 'analytics', label: 'Analytics', icon: 'ph-chart-bar', comingSoon: true },
+  { key: 'accounts', label: 'Accounts', icon: 'ph-link', comingSoon: true },
 ];
 
 const INFLUENCER_STATUSES = ['Prospect', 'Contacted', 'Negotiating', 'Active', 'Completed'];
@@ -422,10 +423,13 @@ export default function ContentHub() {
         )}
 
         {tab === 'email' && <EmailCampaignsTab activeBrand={activeBrand} />}
-        {tab === 'analytics' && <CampaignAnalyticsTab posts={posts} activeBrand={activeBrand} />}
+        {tab === 'analytics' && <><ComingSoonNotice what="Post analytics" platforms="Instagram, TikTok, YouTube and Pinterest">Reach and engagement come from the platforms themselves, so this stays empty until those connections are approved. Everything you plan here is saved and unaffected.</ComingSoonNotice><CampaignAnalyticsTab posts={posts} activeBrand={activeBrand} /></>}
 
         {tab === 'accounts' && (
           <div className="card">
+            <div style={{ padding: '14px 16px 0' }}>
+              <ComingSoonNotice what="Connecting social accounts" platforms="Instagram, TikTok, YouTube and Pinterest" />
+            </div>
             {mergedAccounts.map(a => (
               <div className="list-row" key={a.platform}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
