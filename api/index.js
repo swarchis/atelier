@@ -2894,7 +2894,24 @@ app.get('/api/media/content/:postId', async (req, res) => {
     let outputBuffer;
     let contentType;
     try {
+      // TikTok also caps photo dimensions at 1920x1080 landscape or 1080x1920
+      // portrait, and rejects anything larger with picture_size_check_failed. The
+      // AI image features produce 2048x2048, which is over on BOTH axes, so
+      // every generated image needs scaling down.
+      //
+      // Which envelope applies depends on orientation, and a square image has to
+      // satisfy the tighter side of both — so it lands at 1080x1080 rather than
+      // 1080x1920. `fit: 'inside'` preserves aspect ratio; withoutEnlargement
+      // leaves anything already small alone rather than upscaling it to blur.
+      const metadata = await sharp(buffer).metadata();
+      const isLandscape = (metadata.width || 0) > (metadata.height || 0);
       outputBuffer = await sharp(buffer)
+        .resize({
+          width: isLandscape ? 1920 : 1080,
+          height: isLandscape ? 1080 : 1920,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
         .flatten({ background: '#ffffff' })
         .jpeg({ quality: 90 })
         .toBuffer();
