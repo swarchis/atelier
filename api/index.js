@@ -2442,6 +2442,8 @@ const SOCIAL_OAUTH = {
       const data = await tiktokDisplayCall(
         'https://open.tiktokapis.com/v2/user/info/?fields=display_name,follower_count',
         accessToken,
+        {},
+        'user.info.stats',
       );
       return {
         handle: data.user?.display_name || null,
@@ -2464,6 +2466,7 @@ const SOCIAL_OAUTH = {
         // 20; that is the intended behaviour. Don't add paging here without a
         // per-brand throttle in front of it.
         { method: 'POST', body: JSON.stringify({ max_count: 20 }) },
+        'video.list',
       );
       const videos = Array.isArray(data.videos) ? data.videos : [];
       return {
@@ -2525,7 +2528,12 @@ const SOCIAL_OAUTH = {
 // The scope errors are translated because they are the expected state right now,
 // not an edge case: the app has user.info.basic and nothing else until the
 // revision is approved, so "not authorised" is what a founder will actually hit.
-async function tiktokDisplayCall(url, accessToken, options = {}) {
+// `requiredScope` is not decoration. This helper is shared by the reads and by
+// publishing, and naming the wrong scope in a scope error sends you to the wrong
+// part of the developer portal — which it did: a publish blocked by a missing
+// video.publish reported "video.list and user.info.stats" and read as the reads
+// being broken when they were working fine.
+async function tiktokDisplayCall(url, accessToken, options = {}, requiredScope = null) {
   const response = await fetch(url, {
     ...options,
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -2535,7 +2543,9 @@ async function tiktokDisplayCall(url, accessToken, options = {}) {
 
   if (code && code !== 'ok') {
     if (code === 'scope_not_authorized' || code === 'scope_permission_missed') {
-      throw new Error('TikTok has not approved the permissions this needs yet (video.list and user.info.stats). Nothing to sync until that review passes.');
+      throw new Error(requiredScope
+        ? `TikTok hasn't approved the ${requiredScope} permission yet, so this can't run until that review passes.`
+        : "TikTok hasn't approved the permissions this needs yet.");
     }
     if (code === 'access_token_invalid' || code === 'access_token_expired') {
       throw new Error('This TikTok connection is no longer valid. Reconnect the account and try again.');
@@ -2706,6 +2716,7 @@ async function publishTikTokPhoto(accessToken, { caption, mediaUrl }) {
         media_type: 'PHOTO',
       }),
     },
+    'video.publish',
   );
 
   const publishId = init.publish_id;
@@ -2719,6 +2730,7 @@ async function publishTikTokPhoto(accessToken, { caption, mediaUrl }) {
       'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
       accessToken,
       { method: 'POST', body: JSON.stringify({ publish_id: publishId }) },
+      'video.publish',
     );
 
     if (status.status === 'PUBLISH_COMPLETE') {

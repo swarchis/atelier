@@ -10,6 +10,7 @@ import { consumeOAuthHandoff } from '../lib/oauthHandoff.js';
 import { apiPost } from '../lib/aiApi.js';
 import TabBar from '../components/TabBar.jsx';
 import ComingSoonNotice from '../components/ComingSoonNotice.jsx';
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { PhotoPanel } from '../components/decor.jsx';
 import CalendarGrid from '../components/CalendarGrid.jsx';
@@ -68,8 +69,9 @@ export default function ContentHub() {
   const [calView, setCalView] = useState('timeline'); // 'timeline' | 'month'
   const { products, activeBrand, updateProduct } = useProducts();
   const { orders } = useProduction();
-  const { accounts, posts, syncedPosts, loading, disconnectAccount, syncAccount, schedulePost, updatePostStatus, refresh: refreshContent } = useContent();
+  const { accounts, posts, syncedPosts, loading, disconnectAccount, syncAccount, schedulePost, updatePostStatus, deletePost, refresh: refreshContent } = useContent();
   const [syncingPlatform, setSyncingPlatform] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const { influencers, loading: influencersLoading, createInfluencer, updateInfluencer, deleteInfluencer, dealsByInfluencer, loadDeals, addDeal } = useInfluencers();
 
   const [form, setForm] = useState({ platform: 'instagram', scheduledFor: '', caption: '', productId: '' });
@@ -453,6 +455,18 @@ export default function ContentHub() {
                                         {publishingId === data.id ? 'Publishing…' : data.status === 'Failed' ? 'Retry' : 'Publish Now'}
                                       </button>
                                     )}
+                                    {/* Opens the modal rather than deleting — the row itself is never
+                                        a delete target, per ConfirmDeleteModal's own contract. */}
+                                    {data.status !== 'Publishing' && (
+                                      <button
+                                        className="btn btn-sm"
+                                        style={{ color: 'var(--red)' }}
+                                        onClick={() => setDeleteTarget(data)}
+                                        title="Delete this post"
+                                      >
+                                        <i className="ph ph-trash" />
+                                      </button>
+                                    )}
                                   </div>
                                </>
                             ) : (
@@ -558,6 +572,21 @@ export default function ContentHub() {
           </div>
         )}
       </div>
+
+      {/* itemName is the platform, not the caption: a caption can be empty, and an
+          empty itemName would make the modal's "type the exact name" check pass on
+          an empty box — removing the only thing stopping a stray Enter. platform is
+          NOT NULL, so it is always something real to type. */}
+      <ConfirmDeleteModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        itemLabel="scheduled post"
+        itemName={deleteTarget?.platform || ''}
+        warning={deleteTarget?.published_at
+          ? 'This post has already been published. Deleting it here removes it from your calendar only — it stays live on the platform, and you would need to delete it there too.'
+          : 'This removes the post from your calendar. Its image is deleted too where possible.'}
+        onConfirm={async () => { await deletePost(deleteTarget.id); }}
+      />
     </>
   );
 }

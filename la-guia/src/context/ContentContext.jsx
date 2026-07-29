@@ -103,6 +103,48 @@ export function ContentProvider({ children }) {
     setPosts(prev => [data, ...prev].sort((a,b) => new Date(b.scheduled_for) - new Date(a.scheduled_for)));
   };
 
+  const deletePost = async (id) => {
+    const post = posts.find(p => p.id === id);
+
+    // Mid-publish is the one state where deleting loses information rather than
+    // discarding it: TikTok may already have accepted the job, so the post can go
+    // live with nothing on our side recording that it did. A minute's wait
+    // resolves it either way.
+    if (post?.status === 'Publishing') {
+      throw new Error('That post is being published right now. Wait for it to finish, then delete it.');
+    }
+
+    // .select() so we can tell "deleted" from "matched nothing". An RLS-blocked
+    // delete is NOT an error — it returns { data: [], error: null } — so without
+    // this a viewer (blocked by 050's restrictive delete policy) would watch the
+    // post disappear from the list and reappear on the next load.
+    const { data: deleted, error } = await supabase
+      .from('content_posts').delete().eq('id', id).select('id');
+    if (error) throw error;
+    if (!deleted || deleted.length === 0) {
+      throw new Error("You don't have permission to delete this post. Viewers can read the calendar but not change it.");
+    }
+
+    // Best-effort media cleanup. Not guaranteed, and deliberately not reported as
+    // if it were: content_media's DELETE policy is owner-scoped (047), so removing
+    // an image a different team member uploaded matches no rows and returns
+    // { data: [], error: null } — success-shaped and completely inert. That is the
+    // same silent no-op that hid the mockups leak, so the outcome is at least
+    // logged instead of assumed.
+    const prefix = import.meta.env.VITE_SUPABASE_URL
+      ? `${import.meta.env.VITE_SUPABASE_URL.replace(/\/+$/, '')}/storage/v1/object/public/content_media/`
+      : null;
+    if (prefix && post?.image_url?.startsWith(prefix)) {
+      const objectPath = decodeURIComponent(post.image_url.slice(prefix.length));
+      const { data: removed } = await supabase.storage.from('content_media').remove([objectPath]);
+      if (!removed || removed.length === 0) {
+        console.warn('Post deleted, but its image was not removed from storage (likely uploaded by another member):', objectPath);
+      }
+    }
+
+    setPosts(prev => prev.filter(p => p.id !== id));
+  };
+
   const updatePostStatus = async (id, status) => {
     const { error } = await supabase.from('content_posts').update({ status }).eq('id', id);
     if (error) throw error;
@@ -110,7 +152,7 @@ export function ContentProvider({ children }) {
   };
 
   return (
-    <ContentContext.Provider value={{ accounts, posts, syncedPosts, loading, disconnectAccount, syncAccount, schedulePost, updatePostStatus, refresh: loadData }}>
+    <ContentContext.Provider value={{ accounts, posts, syncedPosts, loading, disconnectAccount, syncAccount, schedulePost, updatePostStatus, deletePost, refresh: loadData }}>
       {children}
     </ContentContext.Provider>
   );
