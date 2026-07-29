@@ -102,19 +102,28 @@ export function TeamProvider({ children }) {
     // 2. Dispatch the Email via our Backend. Authenticated + brand-scoped now:
     // the endpoint sends from our own verified domain, so it checks the caller
     // actually belongs to the brand named in the invite.
+    // The membership row above is already saved, so a failed email is not a
+    // failed invite — it is an invite the person was never told about. Returning
+    // the reason lets the caller say that, instead of the old behaviour: the
+    // response was never inspected at all, so every invite looked sent even when
+    // the backend had refused it outright.
+    let emailError = null;
     try {
-      await apiPost('/api/send-invite', {
+      const res = await apiPost('/api/send-invite', {
         email: targetEmail,
         brandId: activeBrand.id,
         brandName: activeBrand.name,
         inviterName: preferences?.full_name || user?.email,
         role: role,
       });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.ok) emailError = payload?.error || `Invite email failed (${res.status}).`;
     } catch (err) {
-      console.error("Failed to send invite email", err);
+      emailError = err.message || 'Invite email failed to send.';
     }
+    if (emailError) console.error('Failed to send invite email:', emailError);
 
-    return data;
+    return { ...data, emailError };
   };
 
   const updateMemberRole = async (id, role) => {

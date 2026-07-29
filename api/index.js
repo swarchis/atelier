@@ -1727,8 +1727,12 @@ app.get('/api/tiktokshop/auth', (req, res) => {
 app.post('/api/send-invite', requireAuth, async (req, res) => {
   console.log("📥 Received invite email request...");
   if (!resend) {
-    console.warn("⚠️ RESEND_API_KEY missing. Skipping email send.");
-    return res.json({ ok: true, message: 'Skipped email because no key was found.' });
+    // Used to return ok:true "skipped because no key was found" — so with the
+    // key unset, invites reported success forever while /api/send-vendor-email
+    // (which said so plainly) looked like the broken one. Same failure, two
+    // different stories. Say it here too.
+    console.warn("⚠️ RESEND_API_KEY missing. Cannot send invite email.");
+    return res.status(400).json({ ok: false, error: 'RESEND_API_KEY is not set on the API — the teammate was added, but no invite email could be sent.' });
   }
 
   try {

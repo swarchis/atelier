@@ -61,8 +61,15 @@ function TeamTab() {
     setInviting(true);
     setError(null);
     try {
-      await inviteMember(trimmed, role);
-      toast.success('Invite sent.');
+      // The teammate is added either way; only the notification email can fail.
+      // Saying "Invite sent" regardless is how an invite nobody received still
+      // looked like a success.
+      const result = await inviteMember(trimmed, role);
+      if (result?.emailError) {
+        toast.error(`${trimmed} was added, but the invite email did not send: ${result.emailError}`);
+      } else {
+        toast.success('Invite sent.');
+      }
       setEmail('');
     } catch (err) {
       setError(err.message.includes('duplicate') ? 'That email is already invited to this brand.' : err.message);
