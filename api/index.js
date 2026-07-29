@@ -1753,12 +1753,18 @@ app.post('/api/send-invite', requireAuth, async (req, res) => {
       </div>
     `;
 
-    const data = await resend.emails.send({
+    // resend.emails.send RESOLVES with { data, error } — it does not reject.
+    // Returning the response as-is reported ok:true on a refused send, which is
+    // how "the invite was sent" and "no invite ever arrived" were both true at
+    // once. The caller needs Resend's actual reason (unverified domain,
+    // recipient not allowed on the free tier, invalid address) to act on it.
+    const { data, error: sendError } = await resend.emails.send({
       from: 'Atelier <invites@atelierlabs.app>',
-      to: email, 
+      to: email,
       subject: `Join ${brandName} on Atelier`,
       html: htmlBody,
     });
+    if (sendError) throw new Error(sendError.message || 'Resend refused the send.');
 
     res.json({ ok: true, data });
   } catch (error) {
@@ -1801,7 +1807,11 @@ app.post('/api/send-campaign', requireAuth, async (req, res) => {
     const failures = [];
     for (const email of recipients) {
       try {
-        await resend.emails.send({ from: 'Atelier <invites@atelierlabs.app>', to: email, subject, html: body });
+        // { error } rather than a rejection — see /api/send-invite. Without this
+        // check every recipient counted as sent no matter what Resend said, and
+        // the campaign reported a clean 12/12 having delivered nothing.
+        const { error: sendError } = await resend.emails.send({ from: 'Atelier <invites@atelierlabs.app>', to: email, subject, html: body });
+        if (sendError) throw new Error(sendError.message || 'Resend refused the send.');
         sent++;
       } catch (err) {
         failures.push({ email, error: err.message });
@@ -1847,12 +1857,20 @@ app.post('/api/send-vendor-email', requireAuth, async (req, res) => {
       </div>
     `;
 
-    const data = await resend.emails.send({
+    // { error }, not a rejection — see /api/send-invite. This is the one that
+    // matters most: the RFQ UI reports per-vendor delivery to the founder, so a
+    // swallowed error here means being told a factory was contacted when it
+    // wasn't, and waiting on a quote that was never requested.
+    const { data, error: sendError } = await resend.emails.send({
       from: 'Atelier Outreach <invites@atelierlabs.app>',
       to: [to],
       subject: subject,
       html: htmlBody,
     });
+    if (sendError) {
+      console.error('❌ Resend refused vendor email:', sendError.message);
+      return res.status(502).json({ ok: false, error: sendError.message || 'Resend refused the send.' });
+    }
 
     console.log(`✅ RFQ email sent to vendor: ${vendorName || to}`);
     res.json({ ok: true, data });
