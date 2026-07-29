@@ -7,6 +7,9 @@ const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 const { Resend } = require('resend');
 const crypto = require('crypto');
+// Already in package.json but never imported until the media proxy needed it —
+// TikTok photo posts reject PNG, so the proxy re-encodes to JPEG on the way out.
+const sharp = require('sharp');
 const { createClient } = require('@supabase/supabase-js');
 const { creditCost, tierCredits, getPack, silhouetteQuality, silhouetteFeature } = require('./config/aiCredits');
 
@@ -2874,11 +2877,42 @@ app.get('/api/media/content/:postId', async (req, res) => {
     if (downloadError || !file) return res.status(404).send('Not found.');
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    res.setHeader('Content-Type', file.type || 'image/png');
-    res.setHeader('Content-Length', buffer.length);
+
+    // Always served as JPEG, whatever was stored. TikTok photo posts accept
+    // JPEG/WebP and reject PNG with file_format_check_failed — and it checks the
+    // real bytes, so relabelling the Content-Type would fail the same way.
+    // Composer uploads are PNG (ContentHub's uploadMedia hardcodes the extension),
+    // so without this conversion no photo post can ever succeed.
+    //
+    // Converting HERE rather than at upload time is deliberate: the stored file
+    // stays untouched, so the user's own calendar and history keep the original
+    // quality, existing posts work with no migration of stored media, and this
+    // route's only consumer is TikTok's fetcher anyway.
+    //
+    // flatten() before encoding because JPEG has no alpha channel — a transparent
+    // PNG would otherwise composite onto black.
+    let outputBuffer;
+    let contentType;
+    try {
+      outputBuffer = await sharp(buffer)
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+      contentType = 'image/jpeg';
+    } catch (conversionError) {
+      // Serving the original is better than serving nothing: TikTok will reject a
+      // PNG, but every other consumer still gets a usable image, and the reason is
+      // in the log rather than silently swallowed.
+      console.error('Media conversion to JPEG failed, serving original:', conversionError.message);
+      outputBuffer = buffer;
+      contentType = file.type || 'image/png';
+    }
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', outputBuffer.length);
     // TikTok may fetch more than once while a post initialises.
     res.setHeader('Cache-Control', 'public, max-age=3600');
-    res.send(buffer);
+    res.send(outputBuffer);
   } catch (err) {
     console.error('Media proxy failed:', err.message);
     res.status(500).send('Could not read that media.');
