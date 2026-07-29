@@ -1,11 +1,8 @@
 import React from 'react';
 
 // Panel-level banner for a feature that is built but can't be switched on yet
-// because the platform hasn't approved us.
-//
-// It says which platform and why, rather than a bare "coming soon" — waiting on
-// someone else's review is a real, specific reason, and a founder deciding
-// whether to rely on this deserves to know it isn't a week away by our choice.
+// because the platform hasn't approved us. Names the platform so you know who
+// we're waiting on.
 export default function ComingSoonNotice({ what, platforms, children }) {
   return (
     <div
@@ -21,10 +18,7 @@ export default function ComingSoonNotice({ what, platforms, children }) {
         <div style={{ fontWeight: 600, marginBottom: 4 }}>{what} isn't live yet</div>
         <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
           {children || (
-            <>
-              We're waiting on developer approval from {platforms}. The integration is built — it stays
-              switched off until they sign off, rather than showing you a connect button that can't connect.
-            </>
+            <>Waiting on developer approval from {platforms}. Nothing to do here until it comes through.</>
           )}
         </div>
       </div>

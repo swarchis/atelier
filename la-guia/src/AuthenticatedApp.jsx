@@ -83,13 +83,13 @@ function AppShellInner() {
             <Route path="/sampling/:productId" element={<SampleDetail />} />
             <Route path="/production" element={<ProductionOrders />} />
             <Route path="/production/:id" element={<ProductionOrderDetail />} />
-            <Route path="/readiness" element={<PlanGate feature="readiness-review" title="Readiness Review" blurb="Check every product against the factory-readiness gate at once, and see what is blocking each one.">
+            <Route path="/readiness" element={<PlanGate feature="readiness-review" title="Readiness Review" blurb="Check every product against the factory-readiness gate at once and see what is blocking each one.">
               <ReadinessReview />
             </PlanGate>} />
             <Route path="/sales" element={<PlanGate feature="sales-dashboard" title="Sales Dashboard" blurb="Live orders, inventory and per-product break-even, pulled from your connected store.">
               <SalesDashboard />
             </PlanGate>} />
-            <Route path="/financial" element={<PlanGate feature="financial-tools" title="Financial Tools" blurb="Cash-flow forecasting, MOQ optimization and the AI cost simulator.">
+            <Route path="/financial" element={<PlanGate feature="financial-tools" title="Financial Tools" blurb="Cash-flow forecasting and minimum order quantity planning.">
               <FinancialTools />
             </PlanGate>} />
             <Route path="/products/:id/performance" element={<PlanGate feature="product-insights" title="Product Insights" blurb="Manufacturing cost history and profitability for a single product.">

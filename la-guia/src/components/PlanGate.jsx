@@ -3,13 +3,12 @@ import { Link } from 'react-router-dom';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { hasFeature, requiredTier } from '../data/entitlements.js';
 
-// Wraps a page or panel that needs a paid plan. Renders the real thing when the
-// brand qualifies, and a lock screen when it doesn't.
+// Wraps a page or panel that needs a paid plan. Shows the real thing when the
+// brand qualifies, a lock screen when it doesn't.
 //
-// Deliberately replaces the content rather than hiding the nav entry. A founder
-// who can't find where a feature went assumes it's broken; one who sees it
-// locked knows what it is and what it costs. That is also why the lock names
-// the plan and links straight to billing instead of saying "upgrade".
+// Replaces the content rather than hiding the nav entry: a feature that vanishes
+// reads as broken, where a locked one reads as a price. The lock names the plan
+// and links to billing.
 export default function PlanGate({ feature, title, blurb, children }) {
   const { activeBrand } = useProducts();
   const tier = activeBrand?.plan_tier || 'free';

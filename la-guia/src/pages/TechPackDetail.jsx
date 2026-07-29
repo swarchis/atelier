@@ -312,7 +312,7 @@ export default function TechPackDetail() {
       if (added > 0) {
         const enriched = researched.length > 0;
         toast.success(
-          `${added} material${added === 1 ? '' : 's'} added to your Materials Library${enriched ? ' with researched details' : ' (names only — no AI credits)'}.`
+          `${added} material${added === 1 ? '' : 's'} added to your Materials Library${enriched ? ' with details from the web' : '. No AI credits, so names only'}.`
         );
       }
     } finally {

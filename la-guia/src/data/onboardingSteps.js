@@ -16,7 +16,7 @@ export const ONBOARDING_STEPS = [
     path: '/',
     selector: '[data-tour="brand-switcher"]',
     title: 'Welcome to Atelier',
-    body: "Everything lives inside a brand: its products, vendors, and settings. Switch brands or add another one here. The tour takes about a minute — skip it whenever you like, and reopen it later from the sidebar.",
+    body: "Everything lives inside a brand: its products, vendors, and settings. Switch brands or add another one here. The tour takes about a minute. Skip it whenever you like and reopen it from the sidebar.",
   },
   {
     id: 'dashboard',
@@ -30,7 +30,7 @@ export const ONBOARDING_STEPS = [
     path: '/',
     selector: '[data-tour="kanban-board"]',
     title: 'How work moves',
-    body: 'Every product sits on this board, grouped into stages that run top to bottom: Design, Tech Pack, Sourcing, Sampling, Production, Launched. Drag a piece onto another stage to move it, or use the move button on the card itself. The rest of this tour follows the same path.',
+    body: 'Every product sits on this board, grouped into stages that run top to bottom: Design, Tech Pack, Sourcing, Sampling, Production, Launched. Drag a piece onto another stage to move it, or use the move button on the card itself.',
   },
   {
     id: 'design',
@@ -78,6 +78,6 @@ export const ONBOARDING_STEPS = [
     id: 'outro',
     path: '/',
     title: "That's the tour",
-    body: 'Two things worth remembering: Ctrl+K searches everything you have, and ? lists the keyboard shortcuts. Reopen this tour from the sidebar any time.',
+    body: 'Ctrl+K searches everything you have, and ? lists the keyboard shortcuts. Reopen this tour from the sidebar any time.',
   },
 ];

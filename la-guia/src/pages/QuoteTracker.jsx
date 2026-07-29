@@ -354,7 +354,7 @@ export default function QuoteTracker() {
                     <div className="form-group">
                       <label className="form-label">Where should this go?</label>
                       <div className="form-hint" style={{ marginBottom: 8 }}>
-                        {missingEmail.length === 1 ? 'This vendor has' : `These ${missingEmail.length} vendors have`} no email on file. Add one to send now — we'll save it to the vendor. Leave blank and the RFQ is still tracked, just not emailed.
+                        {missingEmail.length === 1 ? 'This vendor has' : `These ${missingEmail.length} vendors have`} no email on file. Add one and we'll save it to the vendor. Leave it blank and the RFQ is still tracked, just not emailed.
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {missingEmail.map(v => (
@@ -398,7 +398,7 @@ export default function QuoteTracker() {
                       style={{ fontFamily: 'var(--mono)', fontSize: 12.5, lineHeight: 1.6 }}
                     />
                     <div className="form-hint" style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                      <span><code>{VENDOR_TOKEN}</code> becomes each vendor's name. One message goes to everyone, so the quotes come back comparable.</span>
+                      <span><code>{VENDOR_TOKEN}</code> becomes each vendor's name. Everyone gets the same message, so the quotes come back comparable.</span>
                       {draftTouched && (
                         <button type="button" className="btn btn-sm" style={{ background: 'none', border: 'none', color: 'var(--ink-3)', textDecoration: 'underline', boxShadow: 'none', padding: 0 }} onClick={() => setDraftTouched(false)}>
                           Reset to template
@@ -409,7 +409,7 @@ export default function QuoteTracker() {
 
                   {invalidEmail.length > 0 && (
                     <div className="form-hint" style={{ color: 'var(--red)', marginBottom: 12 }}>
-                      Not a valid email address for {invalidEmail.map(v => v.name).join(', ')} — fix it or clear it to skip that vendor.
+                      Not a valid email address for {invalidEmail.map(v => v.name).join(', ')}. Fix it, or clear it to skip that vendor.
                     </div>
                   )}
                 </>

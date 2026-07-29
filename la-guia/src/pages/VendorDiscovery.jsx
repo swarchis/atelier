@@ -473,7 +473,7 @@ export default function VendorDiscovery() {
                     <div className="form-group">
                       <label className="form-label">Contact email</label>
                       <input className="form-input" type="email" placeholder="e.g. sales@nortetextile.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-                      <div className="form-hint">Optional. With an address on file, an RFQ can be emailed straight from the quote tracker.</div>
+                      <div className="form-hint">Optional. With an address here, you can email an RFQ straight from the quote tracker.</div>
                     </div>
                     <div className="grid-3">
                       <div className="form-group">

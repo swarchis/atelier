@@ -411,7 +411,7 @@ export default function VendorDetail() {
               {emailError ? (
                 <div style={{ fontSize: 11.5, color: 'var(--red)', marginTop: 4 }}>{emailError}</div>
               ) : !vendor.email ? (
-                <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 4 }}>No address on file — RFQs to this vendor can't be emailed.</div>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 4 }}>No address on file, so you can't email this vendor an RFQ.</div>
               ) : null}
             </div>
             <div>
@@ -537,7 +537,7 @@ export default function VendorDetail() {
               <div className="form-group" style={{ marginBottom: 16 }}>
                 <label className="form-label">What do you want to say or ask?</label>
                 <textarea className="form-textarea" placeholder="e.g. Introduce the brand and ask if they can do a 300-unit run of heavyweight fleece hoodies" value={emailAsk} onChange={e => setEmailAsk(e.target.value)} />
-                <div className="form-hint">Optional — only used by the AI draft. Pulls in whatever quantity / target cost / deadline you've entered in the quote form above. AI-written text is a starting point; read it before sending.</div>
+                <div className="form-hint">Only used by the AI draft, along with the quantity, target cost and deadline from the quote form above. Read anything AI writes before you send it.</div>
               </div>
 
               <div className="form-group">
@@ -564,7 +564,7 @@ export default function VendorDetail() {
               <div className="form-hint" style={{ marginBottom: 12 }}>
                 {vendor.email
                   ? <>Sends to <strong>{vendor.email}</strong> from your verified Atelier address.</>
-                  : <>No contact email on file for {vendor.name} — add one in <strong>Contact email</strong> at the top of this page to send from here.</>}
+                  : <>No contact email for {vendor.name}. Add one under <strong>Contact email</strong> at the top of this page to send from here.</>}
               </div>
 
               {draftError && <div className="form-hint" style={{ color: 'var(--red)', marginBottom: 12 }}>{draftError}</div>}

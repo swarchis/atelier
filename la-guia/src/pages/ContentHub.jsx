@@ -423,7 +423,7 @@ export default function ContentHub() {
         )}
 
         {tab === 'email' && <EmailCampaignsTab activeBrand={activeBrand} />}
-        {tab === 'analytics' && <><ComingSoonNotice what="Post analytics" platforms="Instagram, TikTok, YouTube and Pinterest">Reach and engagement come from the platforms themselves, so this stays empty until those connections are approved. Everything you plan here is saved and unaffected.</ComingSoonNotice><CampaignAnalyticsTab posts={posts} activeBrand={activeBrand} /></>}
+        {tab === 'analytics' && <><ComingSoonNotice what="Post analytics" platforms="Instagram, TikTok, YouTube and Pinterest">Reach and engagement numbers come from the platforms. Your planning is saved either way.</ComingSoonNotice><CampaignAnalyticsTab posts={posts} activeBrand={activeBrand} /></>}
 
         {tab === 'accounts' && (
           <div className="card">
