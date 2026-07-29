@@ -2457,9 +2457,12 @@ const SOCIAL_OAUTH = {
       const data = await tiktokDisplayCall(
         `https://open.tiktokapis.com/v2/video/list/?fields=${fields}`,
         accessToken,
-        // max_count's ceiling is 20. One page per sync on purpose: the limit is
-        // per API client, not per user, so paging through one brand's whole
-        // history would spend everybody's budget. Newest 20 is what the UI shows.
+        // max_count's ceiling is 20, and one page per sync is a DECISION, not a
+        // stub — cursor paging was considered and declined. TikTok's rate limit is
+        // per API client rather than per user, so walking one brand's full history
+        // spends every brand's budget. A founder with 200 posts gets their newest
+        // 20; that is the intended behaviour. Don't add paging here without a
+        // per-brand throttle in front of it.
         { method: 'POST', body: JSON.stringify({ max_count: 20 }) },
       );
       const videos = Array.isArray(data.videos) ? data.videos : [];

@@ -997,9 +997,18 @@ function CampaignAnalyticsTab({ posts, syncedPosts = [], accounts = [], activeBr
     .map(a => a.stats_synced_at).filter(Boolean)
     .sort().reverse()[0];
 
-  const topPosts = [...syncedPosts]
-    .sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
-    .slice(0, 5);
+  // Paged in the client, not the query: syncedPosts is already loaded in full and
+  // is metadata only, so a page change is instant and costs no round trip. The
+  // 20-per-sync ceiling upstream is a separate limit — see the sync endpoint.
+  const POSTS_PER_PAGE = 5;
+  const [postPage, setPostPage] = useState(0);
+
+  const rankedPosts = [...syncedPosts].sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
+  const pageCount = Math.ceil(rankedPosts.length / POSTS_PER_PAGE);
+  // Clamped rather than stored blindly: a re-sync that drops posts can leave the
+  // current page past the end, which would render an empty list with no way back.
+  const safePage = Math.min(postPage, Math.max(0, pageCount - 1));
+  const pagedPosts = rankedPosts.slice(safePage * POSTS_PER_PAGE, safePage * POSTS_PER_PAGE + POSTS_PER_PAGE);
 
   const byPlatform = {};
   posts.forEach(p => {
@@ -1043,10 +1052,13 @@ function CampaignAnalyticsTab({ posts, syncedPosts = [], accounts = [], activeBr
             Real numbers from the platform, covering your {syncedPosts.length} most recently synced post{syncedPosts.length === 1 ? '' : 's'}. They update when you press Sync, not continuously.
           </div>
 
-          {topPosts.length > 0 && (
+          {rankedPosts.length > 0 && (
             <div className="card" style={{ marginBottom: 18 }}>
-              <div className="card-header"><span className="card-title">Top posts by views</span></div>
-              {topPosts.map(p => (
+              <div className="card-header">
+                <span className="card-title">Posts by views</span>
+                <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{rankedPosts.length} synced</span>
+              </div>
+              {pagedPosts.map(p => (
                 <div className="list-row" key={p.id}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     {/* Cover links expire after 6h, so an older row shows the icon
@@ -1071,6 +1083,19 @@ function CampaignAnalyticsTab({ posts, syncedPosts = [], accounts = [], activeBr
                   </div>
                 </div>
               ))}
+              {pageCount > 1 && (
+                <div className="list-row" style={{ justifyContent: 'space-between' }}>
+                  <button className="btn btn-sm" disabled={safePage === 0} onClick={() => setPostPage(safePage - 1)}>
+                    <i className="ph ph-caret-left" /> Previous
+                  </button>
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+                    Page {safePage + 1} of {pageCount}
+                  </span>
+                  <button className="btn btn-sm" disabled={safePage >= pageCount - 1} onClick={() => setPostPage(safePage + 1)}>
+                    Next <i className="ph ph-caret-right" />
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

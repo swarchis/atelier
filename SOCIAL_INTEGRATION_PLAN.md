@@ -270,6 +270,15 @@ photo posting is what makes the application filmable.
 5. Swap Sandbox for production once approved, remove the notices per platform
 6. Later, separately: the audit for public visibility; then video support
 
+## Decided against
+
+- **Cursor paging on sync.** Considered once real data landed (19 posts cached,
+  9,111 views) and declined: TikTok's rate limit is per API client, not per user,
+  so fetching one brand's full history spends every brand's quota. Newest 20 per
+  sync is the intended ceiling. Revisit only behind a per-brand throttle.
+- **Cloudflare R2 for media.** See "Media delivery" — cheaper per GB, but the
+  saving is cents at this scale against a whole second storage system.
+
 ## What this plan does not do
 
 - Instagram, YouTube, Pinterest reads — each needs its own platform review.
