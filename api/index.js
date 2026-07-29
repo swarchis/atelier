@@ -2413,7 +2413,18 @@ const SOCIAL_OAUTH = {
       if (!response.ok) throw new Error(data.message || 'TikTok token exchange failed');
       // refresh_token and expires_in were both being dropped here, so every
       // TikTok connection died 24 hours later with no way to renew it.
-      return { accessToken: data.access_token, refreshToken: data.refresh_token || null, expiresIn: data.expires_in };
+      //
+      // grantedScopes is carried purely so the callback can log what the token
+      // ACTUALLY came back with. TikTok grants whatever intersection of requested
+      // and approved scopes it likes and reports success either way, so a token
+      // silently missing video.publish is indistinguishable from a working one
+      // until a call fails — which cost two rounds of guessing.
+      return {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || null,
+        expiresIn: data.expires_in,
+        grantedScopes: data.scope || null,
+      };
     },
     // TikTok is the only platform with a refresh path today because it is the
     // only one whose token expires fast enough to matter (24h). Pinterest and
@@ -2654,6 +2665,13 @@ app.get('/api/social/callback/:platform', async (req, res) => {
     const redirectUri = `${apiUrl}/api/social/callback/${platform}`;
     const tokenData = await cfg.getToken(code, redirectUri);
     const handle = await cfg.getHandle(tokenData).catch(() => 'Connected');
+
+    // What the token actually carries, not what we asked for. First thing to check
+    // when a platform call fails with scope_not_authorized: if the scope isn't in
+    // this line, the portal config is irrelevant — the request never asked for it.
+    if (tokenData.grantedScopes) {
+      console.log(`🔑 ${platform} token granted scopes: ${tokenData.grantedScopes}`);
+    }
 
     // brandId came out of the HMAC-signed state, so it is safe to write against
     // without a user JWT — there isn't one on a platform redirect.
