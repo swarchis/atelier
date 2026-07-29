@@ -14,23 +14,36 @@
 
 export const TIER_ORDER = ['free', 'basic', 'premium'];
 
+// Free features are absent from this map by design — organizing your own work
+// and getting your own data back out are not upsells. Collections, moodboards
+// and CSV export were listed under Basic and have been moved down: none of them
+// costs us anything to serve, and a founder who can't export their own numbers
+// has been locked in rather than sold to.
 export const FEATURE_TIER = {
   // ── Basic ────────────────────────────────────────────────────────────────
+  // Anything that spends an API call on the founder's behalf, plus the
+  // vendor→quote→sample→production spine that takes a design to a factory.
   'vendor-search': 'basic',
   'vendor-fit-analysis': 'basic',
+  // Comparison sits with search deliberately. Splitting one workflow across two
+  // prices — find vendors on Basic, compare them on Premium — reads as a
+  // toll booth in the middle of a job the founder already started.
+  'vendor-comparison': 'basic',
   'ai-design-studio': 'basic',
   'ai-tech-pack': 'basic',
   'rfq': 'basic',
   'quotes': 'basic',
   'sampling': 'basic',
   'production': 'basic',
-  'collections': 'basic',
-  'moodboards': 'basic',
   'materials-research': 'basic',
   'ecommerce-integration': 'basic',
-  'csv-export': 'basic',
+  // The factory-readiness gate is the core promise — "will this design survive
+  // contact with a factory". Charging Premium for the answer put the most
+  // important checkpoint behind the most expensive door.
+  'readiness-review': 'basic',
 
   // ── Premium ──────────────────────────────────────────────────────────────
+  // Everything downstream of actually selling: money, marketing, scale.
   'sales-dashboard': 'premium',
   'break-even': 'premium',
   'financial-tools': 'premium',
@@ -39,8 +52,6 @@ export const FEATURE_TIER = {
   'influencer-tracking': 'premium',
   'email-campaigns': 'premium',
   'team-chat': 'premium',
-  'vendor-comparison': 'premium',
-  'readiness-review': 'premium',
 };
 
 export function tierRank(tier) {

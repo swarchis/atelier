@@ -2632,7 +2632,11 @@ Return a JSON object with exactly this structure:
   }
 });
 
-app.post('/api/cost-simulator', requireTier('premium'), metered('cost-simulator'), async (req, res) => {
+// Basic, not Premium: the simulator runs on a quote in QuoteDetail, and quotes
+// are a Basic feature. Gating it Premium would have refused a line Basic
+// explicitly advertises ("Landed-cost calculator and AI cost simulator").
+// The Premium financial tools are the separate cash-flow/MOQ page.
+app.post('/api/cost-simulator', requireTier('basic'), metered('cost-simulator'), async (req, res) => {
   console.log("📥 Received cost simulator request...");
   try {
     const { vendor, product, quote, bom } = req.body;

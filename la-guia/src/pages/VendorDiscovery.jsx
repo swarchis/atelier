@@ -8,6 +8,7 @@ import { trustTagClass } from '../lib/format.js';
 import TabBar from '../components/TabBar.jsx';
 import { getPlan } from '../data/plans.js';
 import { hasFeature } from '../data/entitlements.js';
+import PlanGate from '../components/PlanGate.jsx';
 import HoverPreview from '../components/HoverPreview.jsx';
 import { SkeletonRow } from '../components/Skeleton.jsx';
 import { aiPost } from '../lib/aiApi.js';
@@ -662,7 +663,8 @@ export default function VendorDiscovery() {
         )}
 
         {tab === 'compare' && (
-          compareVendors.length === 0 ? (
+          <PlanGate feature="vendor-comparison" title="Vendor comparison" blurb="Put up to five vendors side by side on MOQ, lead time, price, certifications and capabilities — then send one RFQ to all of them.">
+          {compareVendors.length === 0 ? (
             <div className="card-raised" style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13.5 }}>
               Nothing selected yet — check up to 5 vendors from Discover or Favorites to compare them side by side.
             </div>
@@ -769,7 +771,8 @@ export default function VendorDiscovery() {
               </table>
             </div>
             </>
-          )
+          )}
+          </PlanGate>
         )}
 
         {tab === 'blocked' && (
