@@ -138,6 +138,26 @@ the route can't require auth. `image_url` is client-written — if you loosen th
 exact-prefix check against our own `content_media` bucket, this becomes an open
 SSRF proxy.
 
+**That proxy also re-encodes, and publishing breaks without it.** TikTok rejects
+PNG (`file_format_check_failed`, checked on the actual bytes — relabelling the
+Content-Type fails identically) and caps photos at 1920x1080 landscape /
+1080x1920 portrait (`picture_size_check_failed`). Composer uploads are PNG and the
+AI image features emit 2048x2048, so both gates would fail every post. `sharp`
+resizes and converts on the way out; the stored original is left alone so the
+user's own calendar keeps full quality. Square images land at 1080x1080, and the
+buffer is flattened onto white because JPEG has no alpha.
+
+**Publishing while unaudited needs the account itself set to private.**
+`unaudited_client_can_only_post_to_private_accounts` means the TikTok *account*,
+not just the post — TikTok requires both that and `SELF_ONLY`, which is why
+`TIKTOK_PRIVACY_LEVEL` defaults to `SELF_ONLY` and should only be widened after
+the audit. Unaudited clients are also capped at 5 posting users per 24h.
+
+**`TIKTOK_SCOPES` is what the authorize URL is built from.** A scope missing there
+can never reach the token no matter what the developer portal says — the single
+most time-wasting bug in this integration, twice. The token's *granted* scopes are
+logged on connect (`🔑 tiktok token granted scopes:`); check that line first.
+
 **Scheduled publishing runs when `RAILWAY_ENVIRONMENT` is set** — on in any
 deploy, off on a laptop, no configuration. That matters because `api/.env` points
 a local machine at production, so a default-on scheduler would publish real posts
