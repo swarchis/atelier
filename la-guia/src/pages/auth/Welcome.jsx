@@ -12,6 +12,20 @@ import { NeedleA } from './NeedleA.jsx';
 // downloads as its own chunk instead of blocking first render.
 const IntroGate = lazy(() => import('./IntroGate.jsx'));
 
+// A lazy chunk that fails to load throws during render. With no boundary that
+// propagates past Suspense and unmounts the whole route — the landing page
+// disappears and the visitor gets a blank background, which is the exact
+// symptom this whole change set is chasing. three.js is the largest chunk on
+// the site, so it is also the likeliest to fail on a bad connection.
+// Losing the intro is acceptable. Losing the page is not.
+class IntroBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err) { console.error('IntroGate failed to load, skipping intro', err); }
+  componentDidUpdate(_, prev) { if (!prev.failed && this.state.failed) this.props.onFail(); }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    "The Cutting Table" — Rev 3.
 
@@ -656,9 +670,11 @@ export default function Welcome() {
     return (
       <div className="ds-root">
         <style>{CSS}</style>
-        <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#0A0C11' }} />}>
-          <IntroGate onDone={() => setIntroDone(true)} />
-        </Suspense>
+        <IntroBoundary onFail={() => setIntroDone(true)}>
+          <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#0A0C11' }} />}>
+            <IntroGate onDone={() => setIntroDone(true)} />
+          </Suspense>
+        </IntroBoundary>
       </div>
     );
   }

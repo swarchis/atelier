@@ -45,20 +45,17 @@ export default function IntroGate({ onDone }) {
 
     document.body.style.overflow = 'hidden';
 
-    // Nothing here is allowed to strand someone on a black screen. A slow GLB
-    // fetch, a driver that drops the WebGL context mid-animation, a GPU too
-    // busy to hit the exit frame — every one of those used to mean the overlay
-    // stayed up forever. After 10s the intro gives up and hands over the site.
+    // A driver that drops the WebGL context mid-animation leaves the overlay
+    // up with nothing rendering behind it. Hand over the site immediately
+    // rather than waiting out the auto-advance on a frozen letter.
     let bailed = false;
     const bail = (why) => {
       if (bailed || leavingRef.current) return;
       bailed = true;
       console.warn(`IntroGate: ${why} — skipping intro`);
-      document.body.classList.remove('ds-gate-morphing', 'ds-gate-logo-landed');
       document.body.style.overflow = '';
       onDone();
     };
-    const failsafe = setTimeout(() => bail('took too long'), 10000);
     const onContextLost = (e) => { e.preventDefault(); bail('WebGL context lost'); };
     canvas.addEventListener('webglcontextlost', onContextLost, false);
 
@@ -67,9 +64,8 @@ export default function IntroGate({ onDone }) {
       renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     } catch (err) {
       console.error('IntroGate: WebGL unavailable, skipping intro', err);
-      // This path returns no cleanup function, so the failsafe has to be
-      // cleared here or it fires into an unmounted component.
-      clearTimeout(failsafe);
+      // Returns before the auto-advance timer is ever created, so there is
+      // nothing to clear here — only the listener needs unwinding.
       canvas.removeEventListener('webglcontextlost', onContextLost);
       document.body.style.overflow = '';
       onDone();
@@ -305,21 +301,14 @@ export default function IntroGate({ onDone }) {
     const clock = new THREE.Clock();
     let popIn = 0, energy = 0, prevRotY = FACE_ROT, prevRotX = 0;
 
-    // click exit: quick spin, reveal the site under the same letter, then fly.
-    const exit = { active: false, start: 0, spinDuration: 0.62, flyDelay: 0.8, flyStarted: false };
-
-    // fly-to-corner state (filled after the click spin)
-    const fly = {
-      active: false,
-      prog: 0,
-      from: new THREE.Vector3(),
-      to: new THREE.Vector3(),
-      scaleFrom: 1,
-      scaleTo: 0.12,
-      duration: 1.7,
-      rotFrom: new THREE.Euler(),
-      rotTo: new THREE.Euler(0, FACE_ROT, 0),
-    };
+    // Exit is now a spin and a fade, nothing more. The letter used to fly to
+    // the corner and cross-fade into the header mark, which meant three.js and
+    // the bloom pass kept rendering for another 3s at exactly the moment the
+    // landing page was mounting — the two heaviest things on the page fighting
+    // over the same frame. It also had to measure .ds-brand-a and match its
+    // scale, so a header that had not laid out yet sent the letter to the wrong
+    // place. Cutting it removes both the cost and the failure.
+    const exit = { active: false, start: 0, spinDuration: 0.62 };
 
     const worldAtScreen = (sx, sy) => {
       const halfH = Math.tan((camera.fov * Math.PI) / 360) * camera.position.z;
@@ -344,35 +333,21 @@ export default function IntroGate({ onDone }) {
         popIn = Math.min(1, popIn + 0.03);
         const eased = 1 - Math.pow(1 - popIn, 3);
 
-        if (!fly.active) {
-          group.scale.setScalar(eased);
-          if (exit.active) {
-            const p = Math.min(1, (t - exit.start) / exit.spinDuration);
-            const spinEase = 1 - Math.pow(1 - p, 3);
-            holder.rotation.y = FACE_ROT + spinEase * Math.PI * 4;
-            holder.rotation.x = Math.sin(spinEase * Math.PI) * 0.42;
-            holder.rotation.z = Math.sin(spinEase * Math.PI) * 0.5;
-            group.position.set(0, Math.sin(t * 0.9) * 0.035, 0);
-          } else {
-            holder.rotation.y = FACE_ROT + ptr.x * 0.7 + Math.sin(t * 0.4) * 0.14;
-            holder.rotation.x = -ptr.y * 0.35 + Math.cos(t * 0.5) * 0.06;
-            holder.rotation.z = 0;
-            group.position.set(0, Math.sin(t * 0.9) * 0.07, 0);
-          }
+        if (exit.active) {
+          // Spin out and shrink away on the spot.
+          const p = Math.min(1, (t - exit.start) / exit.spinDuration);
+          const spinEase = 1 - Math.pow(1 - p, 3);
+          group.scale.setScalar(eased * (1 - spinEase * 0.55));
+          holder.rotation.y = FACE_ROT + spinEase * Math.PI * 4;
+          holder.rotation.x = Math.sin(spinEase * Math.PI) * 0.42;
+          holder.rotation.z = Math.sin(spinEase * Math.PI) * 0.5;
+          group.position.set(0, Math.sin(t * 0.9) * 0.035, 0);
         } else {
-          fly.prog = Math.min(1, fly.prog + dt / fly.duration);
-          // one easeInOutCubic drives position, scale and settle together, so
-          // the letter recedes smoothly into the corner instead of crossing
-          // the screen at full size and snapping small at the end.
-          const e = fly.prog < 0.5
-            ? 4 * fly.prog * fly.prog * fly.prog
-            : 1 - Math.pow(-2 * fly.prog + 2, 3) / 2;
-          group.position.lerpVectors(fly.from, fly.to, e);
-          group.position.y += Math.sin(fly.prog * Math.PI) * 0.14; // gentle arc
-          group.scale.setScalar(THREE.MathUtils.lerp(fly.scaleFrom, fly.scaleTo, e));
-          holder.rotation.x = THREE.MathUtils.lerp(fly.rotFrom.x, fly.rotTo.x, e);
-          holder.rotation.y = THREE.MathUtils.lerp(fly.rotFrom.y, fly.rotTo.y, e);
-          holder.rotation.z = THREE.MathUtils.lerp(fly.rotFrom.z, fly.rotTo.z, e);
+          group.scale.setScalar(eased);
+          holder.rotation.y = FACE_ROT + ptr.x * 0.7 + Math.sin(t * 0.4) * 0.14;
+          holder.rotation.x = -ptr.y * 0.35 + Math.cos(t * 0.5) * 0.06;
+          holder.rotation.z = 0;
+          group.position.set(0, Math.sin(t * 0.9) * 0.07, 0);
         }
       }
 
@@ -386,35 +361,15 @@ export default function IntroGate({ onDone }) {
       bgUniforms.uSpin.value = holder.rotation.y - FACE_ROT;
       bgUniforms.uMove.value.set(ptr.x, ptr.y);
       if (exit.active) {
-        const age = t - exit.start;
-        const fadeProg = Math.min(1, age / 0.7);
+        const fadeProg = Math.min(1, (t - exit.start) / 0.7);
         bgUniforms.uFade.value = 1 - (1 - Math.pow(1 - fadeProg, 3));
-
-        if (!exit.flyStarted && age >= exit.flyDelay) {
-          exit.flyStarted = true;
-          bg.visible = false;
-          const mark = document.querySelector('.ds-brand-a');
-          const m = mark ? mark.getBoundingClientRect() : { left: 40, top: 20, width: 30, height: 30 };
-          fly.from.copy(group.position);
-          fly.to.copy(worldAtScreen(m.left + m.width / 2, m.top + m.height / 2));
-          const halfH = Math.tan((camera.fov * Math.PI) / 360) * camera.position.z;
-          const targetWorldH = (m.height / window.innerHeight) * 2 * halfH;
-          fly.scaleFrom = group.scale.x;
-          fly.scaleTo = Math.max(0.12, (targetWorldH / 2.6) * 2.3);
-          // the spin has parked the letter face-forward but with 4π wound onto
-          // rotation.y; land it flush at FACE_ROT so the fly is a clean glide
-          // to the corner (matching the flat 2D mark) with no extra spins.
-          holder.rotation.set(0, FACE_ROT, 0);
-          fly.rotFrom.copy(holder.rotation);
-          fly.active = true;
-        }
       }
       cursorRipple.uRippleTime.value = t;
       cursorRipple.uCursorWorld.value.copy(worldAtScreen(
         ((ptr.x + 1) / 2) * window.innerWidth,
         ((1 - ptr.y) / 2) * window.innerHeight,
       ));
-      cursorRipple.uCursorStrength.value = fly.active ? 0 : Math.min(1, 0.42 + energy * 0.45);
+      cursorRipple.uCursorStrength.value = exit.active ? 0 : Math.min(1, 0.42 + energy * 0.45);
 
       // cycle the rim + inner glow through the palette, keeping most of the
       // bloom on the letter's glass edge instead of the dimmer splash field
@@ -430,36 +385,46 @@ export default function IntroGate({ onDone }) {
     animate();
 
     const finish = () => {
-      document.body.classList.remove('ds-gate-morphing', 'ds-gate-logo-landed');
       document.body.style.overflow = '';
       onDone();
     };
 
-    const onClick = () => {
-      if (leavingRef.current || !holder.children.length) return;
+    // Spin, fade, hand over. 900ms instead of the 3050ms the corner landing
+    // needed, and the last 200ms of it are a CSS opacity fade with three.js
+    // already idle.
+    const leave = () => {
+      if (leavingRef.current) return;
       leavingRef.current = true;
-      document.body.classList.add('ds-gate-morphing');
       exit.active = true;
       exit.start = clock.getElapsedTime();
       overlay.classList.add('ds-gate-leave');
-      // fly lands at flyDelay + duration = 2.5s; reveal the real mark then, so
-      // the flat 2D logo fades in under the letter exactly as it settles.
-      window.setTimeout(() => {
-        document.body.classList.add('ds-gate-logo-landed');
-      }, 2500);
-      setTimeout(finish, 3050);
+      clearTimeout(autoAdvance);
+      setTimeout(finish, 900);
+    };
+
+    const onClick = () => {
+      // Before the model is up there is nothing to spin out; go straight through.
+      if (!holder.children.length) { finish(); return; }
+      leave();
     };
     overlay.addEventListener('click', onClick);
 
+    // Nobody should have to click to get in. Ten seconds is long enough to
+    // watch the letter and short enough that a visitor who has stopped looking
+    // at it is not stuck behind it.
+    const autoAdvance = setTimeout(() => {
+      if (holder.children.length) leave();
+      else finish();
+    }, 10000);
+
     return () => {
       disposed = true;
-      clearTimeout(failsafe);
+      clearTimeout(autoAdvance);
       cancelAnimationFrame(raf);
       canvas.removeEventListener('webglcontextlost', onContextLost);
       window.removeEventListener('resize', resize);
       window.removeEventListener('pointermove', onMove);
       overlay.removeEventListener('click', onClick);
-      document.body.classList.remove('ds-gate-morphing', 'ds-gate-logo-landed');
       document.body.style.overflow = '';
       pmrem.dispose();
       composer.dispose();
@@ -480,16 +445,17 @@ export default function IntroGate({ onDone }) {
 }
 
 const GATE_CSS = `
+/* Timings track the 900ms exit in leave(). They used to be built around the
+   fly-to-corner: the canvas fade sat on a 2.5s delay so it would not start
+   until the letter had landed. With the fly gone that delay outlived the
+   overlay itself, so the canvas would have vanished by unmount rather than
+   fading. Spin runs 0-620ms, canvas fades 400-800ms, unmount at 900ms. */
 .ds-gate { position: fixed; inset: 0; z-index: 100; background: #0A0C11; cursor: pointer;
-  transition: background-color 0.58s ease 0.62s; }
-.ds-gate.ds-gate-leave { background: transparent; }
-.ds-gate.ds-gate-leave { pointer-events: none; }
+  transition: background-color 0.45s ease 0.3s; }
+.ds-gate.ds-gate-leave { background: transparent; pointer-events: none; }
 .ds-gate-canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important;
-  transition: opacity 0.3s ease 2.5s; }
+  transition: opacity 0.4s ease 0.4s; }
 .ds-gate-leave .ds-gate-canvas { opacity: 0; }
-
-body.ds-gate-morphing:not(.ds-gate-logo-landed) .ds-brand-a { opacity: 0; }
-body.ds-gate-logo-landed .ds-brand-a { opacity: 1; transition: opacity 0.18s ease; }
 
 .ds-gate-hint { position: absolute; bottom: 7vh; left: 50%; transform: translateX(-50%);
   font-family: ${MONO}; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase;
