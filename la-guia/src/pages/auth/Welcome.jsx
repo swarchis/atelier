@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
+import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, useMotionValue, useSpring, useTransform, useScroll, useReducedMotion } from 'framer-motion';
 import { STAGES } from '../../data/mockData.js';
 import { PLANS } from '../../data/plans.js';
 import { Capacitor } from '@capacitor/core';
+import { isLowPowerDevice } from '../../lib/devicePerf.js';
 import { NeedleA } from './NeedleA.jsx';
 
 // The WebGL gate (with all of three.js) is the single heaviest thing on the
@@ -363,24 +364,26 @@ function Hero3D({ navigate }) {
 }
 
 /* ── Page-wide atmosphere ───────────────────────────────────────────────── */
-function Atmosphere() {
+function Atmosphere({ lite }) {
   return (
     <div className="ds-atmosphere" aria-hidden>
       {/* The goo filter: blur + alpha-contrast turns separate blobs into one
          merging liquid surface (metaballs) wherever they drift close. */}
-      <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden>
-        <defs>
-          <filter id="ds-goo">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="b" />
-            <feColorMatrix in="b" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -13" result="g" />
-            <feBlend in="SourceGraphic" in2="g" />
-          </filter>
-        </defs>
-      </svg>
+      {!lite && (
+        <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden>
+          <defs>
+            <filter id="ds-goo">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="b" />
+              <feColorMatrix in="b" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -13" result="g" />
+              <feBlend in="SourceGraphic" in2="g" />
+            </filter>
+          </defs>
+        </svg>
+      )}
       <div className="ds-aurora ds-aurora-1" />
       <div className="ds-aurora ds-aurora-2" />
-      <div className="ds-aurora ds-aurora-3" />
-      <div className="ds-aurora ds-aurora-4" />
+      {!lite && <div className="ds-aurora ds-aurora-3" />}
+      {!lite && <div className="ds-aurora ds-aurora-4" />}
       <div className="ds-grain" />
     </div>
   );
@@ -527,6 +530,13 @@ const revealDir = (dir) => ({
 
 function Reveal({ children, style, as = 'div' }) {
   const M = motion[as];
+  // Rendered visible with no observer and no animation when the device is
+  // struggling: the entrance is decoration, but `opacity: 0` waiting on a
+  // callback that never comes is a blank page.
+  if (isLowPowerDevice()) {
+    const Tag = as;
+    return <Tag style={style}>{children}</Tag>;
+  }
   return (
     <M variants={reveal} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-70px' }} style={style}>
       {children}
@@ -630,26 +640,35 @@ function FlowRule() {
 
 export default function Welcome() {
   const navigate = useNavigate();
-  // The liquid-logo gate plays on every fresh open; reduced-motion users go
-  // straight to the page.
-  // Skip the WebGL intro inside the native app (too heavy on phones) and for
-  // reduced-motion users; it only plays in the browser.
-  const [introDone, setIntroDone] = useState(() =>
-    Capacitor.isNativePlatform() ||
-    (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
-  );
+  // Weak machines never load the intro at all — three.js is a lazy chunk, so
+  // deciding here means it is never fetched, parsed, or compiled on the
+  // hardware least able to afford it.
+  const lite = useMemo(() => Capacitor.isNativePlatform() || isLowPowerDevice(), []);
+  const [introDone, setIntroDone] = useState(() => lite);
 
-  return (
-    <div className="ds-root">
-      <style>{CSS}</style>
-      {!introDone && (
+  // The page used to render underneath the intro overlay. That cost twice:
+  // every effect, spring and scroll listener ran while three.js had the GPU,
+  // and — worse — useScroll measured the hero while document.body was
+  // overflow:hidden, so scrollYProgress could resolve to 1 and drive the hero
+  // to opacity 0. A page that never becomes visible after the intro is exactly
+  // the reported bug. Mount one or the other, never both.
+  if (!introDone) {
+    return (
+      <div className="ds-root">
+        <style>{CSS}</style>
         <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#0A0C11' }} />}>
           <IntroGate onDone={() => setIntroDone(true)} />
         </Suspense>
-      )}
-      <Atmosphere />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`ds-root${lite ? ' ds-lite' : ''}`}>
+      <style>{CSS}</style>
+      <Atmosphere lite={lite} />
       <GrainlineThread />
-      <CursorLight />
+      {!lite && <CursorLight />}
 
       <header className="ds-bar">
         <div className="ds-bar-in">
@@ -781,6 +800,26 @@ export default function Welcome() {
 
 const CSS = `
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+/* ── ds-lite — the low-end profile ──────────────────────────────────────────
+   Everything below is a paint cost, not a layout one, so removing it changes
+   how the page looks and not how it works. Ranked by what actually hurts on
+   integrated graphics: a 90px blur across half the viewport is resized and
+   recomposited every frame of a 28s animation; url(#ds-goo) is an SVG filter
+   most drivers paint on the CPU; backdrop-filter forces the header to
+   re-sample everything behind it on every scroll frame. Together they can
+   saturate the compositor to the point where nothing paints at all. */
+.ds-lite .ds-aurora { filter: blur(40px); opacity: 0.3; animation: none; will-change: auto; }
+.ds-lite .ds-liquid { display: none; }
+.ds-lite .ds-liquid-field { filter: none; }
+.ds-lite .ds-beams { display: none; }
+.ds-lite .ds-grain { display: none; }
+.ds-lite .ds-cursorlight { display: none; }
+.ds-lite .ds-bar { backdrop-filter: none; background: ${C.ink}; }
+/* mix-blend-mode forces a stacking context the compositor cannot fast-path */
+.ds-lite .ds-aurora, .ds-lite .ds-thread, .ds-lite .ds-thread-front { mix-blend-mode: normal; }
+.ds-lite * { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; }
+
 .ds-root { position: relative; background: ${C.ink}; color: ${C.paper}; font-family: ${BODY};
   min-height: 100vh; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
 .ds-root ::selection { background: ${C.blue}; color: ${C.ink}; }

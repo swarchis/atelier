@@ -45,16 +45,40 @@ export default function IntroGate({ onDone }) {
 
     document.body.style.overflow = 'hidden';
 
+    // Nothing here is allowed to strand someone on a black screen. A slow GLB
+    // fetch, a driver that drops the WebGL context mid-animation, a GPU too
+    // busy to hit the exit frame — every one of those used to mean the overlay
+    // stayed up forever. After 10s the intro gives up and hands over the site.
+    let bailed = false;
+    const bail = (why) => {
+      if (bailed || leavingRef.current) return;
+      bailed = true;
+      console.warn(`IntroGate: ${why} — skipping intro`);
+      document.body.classList.remove('ds-gate-morphing', 'ds-gate-logo-landed');
+      document.body.style.overflow = '';
+      onDone();
+    };
+    const failsafe = setTimeout(() => bail('took too long'), 10000);
+    const onContextLost = (e) => { e.preventDefault(); bail('WebGL context lost'); };
+    canvas.addEventListener('webglcontextlost', onContextLost, false);
+
     let renderer;
     try {
       renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     } catch (err) {
       console.error('IntroGate: WebGL unavailable, skipping intro', err);
+      // This path returns no cleanup function, so the failsafe has to be
+      // cleared here or it fires into an unmounted component.
+      clearTimeout(failsafe);
+      canvas.removeEventListener('webglcontextlost', onContextLost);
       document.body.style.overflow = '';
       onDone();
       return undefined;
     }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Capped at 1.5: the bloom pass runs at the framebuffer's full
+    // resolution, so 2x on a HiDPI panel means ~4x the fragment work for a
+    // difference nobody sees on a 3-second animation.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setClearColor(0x000000, 0);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.92;
@@ -429,7 +453,9 @@ export default function IntroGate({ onDone }) {
 
     return () => {
       disposed = true;
+      clearTimeout(failsafe);
       cancelAnimationFrame(raf);
+      canvas.removeEventListener('webglcontextlost', onContextLost);
       window.removeEventListener('resize', resize);
       window.removeEventListener('pointermove', onMove);
       overlay.removeEventListener('click', onClick);
