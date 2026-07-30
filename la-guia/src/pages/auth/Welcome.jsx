@@ -4,7 +4,7 @@ import { motion, useMotionValue, useSpring, useTransform, useScroll, useReducedM
 import { STAGES } from '../../data/mockData.js';
 import { PLANS } from '../../data/plans.js';
 import { Capacitor } from '@capacitor/core';
-import { isLowPowerDevice } from '../../lib/devicePerf.js';
+import { isLowPowerDevice, shouldSkipIntro } from '../../lib/devicePerf.js';
 import { NeedleA } from './NeedleA.jsx';
 
 // The WebGL gate (with all of three.js) is the single heaviest thing on the
@@ -658,7 +658,9 @@ export default function Welcome() {
   // deciding here means it is never fetched, parsed, or compiled on the
   // hardware least able to afford it.
   const lite = useMemo(() => Capacitor.isNativePlatform() || isLowPowerDevice(), []);
-  const [introDone, setIntroDone] = useState(() => lite);
+  // Native stays excluded regardless — a phone has no business compiling
+  // three.js to show a logo.
+  const [introDone, setIntroDone] = useState(() => Capacitor.isNativePlatform() || shouldSkipIntro());
 
   // The page used to render underneath the intro overlay. That cost twice:
   // every effect, spring and scroll listener ran while three.js had the GPU,
