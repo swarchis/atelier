@@ -101,10 +101,22 @@ happens** — the check is at plan time. Dropping the SELECT policy on `mockups`
 because "timestamped filenames never collide" broke every image save for three
 hours. Both buckets now scope SELECT/UPDATE to `owner = auth.uid()` (046, 047).
 
-`mockups` still has **no DELETE policy**, so `.remove()` deletes nothing and
-returns `{data: [], error: null}` — not an error, which is why it went unnoticed.
-Paths are flat with no per-brand folder, so a safe DELETE policy needs the
-namespacing work first.
+`mockups` got its DELETE policy in **057**, owner-scoped like `content_media`.
+Before that it had none, so all nine `.remove()` call sites silently deleted
+nothing — `{data: [], error: null}` is what an RLS-blocked delete returns, not an
+error. That is how the bucket reached **2304 MB of orphans against 65 MB of live
+data**, 1933 MB of it superseded Photopea working PSDs.
+
+**Anything that repoints a stored URL must delete the file it replaced.** Use
+`deleteMockupFiles()` (`lib/designImages.js`), always *after* the row is written,
+and never for a file the new row still references — a failed PSD capture leaves
+`psdUrl` null and the row keeps pointing at the old file. Autosave filenames are
+timestamped on purpose (a reused name serves stale CDN bytes), so every save is a
+new object and nothing is overwritten in place.
+
+Owner-scoped DELETE means a teammate still cannot remove another member's file;
+that returns success and deletes nothing. Per-brand path namespacing is the real
+fix and is not done — mockup paths are flat (`{productId}-{kind}-{timestamp}`).
 
 ## Invariants that break things quietly
 

@@ -16,7 +16,7 @@ import InspirationTab from '../components/design-studio/InspirationTab.jsx';
 import VariantsTab from '../components/design-studio/VariantsTab.jsx';
 import HistoryTab from '../components/design-studio/HistoryTab.jsx';
 import SkuVariantsTab from '../components/design-studio/SkuVariantsTab.jsx';
-import { blobToBase64, uploadDesignImage, uploadDesignPsd, PSD_VERSION_LABEL } from '../lib/designImages.js';
+import { blobToBase64, uploadDesignImage, uploadDesignPsd, deleteMockupFiles, PSD_VERSION_LABEL } from '../lib/designImages.js';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import Splitter from '../components/Splitter.jsx';
 import AssetsTab from '../components/design-studio/AssetsTab.jsx';
@@ -232,15 +232,32 @@ export default function DesignDetail() {
 
     const row = { image_url: publicUrl, psd_url: psdUrl };
     if (label === 'Autosave') {
+      // The files this autosave is about to replace. Read BEFORE the write, used
+      // only after it succeeds — this rolling row is the single biggest source of
+      // orphaned storage in the app, because each autosave repointed it and left
+      // the previous PNG and PSD behind forever.
       const { data: existing } = await supabase
-        .from('design_versions').select('id')
+        .from('design_versions').select('id, image_url, psd_url')
         .eq('product_id', id).eq('label', 'Autosave').maybeSingle();
+      const superseded = existing ? [existing.image_url, existing.psd_url] : [];
+
       let error = existing
         ? await writeVersionRow({ ...row, created_at: new Date().toISOString() }, existing.id)
         : await writeVersionRow({ ...row, label: 'Autosave', source: 'autosave' });
       // An update blocked by RLS leaves nothing saved — fall back to an insert.
       if (error && existing) error = await writeVersionRow({ ...row, label: 'Autosave', source: 'autosave' });
       if (error) throw error;
+
+      // Only once the replacement is safely stored, and only files genuinely
+      // replaced by this save.
+      const toDelete = [];
+      if (superseded[0] && superseded[0] !== publicUrl) toDelete.push(superseded[0]);
+      // The PSD goes ONLY if a new one actually took its place. A failed capture
+      // leaves psdUrl null, and deleting then would destroy the user's only
+      // layered file to reclaim a few megabytes — an orphan is the cheaper
+      // mistake by a wide margin.
+      if (psdUrl && superseded[1] && superseded[1] !== psdUrl) toDelete.push(superseded[1]);
+      await deleteMockupFiles(toDelete);
     } else {
       const error = await writeVersionRow({ ...row, label, source: 'manual-save' });
       if (error) throw error;
@@ -377,11 +394,21 @@ export default function DesignDetail() {
     } catch (err) {
       console.error('PSD capture failed for this view (flattened preview still saved):', err);
     }
+    const previous = views.find(v => v.key === activeView);
     const next = views.map(v => (
       v.key === activeView ? { ...v, imageUrl: publicUrl, psdUrl: psdUrl || v.psdUrl || null } : v
     ));
     setViews(next);
     await persistStudioField('views', next);
+
+    // Same leak as the autosave row: re-saving a view repointed it and left the
+    // previous files behind. Only after the persist succeeds, and note psdUrl is
+    // kept when the new capture failed (`psdUrl || v.psdUrl`), so the old PSD is
+    // still referenced in that case and must not be removed.
+    const supersededViewFiles = [];
+    if (previous?.imageUrl && previous.imageUrl !== publicUrl) supersededViewFiles.push(previous.imageUrl);
+    if (psdUrl && previous?.psdUrl && previous.psdUrl !== psdUrl) supersededViewFiles.push(previous.psdUrl);
+    await deleteMockupFiles(supersededViewFiles);
   };
 
   // Load a stored view into the canvas, preferring its layered file so the

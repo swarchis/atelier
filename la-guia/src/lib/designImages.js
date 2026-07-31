@@ -38,6 +38,52 @@ export async function uploadDesignPsd(blob, productId) {
   return publicUrl;
 }
 
+// Removes files from `mockups` that nothing points at any more.
+//
+// Every autosave uploads a NEW timestamped file (see above — the timestamp is
+// required, since reusing a name serves stale CDN bytes) and repoints the rolling
+// version row at it. Nothing ever removed the file it replaced, which is why the
+// bucket reached 2304 MB of orphans against 65 MB of live data, 1933 MB of it
+// superseded working PSDs.
+//
+// Call this AFTER the row that replaces them has been written. Deleting first
+// means a failed write leaves a row pointing at a file that no longer exists,
+// which is worse than an orphan — a broken design instead of a wasted megabyte.
+//
+// Deletion is best-effort by design. The DELETE policy added in 057 is
+// owner-scoped, so removing a file uploaded by a different team member matches no
+// rows and returns `{data: [], error: null}` — success-shaped and inert. That is
+// logged rather than treated as failure, because the save it follows genuinely
+// did succeed and there is nothing the user could do about it.
+export async function deleteMockupFiles(urls) {
+  const prefix = import.meta.env.VITE_SUPABASE_URL
+    ? `${import.meta.env.VITE_SUPABASE_URL.replace(/\/+$/, '')}/storage/v1/object/public/mockups/`
+    : null;
+  if (!prefix) return;
+
+  const names = [...new Set(
+    (urls || [])
+      .filter(u => typeof u === 'string' && u.startsWith(prefix))
+      .map(u => decodeURIComponent(u.slice(prefix.length).split('?')[0]))
+      .filter(Boolean)
+  )];
+  if (!names.length) return;
+
+  try {
+    const { data: removed, error } = await supabase.storage.from('mockups').remove(names);
+    if (error) {
+      console.warn('Could not remove superseded mockup files:', error.message);
+    } else if (!removed || removed.length < names.length) {
+      console.warn(
+        `Removed ${removed?.length || 0}/${names.length} superseded mockup files — ` +
+        'the rest were uploaded by another member and are not deletable under the owner-scoped policy.'
+      );
+    }
+  } catch (err) {
+    console.warn('Could not remove superseded mockup files:', err.message);
+  }
+}
+
 // Formats a browser can actually paint in an <img>. A PSD (or TIFF) can be
 // stored and reopened in the editor, but it can never be a thumbnail.
 const RENDERABLE_EXT = /\.(png|jpe?g|webp|gif|avif|svg)$/i;
