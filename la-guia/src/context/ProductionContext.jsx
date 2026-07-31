@@ -11,6 +11,7 @@ export function ProductionProvider({ children }) {
   const [issuesByOrder, setIssuesByOrder] = useState({});
   const [updatesByOrder, setUpdatesByOrder] = useState({});
   const [paymentsByOrder, setPaymentsByOrder] = useState({}); // NEW
+  const [sizesByOrder, setSizesByOrder] = useState({});
   const [allPayments, setAllPayments] = useState([]); // brand-wide, for Financial Tools / Analytics
 
   const loadOrders = async () => {
@@ -153,6 +154,53 @@ export function ProductionProvider({ children }) {
     return data;
   };
 
+  // --- Size curve ---------------------------------------------------------
+  // The per-size split of an order. A DB trigger keeps production_orders.units
+  // equal to the sum, so callers never maintain the total by hand and every
+  // existing reader of `units` keeps working.
+  const loadOrderSizes = async (orderId) => {
+    const { data, error } = await supabase
+      .from('production_order_sizes')
+      .select('*')
+      .eq('production_order_id', orderId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      // Migration 057 may not have run yet — a missing curve is a missing
+      // feature, not a broken order page.
+      console.error('Error loading size curve:', error.message);
+      return [];
+    }
+    setSizesByOrder(prev => ({ ...prev, [orderId]: data || [] }));
+    return data || [];
+  };
+
+  // Replaces the whole curve in one go: the editor is a grid the founder edits
+  // as a unit, and per-row saves would leave the total wrong between writes.
+  const saveOrderSizes = async (orderId, rows) => {
+    if (!activeBrand) throw new Error('No active brand');
+    const clean = (rows || [])
+      .map(r => ({ size: String(r.size || '').trim(), colorway: String(r.colorway || '').trim(), units: Number(r.units) || 0, received_units: r.received_units === '' || r.received_units == null ? null : Number(r.received_units) }))
+      .filter(r => r.size);
+
+    const { error: delError } = await supabase.from('production_order_sizes').delete().eq('production_order_id', orderId);
+    if (delError) throw delError;
+
+    if (clean.length === 0) {
+      setSizesByOrder(prev => ({ ...prev, [orderId]: [] }));
+      return [];
+    }
+
+    const { data, error } = await supabase.from('production_order_sizes').insert(
+      clean.map(r => ({ ...r, brand_id: activeBrand.id, production_order_id: orderId }))
+    ).select();
+    if (error) throw error;
+    setSizesByOrder(prev => ({ ...prev, [orderId]: data || [] }));
+    // The trigger moved units server-side; pull the order back so the UI total
+    // matches the database rather than a number computed twice.
+    await loadOrders();
+    return data || [];
+  };
+
   const deletePayment = async (paymentId, orderId) => {
     const { error } = await supabase.from('production_payments').delete().eq('id', paymentId);
     if (error) throw error;
@@ -166,6 +214,7 @@ export function ProductionProvider({ children }) {
       issuesByOrder, loadIssues, addIssue, toggleIssueResolved,
       updatesByOrder, loadUpdates, addUpdate,
       paymentsByOrder, loadPayments, addPayment, deletePayment, // NEW
+      sizesByOrder, loadOrderSizes, saveOrderSizes,
       allPayments, // brand-wide, for Financial Tools / Analytics
     }}>
       {children}

@@ -5,10 +5,12 @@ import { currency } from '../lib/format.js';
 import FlowStepper from '../components/FlowStepper.jsx';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import SizeCurvePanel from '../components/SizeCurvePanel.jsx';
 import { toast } from '../lib/toast.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: 'ph-squares-four' },
+  { key: 'sizes', label: 'Size Curve', icon: 'ph-rows' },
   { key: 'quality', label: 'Quality & Issues', icon: 'ph-check-circle' },
   { key: 'shipment', label: 'Shipment & Inventory', icon: 'ph-truck' },
   { key: 'payments', label: 'Payments', icon: 'ph-currency-dollar' }, // NEW
@@ -256,6 +258,8 @@ export default function ProductionOrderDetail() {
             </div>
           </>
         )}
+
+        {tab === 'sizes' && <SizeCurvePanel orderId={order.id} orderUnits={order.units} />}
 
         {tab === 'quality' && (
           <>
