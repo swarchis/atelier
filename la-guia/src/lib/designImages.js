@@ -50,7 +50,7 @@ export async function uploadDesignPsd(blob, productId) {
 // means a failed write leaves a row pointing at a file that no longer exists,
 // which is worse than an orphan — a broken design instead of a wasted megabyte.
 //
-// Deletion is best-effort by design. The DELETE policy added in 057 is
+// Deletion is best-effort by design. The DELETE policy added in 058 is
 // owner-scoped, so removing a file uploaded by a different team member matches no
 // rows and returns `{data: [], error: null}` — success-shaped and inert. That is
 // logged rather than treated as failure, because the save it follows genuinely

@@ -21,10 +21,19 @@ export function SalesProvider({ children }) {
     }
     setLoading(true);
     try {
-      const { data: conns } = await supabase
+      // Columns named explicitly, NOT select('*'). 059 revoked table-level SELECT
+      // and granted the non-secret columns back individually, and `select *`
+      // needs the table-level privilege. With '*' this returns a permission
+      // error, which the destructure below swallows, and every connected store
+      // silently renders as disconnected — the exact failure social_accounts had.
+      //
+      // access_token / api_key / refresh_token are absent on purpose. The backend
+      // reads them from the row itself; the browser never sees them.
+      const { data: conns, error: connError } = await supabase
         .from('store_connections')
-        .select('*')
+        .select('id, brand_id, platform, shop_domain, connected_at, token_expires_at')
         .eq('brand_id', activeBrand.id);
+      if (connError) throw connError;
 
       setConnections(conns || []);
 

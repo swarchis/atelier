@@ -55,6 +55,7 @@ you the wrong thing.
 | `brands` | Column `GRANT`s (045, 049) | Only 9 columns are client-writable; `plan_tier` and the `stripe_*` ids are not, on INSERT **or** UPDATE |
 | `chat_participants` | Column `GRANT` (051) | Only `last_read_at` is client-writable, so a row can't be moved into another chat |
 | `social_accounts` | Column `GRANT` (054) | `access_token`/`refresh_token` are not client-**readable**; INSERT/UPDATE are revoked entirely, so the backend owns every write except the client's DELETE (Disconnect) |
+| `store_connections` | Column `GRANT` (059) | Same shape as 054 for storefronts: `access_token`/`api_key`/`refresh_token` unreadable, all client writes revoked except DELETE |
 
 Plus **111 restrictive policies** across 37 tables (050) that require
 `has_brand_write_access()` — owner/admin/editor — for INSERT/UPDATE/DELETE.
@@ -101,7 +102,7 @@ happens** — the check is at plan time. Dropping the SELECT policy on `mockups`
 because "timestamped filenames never collide" broke every image save for three
 hours. Both buckets now scope SELECT/UPDATE to `owner = auth.uid()` (046, 047).
 
-`mockups` got its DELETE policy in **057**, owner-scoped like `content_media`.
+`mockups` got its DELETE policy in **058**, owner-scoped like `content_media`.
 Before that it had none, so all nine `.remove()` call sites silently deleted
 nothing — `{data: [], error: null}` is what an RLS-blocked delete returns, not an
 error. That is how the bucket reached **2304 MB of orphans against 65 MB of live
@@ -192,9 +193,19 @@ written by the backend in the OAuth callback (`persistSocialAccount`), and
 `/api/social/publish/:platform` takes a `brandId` and looks the token up itself
 via `getSocialAccessToken`, which also refreshes it when it's within 5 minutes of
 expiry. Don't add a client-side read of a token column — 054 revoked SELECT on
-them, so it returns a permission error, not a null. `sales_connections` (Shopify/
-Etsy/Woo) still holds tokens the client reads; that's the same shape and is *not*
-fixed yet.
+them, so it returns a permission error, not a null.
+
+**Storefront credentials work the same way (059).** The table is
+`store_connections` — Shopify tokens, Etsy OAuth pairs, WooCommerce consumer
+key/secret. The backend writes every row (`persistStoreConnection`, in the OAuth
+callbacks and `/api/woocommerce/connect`) and reads them itself via
+`getStoreConnection`, which also handles Etsy's **one-hour** expiry. All nine
+storefront endpoints take a `brandId`, never a credential.
+`/api/etsy/refresh-token` was deleted outright: it refreshed any refresh token
+presented to it, which only made sense while the browser held one. WooCommerce is
+the sole case where credentials cross the wire, because the founder types them —
+and `/api/woocommerce/connect` validates them against the live store before
+storing, so a typo can't leave a dead connection looking real.
 
 **Frontend never raw-`fetch`es the API.** Use `aiPost()` for metered AI routes
 (injects JWT + brandId + brand profile) or `apiPost()` for authenticated

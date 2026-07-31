@@ -62,13 +62,10 @@ export default function SalesDashboard() {
       const brandId = params.get('brandId');
 
       if (brandId === activeBrand.id && handoffCode) {
+        // The backend already wrote the connection with its service-role key in
+        // the OAuth callback, and the handoff carries no credential. This only
+        // confirms the handoff was genuine, then reloads. See migration 059.
         consumeOAuthHandoff(handoffCode)
-          .then(({ shop, accessToken }) => supabase.from('store_connections').upsert({
-            brand_id: activeBrand.id,
-            platform: 'shopify',
-            shop_domain: shop,
-            access_token: accessToken,
-          }, { onConflict: 'brand_id, platform' }))
           .then(() => {
             refreshSales();
             window.history.replaceState({}, '', '/sales');
@@ -87,15 +84,8 @@ export default function SalesDashboard() {
       const brandId = params.get('brandId');
 
       if (brandId === activeBrand.id && handoffCode) {
+        // Same as Shopify above — the row is already written server-side.
         consumeOAuthHandoff(handoffCode)
-          .then(({ shopId, accessToken, refreshToken, expiresIn }) => supabase.from('store_connections').upsert({
-            brand_id: activeBrand.id,
-            platform: 'etsy',
-            shop_domain: shopId,
-            access_token: accessToken,
-            refresh_token: refreshToken,
-            token_expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(),
-          }, { onConflict: 'brand_id, platform' }))
           .then(() => {
             refreshSales();
             window.history.replaceState({}, '', '/sales');
@@ -212,22 +202,16 @@ export default function SalesDashboard() {
     }
   };
 
-  // Etsy tokens expire hourly — fetchOrders refreshes automatically and
-  // reports the new token here so it gets persisted for next time.
-  const persistRefreshedEtsyToken = async (refreshed) => {
-    await supabase.from('store_connections').update({
-      access_token: refreshed.access_token,
-      refresh_token: refreshed.refresh_token,
-      token_expires_at: refreshed.token_expires_at,
-    }).eq('id', etsyConnection.id);
-  };
-
+  // Etsy's hourly expiry is handled entirely server-side now (see
+  // getStoreConnection in api/index.js). The old persistRefreshedEtsyToken
+  // callback that lived here wrote the refreshed token from the browser, which
+  // only worked because the browser held it — exactly what 059 removes.
   const syncEtsy = async () => {
     if (!etsyConnection) return;
     setSyncing(true);
     setSyncError(null);
     try {
-      const orders = await platformAdapters.etsy.fetchOrders(etsyConnection, persistRefreshedEtsyToken);
+      const orders = await platformAdapters.etsy.fetchOrders(etsyConnection);
       await aggregateAndUpsertOrders(orders, 'etsy');
       await refreshSales();
     } catch (err) {
@@ -248,15 +232,15 @@ export default function SalesDashboard() {
     setWooConnecting(true);
     setWooError(null);
     try {
-      await platformAdapters.woocommerce.validate({ shop_domain: wooForm.storeUrl, api_key: wooForm.consumerKey, access_token: wooForm.consumerSecret });
-      const { error } = await supabase.from('store_connections').upsert({
-        brand_id: activeBrand.id,
-        platform: 'woocommerce',
-        shop_domain: wooForm.storeUrl.trim(),
-        api_key: wooForm.consumerKey.trim(),
-        access_token: wooForm.consumerSecret.trim(),
-      }, { onConflict: 'brand_id, platform' });
-      if (error) throw error;
+      // Validates against the live store AND stores the credentials in one
+      // backend call. Previously the browser validated, then wrote the row
+      // itself — which is how the consumer key and secret became client-owned.
+      await platformAdapters.woocommerce.connect({
+        brandId: activeBrand.id,
+        storeUrl: wooForm.storeUrl.trim(),
+        consumerKey: wooForm.consumerKey.trim(),
+        consumerSecret: wooForm.consumerSecret.trim(),
+      });
       setWooForm({ storeUrl: '', consumerKey: '', consumerSecret: '' });
       await refreshSales();
     } catch (err) {
@@ -389,7 +373,7 @@ export default function SalesDashboard() {
         {tab === 'vendors' && <VendorsTab vendors={vendors} quotes={quotes} orders={orders} navigate={navigate} />}
         {tab === 'manufacturing' && <ManufacturingTab orders={orders} />}
         {tab === 'inventory' && <InventoryTab products={products} orders={orders} productSales={productSales} navigate={navigate} connections={connections} />}
-        {tab === 'listings' && <><ComingSoonNotice what="Publishing listings" platforms="Shopify and Etsy" /><ListingsTab products={products} connections={connections} persistRefreshedEtsyToken={persistRefreshedEtsyToken} /></>}
+        {tab === 'listings' && <><ComingSoonNotice what="Publishing listings" platforms="Shopify and Etsy" /><ListingsTab products={products} connections={connections} /></>}
         {tab === 'marketing' && (
           <EmptyState
             icon="ph-megaphone"
@@ -696,7 +680,7 @@ function InventoryTab({ products, orders, productSales, navigate, connections })
   );
 }
 
-function ListingsTab({ products, connections, persistRefreshedEtsyToken }) {
+function ListingsTab({ products, connections }) {
   const writeCapable = connections.filter(c => platformAdapters[c.platform]?.publishProduct);
   const [listings, setListings] = useState([]);
   const [loadingListings, setLoadingListings] = useState(true);
@@ -727,9 +711,9 @@ function ListingsTab({ products, connections, persistRefreshedEtsyToken }) {
       const conn = connections.find(c => c.platform === form.platform);
       const adapter = platformAdapters[form.platform];
       const args = { name: form.name, description: form.description, price: form.price, sku: form.sku || undefined, imageUrl: form.imageUrl || undefined, quantity: 1, taxonomyId: form.taxonomyId || undefined };
-      const result = form.platform === 'etsy'
-        ? await adapter.publishProduct(conn, args, persistRefreshedEtsyToken)
-        : await adapter.publishProduct(conn, args);
+      // Etsy no longer needs a token-refresh callback — the backend refreshes it
+      // itself, so both platforms take the same two arguments now.
+      const result = await adapter.publishProduct(conn, args);
 
       const { data, error } = await supabase.from('platform_listings').upsert({
         brand_id: conn.brand_id, product_id: form.productId, platform: form.platform,

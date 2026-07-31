@@ -1439,6 +1439,79 @@ app.get('/api/shopify/auth', (req, res) => {
   res.redirect(installUrl);
 });
 
+// ── Storefront credentials stay server-side ────────────────────────────────
+// store_connections holds Shopify access tokens, Etsy OAuth tokens, and
+// WooCommerce consumer key/secret pairs — credentials that can read a founder's
+// orders and, for Woo and Etsy, create real products on their store.
+//
+// Every one of these used to be read in the browser (SalesContext did
+// `select('*')`) and posted back in the request body of nine endpoints, which
+// meant any brand member — viewer included — held them. Same shape as the
+// social_accounts leak closed in 054, with a bigger blast radius because these
+// touch a real storefront. Migration 059 revokes client SELECT on the secret
+// columns and all client writes; these two helpers are what replaces them.
+async function persistStoreConnection(brandId, platform, fields) {
+  const row = { brand_id: brandId, platform, ...fields };
+  const { error } = await supabase
+    .from('store_connections').upsert(row, { onConflict: 'brand_id, platform' });
+  if (error) throw new Error(error.message);
+}
+
+// Loads a connection and guarantees a usable credential. Etsy access tokens last
+// ONE HOUR, so the refresh lives here rather than in the caller — previously the
+// browser noticed the expiry and called a refresh endpoint with a refresh token
+// it held, which is exactly the pattern being removed.
+const ETSY_REFRESH_SKEW_MS = 60 * 1000;
+
+async function getStoreConnection(brandId, platform) {
+  const { data: conn, error } = await supabase
+    .from('store_connections').select('*')
+    .eq('brand_id', brandId).eq('platform', platform).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!conn) return null;
+
+  if (platform !== 'etsy' || !conn.refresh_token) return conn;
+
+  const expiresAt = conn.token_expires_at ? new Date(conn.token_expires_at).getTime() : 0;
+  if (expiresAt - Date.now() > ETSY_REFRESH_SKEW_MS) return conn;
+
+  const tokenRes = await fetch('https://api.etsy.com/v3/public/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ grant_type: 'refresh_token', client_id: process.env.ETSY_KEYSTRING, refresh_token: conn.refresh_token }),
+  });
+  const data = await tokenRes.json();
+  if (!tokenRes.ok) throw new Error('Your Etsy connection has expired. Reconnect the shop and try again.');
+
+  const refreshed = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token || conn.refresh_token,
+    token_expires_at: new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString(),
+  };
+  await persistStoreConnection(brandId, 'etsy', { shop_domain: conn.shop_domain, ...refreshed });
+  return { ...conn, ...refreshed };
+}
+
+// Resolves the caller's connection for a storefront endpoint, or sends the right
+// error. Returns null when it has already responded.
+async function requireStoreConnection(req, res, platform, label) {
+  const { brandId } = req.body;
+  if (!brandId) { res.status(400).json({ ok: false, error: 'brandId is required.' }); return null; }
+  if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
+    res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
+    return null;
+  }
+  let conn;
+  try {
+    conn = await getStoreConnection(brandId, platform);
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+    return null;
+  }
+  if (!conn) { res.status(400).json({ ok: false, error: `No connected ${label} store for this brand.` }); return null; }
+  return conn;
+}
+
 app.get('/api/shopify/callback', async (req, res) => {
   const { shop, code, state } = req.query;
   const brandId = verifyOAuthState(state);
@@ -1459,7 +1532,17 @@ app.get('/api/shopify/callback', async (req, res) => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error_description || 'Failed to get token');
 
-    const handoffCode = createOAuthHandoff({ platform: 'shopify', shop: shopDomain, accessToken: data.access_token, brandId });
+    // Written here with the service-role key. brandId came out of the
+    // HMAC-signed state, and there is no user JWT on a platform redirect.
+    await persistStoreConnection(brandId, 'shopify', {
+      shop_domain: shopDomain,
+      access_token: data.access_token,
+    });
+
+    // The handoff still confirms the connection succeeded, but carries no
+    // credential — /api/oauth/consume is unauthenticated, so anything in this
+    // payload is readable by whoever holds the code.
+    const handoffCode = createOAuthHandoff({ platform: 'shopify', shop: shopDomain, brandId });
     res.redirect(`${APP_URL}/sales?shopify_success=true&handoff=${handoffCode}&brandId=${brandId}`);
   } catch (err) {
     console.error('Shopify OAuth Error:', err);
@@ -1468,12 +1551,12 @@ app.get('/api/shopify/callback', async (req, res) => {
 });
 
 app.post('/api/shopify/fetch-orders', requireAuth, async (req, res) => {
-  const { shop, token } = req.body;
-  if (!shop || !token) return res.status(400).json({ ok: false, error: 'Missing shop or token' });
+  const conn = await requireStoreConnection(req, res, 'shopify', 'Shopify');
+  if (!conn) return;
 
   try {
-    const response = await fetch(`https://${safeShopifyShop(shop)}/admin/api/2024-01/orders.json?status=any&limit=250`, {
-      headers: { 'X-Shopify-Access-Token': token }
+    const response = await fetch(`https://${safeShopifyShop(conn.shop_domain)}/admin/api/2024-01/orders.json?status=any&limit=250`, {
+      headers: { 'X-Shopify-Access-Token': conn.access_token }
     });
     const data = await response.json();
     
@@ -1539,11 +1622,11 @@ app.post('/api/shopify/webhooks/app_uninstalled', async (req, res) => {
 // long-standing "no inventory endpoint" note, which was about a live
 // write-back sync; this only reads.
 app.post('/api/shopify/fetch-inventory', requireAuth, async (req, res) => {
-  const { shop, token } = req.body;
-  if (!shop || !token) return res.status(400).json({ ok: false, error: 'Missing shop or token' });
+  const conn = await requireStoreConnection(req, res, 'shopify', 'Shopify');
+  if (!conn) return;
   try {
-    const response = await fetch(`https://${safeShopifyShop(shop)}/admin/api/2024-01/products.json?limit=250`, {
-      headers: { 'X-Shopify-Access-Token': token }
+    const response = await fetch(`https://${safeShopifyShop(conn.shop_domain)}/admin/api/2024-01/products.json?limit=250`, {
+      headers: { 'X-Shopify-Access-Token': conn.access_token }
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.errors || 'Failed to fetch products');
@@ -1574,8 +1657,19 @@ function normalizeStoreUrl(url) {
   return safeStoreUrl(url);
 }
 
-app.post('/api/woocommerce/validate', requireAuth, async (req, res) => {
-  const { storeUrl, consumerKey, consumerSecret } = req.body;
+// Validates the founder-supplied credentials AND stores them, in one step.
+//
+// This replaces the old /api/woocommerce/validate, which only checked them and
+// left the frontend to write the row — which is how the consumer key and secret
+// ended up client-written and client-readable. WooCommerce is the one platform
+// where the browser legitimately sees the credentials, because the founder types
+// them in; it must not be where they live afterwards.
+app.post('/api/woocommerce/connect', requireAuth, async (req, res) => {
+  const { brandId, storeUrl, consumerKey, consumerSecret } = req.body;
+  if (!brandId) return res.status(400).json({ ok: false, error: 'brandId is required.' });
+  if (!(await verifyBrandAccess(req.user && req.user.id, brandId))) {
+    return res.status(403).json({ ok: false, error: 'You do not have access to this brand.' });
+  }
   if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
   try {
     const base = normalizeStoreUrl(storeUrl);
@@ -1590,6 +1684,15 @@ app.post('/api/woocommerce/validate', requireAuth, async (req, res) => {
         ? 'Invalid Consumer Key/Secret'
         : `Store responded with ${response.status}. Check the URL points at your WooCommerce site and the REST API is enabled.`);
     }
+    // Only stored once the credentials are proven to work, so a typo can't
+    // leave a dead connection sitting in the table looking real.
+    // consumer secret -> access_token, consumer key -> api_key, matching the
+    // columns the rest of the app already uses for this platform.
+    await persistStoreConnection(brandId, 'woocommerce', {
+      shop_domain: base,
+      api_key: consumerKey,
+      access_token: consumerSecret,
+    });
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });
@@ -1597,12 +1700,12 @@ app.post('/api/woocommerce/validate', requireAuth, async (req, res) => {
 });
 
 app.post('/api/woocommerce/fetch-orders', requireAuth, async (req, res) => {
-  const { storeUrl, consumerKey, consumerSecret } = req.body;
-  if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
+  const conn = await requireStoreConnection(req, res, 'woocommerce', 'WooCommerce');
+  if (!conn) return;
   try {
-    const base = normalizeStoreUrl(storeUrl);
+    const base = normalizeStoreUrl(conn.shop_domain);
     const response = await safeFetchFollow(`${base}/wp-json/wc/v3/orders?per_page=100&status=any`, {
-      headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret) }
+      headers: { Authorization: wooAuthHeader(conn.api_key, conn.access_token) }
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Failed to fetch orders');
@@ -1613,12 +1716,12 @@ app.post('/api/woocommerce/fetch-orders', requireAuth, async (req, res) => {
 });
 
 app.post('/api/woocommerce/fetch-inventory', requireAuth, async (req, res) => {
-  const { storeUrl, consumerKey, consumerSecret } = req.body;
-  if (!storeUrl || !consumerKey || !consumerSecret) return res.status(400).json({ ok: false, error: 'Missing store URL or credentials' });
+  const conn = await requireStoreConnection(req, res, 'woocommerce', 'WooCommerce');
+  if (!conn) return;
   try {
-    const base = normalizeStoreUrl(storeUrl);
+    const base = normalizeStoreUrl(conn.shop_domain);
     const response = await safeFetchFollow(`${base}/wp-json/wc/v3/products?per_page=100`, {
-      headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret) }
+      headers: { Authorization: wooAuthHeader(conn.api_key, conn.access_token) }
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Failed to fetch products');
@@ -1633,13 +1736,15 @@ app.post('/api/woocommerce/fetch-inventory', requireAuth, async (req, res) => {
 // automatically. Requires the connected Consumer Key to actually have
 // write access (WooCommerce keys are read-only by default).
 app.post('/api/woocommerce/publish-product', requireAuth, async (req, res) => {
-  const { storeUrl, consumerKey, consumerSecret, name, description, price, sku, imageUrl } = req.body;
-  if (!storeUrl || !consumerKey || !consumerSecret || !name || !price) return res.status(400).json({ ok: false, error: 'Missing required fields' });
+  const { name, description, price, sku, imageUrl } = req.body;
+  if (!name || !price) return res.status(400).json({ ok: false, error: 'Missing required fields' });
+  const conn = await requireStoreConnection(req, res, 'woocommerce', 'WooCommerce');
+  if (!conn) return;
   try {
-    const base = normalizeStoreUrl(storeUrl);
+    const base = normalizeStoreUrl(conn.shop_domain);
     const response = await safeFetchFollow(`${base}/wp-json/wc/v3/products`, {
       method: 'POST',
-      headers: { Authorization: wooAuthHeader(consumerKey, consumerSecret), 'Content-Type': 'application/json' },
+      headers: { Authorization: wooAuthHeader(conn.api_key, conn.access_token), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name, type: 'simple', regular_price: String(price), description: description || '', sku: sku || undefined,
         images: imageUrl ? [{ src: imageUrl }] : undefined,
@@ -1722,13 +1827,18 @@ app.get('/api/etsy/callback', async (req, res) => {
     const shopsData = await shopsRes.json();
     if (!shopsRes.ok || !shopsData.shop_id) throw new Error('Could not find an Etsy shop for this account');
 
+    await persistStoreConnection(brandId, 'etsy', {
+      shop_domain: String(shopsData.shop_id),
+      access_token: tokenData.access_token,
+      refresh_token: tokenData.refresh_token,
+      token_expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
+    });
+
+    // Shop name and id only — no tokens. See the Shopify callback for why.
     const handoffCode = createOAuthHandoff({
       platform: 'etsy',
       shopId: String(shopsData.shop_id),
       shopName: shopsData.shop_name,
-      accessToken: tokenData.access_token,
-      refreshToken: tokenData.refresh_token,
-      expiresIn: tokenData.expires_in,
       brandId,
     });
     res.redirect(`${APP_URL}/sales?etsy_success=true&handoff=${handoffCode}&brandId=${brandId}`);
@@ -1738,22 +1848,11 @@ app.get('/api/etsy/callback', async (req, res) => {
   }
 });
 
-app.post('/api/etsy/refresh-token', requireAuth, async (req, res) => {
-  const { refreshToken } = req.body;
-  if (!refreshToken) return res.status(400).json({ ok: false, error: 'Missing refresh token' });
-  try {
-    const tokenRes = await fetch('https://api.etsy.com/v3/public/oauth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'refresh_token', client_id: process.env.ETSY_KEYSTRING, refresh_token: refreshToken }),
-    });
-    const data = await tokenRes.json();
-    if (!tokenRes.ok) throw new Error(data.error_description || 'Failed to refresh token');
-    res.json({ ok: true, accessToken: data.access_token, refreshToken: data.refresh_token, expiresIn: data.expires_in });
-  } catch (err) {
-    res.status(400).json({ ok: false, error: err.message });
-  }
-});
+// /api/etsy/refresh-token is deliberately gone. It took a refresh token from the
+// request body, which only worked because the browser was holding one — and it
+// would refresh ANY refresh token presented to it, for any shop, by any signed-in
+// user. Etsy's hourly expiry is now handled inside getStoreConnection, where the
+// token is read from the row rather than accepted from the caller.
 
 // Etsy prices come back as Money objects ({amount, divisor, currency_code}
 // — real value is amount/divisor) and each receipt's line items live in
@@ -1765,11 +1864,11 @@ function etsyMoney(m) {
 }
 
 app.post('/api/etsy/fetch-orders', requireAuth, async (req, res) => {
-  const { shopId, accessToken } = req.body;
-  if (!shopId || !accessToken) return res.status(400).json({ ok: false, error: 'Missing shopId or accessToken' });
+  const conn = await requireStoreConnection(req, res, 'etsy', 'Etsy');
+  if (!conn) return;
   try {
-    const response = await fetch(`https://openapi.etsy.com/v3/application/shops/${shopId}/receipts?limit=100`, {
-      headers: { Authorization: `Bearer ${accessToken}`, 'x-api-key': process.env.ETSY_KEYSTRING },
+    const response = await fetch(`https://openapi.etsy.com/v3/application/shops/${conn.shop_domain}/receipts?limit=100`, {
+      headers: { Authorization: `Bearer ${conn.access_token}`, 'x-api-key': process.env.ETSY_KEYSTRING },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to fetch receipts');
@@ -1785,11 +1884,11 @@ app.post('/api/etsy/fetch-orders', requireAuth, async (req, res) => {
 });
 
 app.post('/api/etsy/fetch-inventory', requireAuth, async (req, res) => {
-  const { shopId, accessToken } = req.body;
-  if (!shopId || !accessToken) return res.status(400).json({ ok: false, error: 'Missing shopId or accessToken' });
+  const conn = await requireStoreConnection(req, res, 'etsy', 'Etsy');
+  if (!conn) return;
   try {
-    const response = await fetch(`https://openapi.etsy.com/v3/application/shops/${shopId}/listings?limit=100`, {
-      headers: { Authorization: `Bearer ${accessToken}`, 'x-api-key': process.env.ETSY_KEYSTRING },
+    const response = await fetch(`https://openapi.etsy.com/v3/application/shops/${conn.shop_domain}/listings?limit=100`, {
+      headers: { Authorization: `Bearer ${conn.access_token}`, 'x-api-key': process.env.ETSY_KEYSTRING },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to fetch listings');
@@ -1808,12 +1907,14 @@ app.post('/api/etsy/fetch-inventory', requireAuth, async (req, res) => {
 // separate multipart endpoint this doesn't call — the listing is created
 // text-only; photos get added directly in Etsy afterward.
 app.post('/api/etsy/publish-listing', requireAuth, async (req, res) => {
-  const { shopId, accessToken, title, description, price, quantity, taxonomyId, sku } = req.body;
-  if (!shopId || !accessToken || !title || !price || !taxonomyId) return res.status(400).json({ ok: false, error: 'Missing required fields (title, price, and an Etsy taxonomy ID are all required)' });
+  const { title, description, price, quantity, taxonomyId, sku } = req.body;
+  if (!title || !price || !taxonomyId) return res.status(400).json({ ok: false, error: 'Missing required fields (title, price, and an Etsy taxonomy ID are all required)' });
+  const conn = await requireStoreConnection(req, res, 'etsy', 'Etsy');
+  if (!conn) return;
   try {
-    const response = await fetch(`https://openapi.etsy.com/v3/application/shops/${shopId}/listings`, {
+    const response = await fetch(`https://openapi.etsy.com/v3/application/shops/${conn.shop_domain}/listings`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}`, 'x-api-key': process.env.ETSY_KEYSTRING, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${conn.access_token}`, 'x-api-key': process.env.ETSY_KEYSTRING, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         quantity: quantity || 1, title, description: description || '', price: Number(price),
         who_made: 'i_did', when_made: 'made_to_order', taxonomy_id: Number(taxonomyId),
