@@ -546,27 +546,137 @@ async function callOpenAIImage(prompt, { size = '1024x1024', background = 'auto'
 // 1. DESIGN & TECH PACK ENDPOINTS
 // ---------------------------------------------------------
 
+// Weighted review dimensions. The model scores each one; the TOTAL IS COMPUTED
+// HERE, not by the model. Asking an LLM for "a score out of 100" with no rubric
+// is how the old version returned 85 for everything: with nothing to anchor
+// against, scores collapse toward a confident-sounding middle-high number. Fixed
+// dimensions with stated anchors, aggregated in code, remove that freedom.
+const DESIGN_REVIEW_DIMENSIONS = [
+  { key: 'manufacturability', label: 'Manufacturability', weight: 25 },
+  { key: 'specCompleteness', label: 'Spec completeness', weight: 25 },
+  { key: 'costRealism', label: 'Cost realism', weight: 20 },
+  { key: 'brandFit', label: 'Brand fit', weight: 12 },
+  { key: 'marketFit', label: 'Market fit', weight: 10 },
+  { key: 'differentiation', label: 'Differentiation', weight: 8 },
+];
+
 app.post('/api/analyze-design', metered('analyze-design'), async (req, res) => {
-  console.log("📥 Received analysis request...");
+  console.log("📥 Received design review request...");
   try {
-    const { imageBase64 } = req.body;
+    const { imageBase64, product, design, notes: designNotes } = req.body;
     if (!imageBase64) return res.status(400).json({ ok: false, error: 'No image provided' });
 
-    const prompt = `You are an expert fashion technical designer. Analyze this garment design.
-Provide a JSON response with exactly this structure:
-{
-  "score": <number 0-100>,
-  "notes": [
-    {
-      "severity": "green" | "amber" | "blue" | "red",
-      "text": "feedback string"
+    // Live trend context for the category. Best-effort: a design review that
+    // can't reach Tavily is still worth having, it just can't speak to what is
+    // selling right now — and the prompt is told to stay silent on market fit
+    // rather than invent a trend, which is the failure mode that matters.
+    let trendBlock = 'No live trend data available for this review. Score marketFit at 50 and say plainly in the finding that current-season context was unavailable — do NOT invent trends.';
+    const category = (product && (product.category || product.name)) || (design && design.garment_type) || '';
+    if (category && process.env.TAVILY_API_KEY && !process.env.TAVILY_API_KEY.startsWith('get_a_free_key')) {
+      try {
+        const r = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: process.env.TAVILY_API_KEY,
+            query: `${category} fashion current season trends silhouette fabric detail what is selling`,
+            search_depth: 'advanced',
+            max_results: 8,
+          }),
+        }).then(x => x.json());
+        const results = r.error ? [] : (r.results || []);
+        if (results.length) {
+          trendBlock = `Live web results on current ${category} trends. Use ONLY these for marketFit; if they are thin, say so and score conservatively rather than inventing a trend:\n${results.map((x, i) => `[${i}] ${x.title}\n${(x.content || '').slice(0, 500)}`).join('\n\n')}`;
+        }
+      } catch { /* keep the no-data block */ }
     }
-  ]
+
+    const ctx = [
+      product?.name && `Product name: ${product.name}`,
+      product?.category && `Category: ${product.category}`,
+      product?.stage && `Stage: ${product.stage}`,
+      product?.risk && `Risk posture set on this product: ${product.risk}`,
+      product?.budget && `Budget for this product: $${product.budget}`,
+      design?.garment_type && `Garment type: ${design.garment_type}`,
+      design?.silhouette && `Silhouette: ${design.silhouette}`,
+      design?.base_type && `Base: ${design.base_type}`,
+      design?.colorway && `Colorway: ${design.colorway}`,
+      Array.isArray(design?.fabric_tags) && design.fabric_tags.length && `Fabrics tagged on this design: ${design.fabric_tags.join(', ')}`,
+      Array.isArray(design?.palette) && design.palette.length && `Palette: ${design.palette.map(p => (typeof p === 'string' ? p : p.hex || p.name)).filter(Boolean).join(', ')}`,
+      Array.isArray(design?.moodboard) && design.moodboard.length && `Moodboard has ${design.moodboard.length} reference(s) pinned.`,
+      designNotes && `The founder's own notes on this design: ${String(designNotes).slice(0, 1200)}`,
+    ].filter(Boolean).join('\n') || 'No written context was supplied with this design — judge specCompleteness accordingly.';
+
+    const prompt = `You are a senior technical designer and sourcing lead reviewing a garment design BEFORE it becomes a tech pack. You have seen thousands of these. Your job is to find what will go wrong at the factory, not to encourage the designer.
+
+WHAT YOU KNOW ABOUT THIS PIECE
+${ctx}
+
+CURRENT MARKET CONTEXT
+${trendBlock}
+
+HOW TO SCORE — read this carefully, it is the point of the exercise.
+Score each dimension 0-100 against these anchors. Be harsh. Most designs at this stage are NOT close to production-ready, and saying so is the useful thing:
+- 0-30: fundamentally not makeable / nothing specified / would be rejected by a factory outright.
+- 31-55: the normal state of a real first draft. Recognisable garment, but a factory would come back with a list of questions before quoting.
+- 56-75: solid work with specific identified gaps that must close before sampling.
+- 76-89: genuinely production-ready; a competent factory could quote it with minor clarification.
+- 90-100: exceptional and complete. Reserve this. If you are scoring above 89 you should be able to name why it beats a professional studio's output.
+A competent-looking sketch with no specified fabric, trims or construction belongs in the 31-55 band no matter how attractive it is. Do not award points for the drawing being pretty.
+
+THE DIMENSIONS
+- manufacturability: can a factory actually cut and sew this as drawn? Seam construction, closures, curves, panel count, whether the details are physically achievable in the implied fabric.
+- specCompleteness: is there enough here to QUOTE from? Fabric weight/composition, trims, stitch types, placements, colorway. Missing information scores low even if the design is good.
+- costRealism: does the implied construction fit the stated budget and the brand's quality tier? Panel count, trims and finishes drive cost. If no budget is stated, judge against the brand's stated budget philosophy.
+- brandFit: does this match the brand profile below — quality tier, risk tolerance, sustainability stance? A safe design for an aggressive brand is a miss, and so is the reverse.
+- marketFit: against the market context above only.
+- differentiation: could a customer tell this apart from a blank with a logo on it? Be blunt.
+
+FINDINGS
+Return 4 to 8 findings. Every one must point at something SPECIFIC you can see or that is specifically absent — "the collar has no specified interfacing or stitch type" not "consider adding more detail". Order them worst-first. At least two must be things that would actually block or delay a factory. If the design is genuinely good, say what is good in at most one finding and spend the rest on what still has to close.
+severity: "red" = blocks production or quoting, "amber" = will cause a factory question or a cost surprise, "blue" = worth deciding before sampling, "green" = genuinely resolved, use sparingly.
+
+Return a JSON object with exactly this structure and nothing else:
+{
+  "dimensions": {
+    "manufacturability": { "score": <0-100>, "reason": "one sentence naming the specific thing driving this score" },
+    "specCompleteness": { "score": <0-100>, "reason": "..." },
+    "costRealism": { "score": <0-100>, "reason": "..." },
+    "brandFit": { "score": <0-100>, "reason": "..." },
+    "marketFit": { "score": <0-100>, "reason": "..." },
+    "differentiation": { "score": <0-100>, "reason": "..." }
+  },
+  "verdict": "one blunt sentence a founder can act on",
+  "notes": [ { "severity": "red" | "amber" | "blue" | "green", "text": "specific finding" } ]
 }`;
 
-    const analysis = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64);
-    console.log("✅ Analysis successful");
-    res.json({ ok: true, analysis });
+    const raw = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64);
+
+    // Aggregate here so the headline number is arithmetic, not a vibe.
+    const dims = raw.dimensions || {};
+    let weighted = 0;
+    let totalWeight = 0;
+    const dimensions = DESIGN_REVIEW_DIMENSIONS.map(d => {
+      const entry = dims[d.key] || {};
+      const score = Math.max(0, Math.min(100, Number(entry.score)));
+      const usable = Number.isFinite(score);
+      if (usable) { weighted += score * d.weight; totalWeight += d.weight; }
+      return { key: d.key, label: d.label, weight: d.weight, score: usable ? Math.round(score) : null, reason: entry.reason || null };
+    });
+    let score = totalWeight ? Math.round(weighted / totalWeight) : 0;
+
+    // A fatal finding cannot coexist with a passing headline. Without this a
+    // design can average its way past the 80 gate while carrying something that
+    // stops the line — which is exactly what a readiness score exists to catch.
+    const notes = Array.isArray(raw.notes) ? raw.notes : [];
+    const reds = notes.filter(n => n && n.severity === 'red').length;
+    const ambers = notes.filter(n => n && n.severity === 'amber').length;
+    let cappedBy = null;
+    if (reds > 0 && score > 55) { score = 55; cappedBy = `${reds} blocking issue${reds === 1 ? '' : 's'}`; }
+    else if (ambers >= 3 && score > 75) { score = 75; cappedBy = `${ambers} unresolved factory questions`; }
+
+    console.log(`✅ Design review complete — ${score}/100${cappedBy ? ` (capped by ${cappedBy})` : ''}, ${notes.length} findings`);
+    res.json({ ok: true, analysis: { score, dimensions, verdict: raw.verdict || null, cappedBy, notes } });
   } catch (error) {
     console.error('❌ Endpoint Error:', error.message);
     res.status(500).json({ ok: false, error: error.message });

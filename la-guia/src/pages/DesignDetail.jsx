@@ -593,7 +593,14 @@ export default function DesignDetail() {
         reader.readAsDataURL(blob);
       });
           
-      const apiRes = await aiPost('/api/analyze-design', { imageBase64: base64data });
+      const apiRes = await aiPost('/api/analyze-design', {
+        imageBase64: base64data,
+        product: product ? { name: product.name, category: product.category, stage: product.stage, risk: product.risk, budget: product.budget } : null,
+        design: design ? {
+          garment_type: design.garment_type, silhouette: design.silhouette, base_type: design.base_type,
+          colorway: design.colorway, fabric_tags: design.fabric_tags, palette: design.palette, moodboard: design.moodboard,
+        } : null,
+      });
       
       const data = await apiRes.json();
       if (data.ok) {
@@ -868,14 +875,50 @@ export default function DesignDetail() {
                 <span className="card-title">AI Design Critique</span>
               </div>
               <div className="card-body">
-                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 14 }}>A real critique of this exact canvas snapshot — not general advice. Score and notes come straight from Gemini looking at the image, nothing pre-scripted.</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 14 }}>A critique of this exact canvas snapshot, judged against your brand profile, this product's budget and live trend data. Scored on six weighted dimensions and deliberately harsh: a good-looking sketch with nothing specified belongs in the 30s, not the 80s.</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
                   {snapshot && <img src={snapshot} alt="Captured canvas snapshot" style={{ width: 64, height: 64, objectFit: 'contain', background: '#fff', borderRadius: 8, border: '1.5px solid var(--border-2)', flexShrink: 0 }} />}
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 30, fontWeight: 700, color: analysis.score >= 80 ? 'var(--green)' : 'var(--amber)' }}>
                     {analysis.score}
                   </div>
-                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Factory Readiness Score</div>
+                  <div>
+                    <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Factory Readiness Score</div>
+                    {analysis.cappedBy && (
+                      <div style={{ fontSize: 11.5, color: 'var(--red)', marginTop: 2 }}>Capped by {analysis.cappedBy}</div>
+                    )}
+                  </div>
                 </div>
+
+                {analysis.verdict && (
+                  <div style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55, marginBottom: 16, paddingLeft: 12, borderLeft: '2px solid var(--border-2)' }}>
+                    {analysis.verdict}
+                  </div>
+                )}
+
+                {Array.isArray(analysis.dimensions) && analysis.dimensions.length > 0 && (
+                  <div style={{ marginBottom: 18 }}>
+                    <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>What makes up the score</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      {analysis.dimensions.map(d => (
+                        <div key={d.key} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ width: 132, fontSize: 12.5, color: 'var(--ink-2)', flexShrink: 0 }}>{d.label}</div>
+                          <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--bg-3)', overflow: 'hidden', minWidth: 60 }}>
+                            <div style={{ width: `${d.score ?? 0}%`, height: '100%', background: (d.score ?? 0) >= 76 ? 'var(--green)' : (d.score ?? 0) >= 56 ? 'var(--amber)' : 'var(--red)' }} />
+                          </div>
+                          <div style={{ width: 34, textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12.5, flexShrink: 0 }}>{d.score ?? '—'}</div>
+                          <div style={{ width: 34, textAlign: 'right', fontSize: 11, color: 'var(--ink-4)', flexShrink: 0 }}>×{d.weight}%</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
+                      {analysis.dimensions.filter(d => d.reason).map(d => (
+                        <div key={d.key} style={{ fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                          <strong style={{ color: 'var(--ink-2)' }}>{d.label}:</strong> {d.reason}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {(analysis.notes || []).map((note, i) => (
                     <div key={i} className={`alert alert-${note.severity}`} style={{ display: 'flex', gap: 10, padding: '12px 14px', borderRadius: 8, fontSize: 13 }}>
