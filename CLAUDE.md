@@ -57,6 +57,15 @@ you the wrong thing.
 | `social_accounts` | Column `GRANT` (054) | `access_token`/`refresh_token` are not client-**readable**; INSERT/UPDATE are revoked entirely, so the backend owns every write except the client's DELETE (Disconnect) |
 | `store_connections` | Column `GRANT` (059) | Same shape as 054 for storefronts: `access_token`/`api_key`/`refresh_token` unreadable, all client writes revoked except DELETE |
 
+**A RESTRICTIVE policy with no PERMISSIVE one denies the command outright.**
+`design_versions` had a restrictive UPDATE and no permissive UPDATE, so *every*
+update was blocked — and because an RLS-blocked UPDATE returns
+`{data: null, error: null}` rather than an error, autosave reported success while
+saving nothing for months. 060 adds the missing policy. **Any write that matters
+must check the returned rows, not just `error`** — `.select('id')` and treat an
+empty result as failure. Fifteen other tables share the same shape and are left
+alone deliberately: the app never updates them.
+
 Plus **111 restrictive policies** across 37 tables (050) that require
 `has_brand_write_access()` — owner/admin/editor — for INSERT/UPDATE/DELETE.
 Restrictive policies AND with the permissive ones and can only subtract, so if a

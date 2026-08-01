@@ -194,17 +194,31 @@ export default function DesignDetail() {
   // Write a version row, retrying without psd_url if that column doesn't exist
   // yet (migration 030 not applied). A save must never fail outright just
   // because layers can't be stored — it simply saves flattened instead.
+  // .select('id') on every write is what makes a blocked one detectable. An
+  // UPDATE that RLS refuses is NOT an error — it matches zero rows and returns
+  // `{data: null, error: null}`, which is indistinguishable from success unless
+  // you look at what came back. design_versions had no permissive UPDATE policy
+  // at all until 060, so every autosave for months reported success while saving
+  // nothing, and the "fall back to an insert" guard below could never fire
+  // because it was testing for an error that RLS does not produce.
   const writeVersionRow = async (payload, existingId) => {
     const attempt = (body) => (existingId
-      ? supabase.from('design_versions').update(body).eq('id', existingId)
-      : supabase.from('design_versions').insert([{ product_id: id, ...body }]));
-    let { error } = await attempt(payload);
+      ? supabase.from('design_versions').update(body).eq('id', existingId).select('id')
+      : supabase.from('design_versions').insert([{ product_id: id, ...body }]).select('id'));
+
+    let { data, error } = await attempt(payload);
     if (error && /psd_url/i.test(error.message || '')) {
       console.warn('design_versions.psd_url is missing — apply migration 030 to preserve layers. Saving flattened for now.');
       const { psd_url, ...withoutPsd } = payload;
-      ({ error } = await attempt(withoutPsd));
+      ({ data, error } = await attempt(withoutPsd));
     }
-    return error;
+    if (error) return error;
+    if (!data || data.length === 0) {
+      // Wrote nothing, silently. Surfaced as a real error so the caller's
+      // fallback runs and the autosave failure counter actually counts.
+      return new Error('That save was blocked before it reached the database — no row was written.');
+    }
+    return null;
   };
 
   // Capture the canvas ONCE as both a flattened preview and a layered PSD, and
