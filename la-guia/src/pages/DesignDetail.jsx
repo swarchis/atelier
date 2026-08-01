@@ -244,7 +244,26 @@ export default function DesignDetail() {
     }
     if (psdUrl) setFrontPsdUrl(psdUrl);
 
-    const row = { image_url: publicUrl, psd_url: psdUrl };
+    // psd_url is written ONLY when a capture actually produced one.
+    //
+    // This used to be `psd_url: psdUrl` unconditionally, so a failed or
+    // oversized capture wrote null over the rolling Autosave row's reference to
+    // the last good layered file. The design silently lost its layer stack and
+    // reopened flattened — trading the user's layers for nothing at all.
+    //
+    // Omitting the column leaves the previous value in place on an UPDATE, and
+    // leaves it null on an INSERT, which is correct in both cases: a version that
+    // never had a layered file genuinely has none, and one that did keeps it.
+    //
+    // The kept PSD can be a capture or two behind the flat preview beside it.
+    // That is the intended trade: slightly stale layers beat no layers, and the
+    // restore path prefers the PSD precisely because layers are the valuable part.
+    const row = { image_url: publicUrl };
+    if (psdUrl) {
+      row.psd_url = psdUrl;
+    } else {
+      console.warn('No PSD captured for this save — keeping the previous layered file rather than clearing it.');
+    }
     if (label === 'Autosave') {
       // The files this autosave is about to replace. Read BEFORE the write, used
       // only after it succeeds — this rolling row is the single biggest source of

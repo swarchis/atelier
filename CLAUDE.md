@@ -226,6 +226,13 @@ whichever row has a layered file" reopens the stale legacy rolling row —
 that's the "designs reopen as their first version" bug. Display surfaces
 (previews, history, activity) must **skip** `PSD_VERSION_LABEL` rows.
 
+**Never write `psd_url: null` on a save.** The PSD capture is best-effort — an
+oversized or failed capture leaves it null, and writing that over the rolling
+Autosave row wipes the reference to the last good layered file, so the design
+reopens flattened. Omit the column instead: that preserves the previous value on
+an UPDATE and stays null on an INSERT. A slightly stale PSD beside a current
+preview is the intended trade, because layers are the part worth keeping.
+
 **Photopea content loads once per iframe document** (`lastLoadedRef`), so a
 fullscreen or split-view toggle can't open a second document over the user's
 work. Captures carry a token each because autosave chains PNG + PSD captures.
