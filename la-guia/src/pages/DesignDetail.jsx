@@ -16,7 +16,7 @@ import InspirationTab from '../components/design-studio/InspirationTab.jsx';
 import VariantsTab from '../components/design-studio/VariantsTab.jsx';
 import HistoryTab from '../components/design-studio/HistoryTab.jsx';
 import SkuVariantsTab from '../components/design-studio/SkuVariantsTab.jsx';
-import { blobToBase64, uploadDesignImage, uploadDesignPsd, deleteMockupFiles, PSD_VERSION_LABEL } from '../lib/designImages.js';
+import { blobToBase64, uploadDesignImage, uploadDesignPsd, deleteMockupFiles, PSD_VERSION_LABEL, appendViewToPsd } from '../lib/designImages.js';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import Splitter from '../components/Splitter.jsx';
 import AssetsTab from '../components/design-studio/AssetsTab.jsx';
@@ -447,24 +447,33 @@ export default function DesignDetail() {
 
   // Called by the AI Studio "Generate a View" tool instead of overwriting the
   // canvas: the new angle becomes its own tab and the front view survives.
+  // A generated back or side view goes ON the current canvas, to the right of
+  // what is already there, rather than replacing it or opening in its own tab.
+  // A designer judging proportion needs both at once, and the design review
+  // captures the canvas — so views in separate tabs meant it could only ever
+  // see one, and "the back view is entirely missing" was its most common
+  // finding on designs that had a back.
+  //
+  // Done by rebuilding the PSD rather than scripting Photopea, because
+  // Photopea cannot do this: checked against a live instance, resizeCanvas and
+  // Layer.translate are both undefined, so there is no scripted way to widen
+  // the canvas or move a layer into the new space.
   const addViewFromResult = async (dataUrl, label) => {
     const key = `view-${Date.now()}`;
+    const name = (label || '').trim() ? label.trim().slice(0, 24) : 'New view';
     setSwitchingView(key);
     setCaptureError(null);
     try {
-      try { await saveActiveView(); } catch (err) { console.error('Could not save the current view:', err); }
-      const blob = await fetch(dataUrl).then(r => r.blob());
-      const imageUrl = await uploadDesignImage(blob, id, 'view');
-      const entry = { key, label: (label || '').trim() ? label.trim().slice(0, 24) : 'New view', imageUrl };
-      const next = [...views, entry];
-      setViews(next);
-      await persistStudioField('views', next);
-      await openIntoCanvas({ imageUrl });
-      setActiveView(key);
       setTab('canvas');
-      toast.success(`Added "${entry.label}" as a new view.`);
+      const psdBlob = await photopeaRef.current.capturePsd();
+      const combined = await appendViewToPsd(psdBlob, dataUrl, name);
+      await photopeaRef.current.openFile(combined);
+      // Give Photopea a moment to finish opening before capturing it back.
+      await new Promise(r => setTimeout(r, 1500));
+      await persistCanvas(`Added ${name}`);
+      toast.success(`"${name}" placed beside your existing view.`);
     } catch (err) {
-      setCaptureError('Could not add that view: ' + err.message + ' (if this mentions a missing "views" column, apply migration 029.)');
+      setCaptureError(`Could not place that view on the canvas: ${err.message}`);
     } finally {
       setSwitchingView(null);
     }

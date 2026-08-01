@@ -158,3 +158,54 @@ export async function uploadDesignImage(blob, productId, prefix = 'ai') {
   const { data: { publicUrl } } = supabase.storage.from('mockups').getPublicUrl(fileName);
   return publicUrl;
 }
+
+// Widens a layered PSD and drops an extra image into the new space on the
+// right, returning a new PSD blob.
+//
+// This exists because Photopea's scripting surface cannot do it. Verified
+// against a live instance: `app.activeDocument.resizeCanvas` and
+// `Layer.translate` are both undefined, and `app.activeDocument.width` is a
+// plain number rather than a UnitValue — so there is no scripted way to make
+// the canvas bigger or move a layer into the new area. What DOES work is
+// `app.open(url, "", true)`, which adds a layer, and posting raw bytes to
+// replace the document. So the document is rebuilt here and posted back.
+//
+// Layers are preserved, which is the whole point: flattening to composite the
+// two views would throw away the layer stack the canvas works so hard to keep.
+export async function appendViewToPsd(psdBlob, viewImageUrl, layerName = 'New view') {
+  const { readPsd, writePsd } = await import('ag-psd');
+  const psd = readPsd(await psdBlob.arrayBuffer(), { useImageData: false });
+  if (!psd || !psd.width || !psd.height) throw new Error('Could not read the current canvas.');
+
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.crossOrigin = 'anonymous';
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error('Could not load the generated view.'));
+    i.src = viewImageUrl;
+  });
+
+  // Match the incoming view to the document height so the two sit level.
+  const scale = psd.height / img.height;
+  const drawW = Math.max(1, Math.round(img.width * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = drawW;
+  canvas.height = psd.height;
+  canvas.getContext('2d').drawImage(img, 0, 0, drawW, psd.height);
+
+  const next = {
+    ...psd,
+    width: psd.width + drawW,
+    height: psd.height,
+    children: [
+      ...(psd.children || []),
+      { name: layerName, canvas, left: psd.width, top: 0, right: psd.width + drawW, bottom: psd.height },
+    ],
+  };
+  // The stored composite describes the OLD, narrower canvas; leaving it in
+  // place makes the file disagree with itself. Photopea regenerates it.
+  delete next.canvas;
+  delete next.imageData;
+
+  return new Blob([writePsd(next)], { type: 'image/vnd.adobe.photoshop' });
+}
