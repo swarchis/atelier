@@ -552,11 +552,12 @@ async function callOpenAIImage(prompt, { size = '1024x1024', background = 'auto'
 // against, scores collapse toward a confident-sounding middle-high number. Fixed
 // dimensions with stated anchors, aggregated in code, remove that freedom.
 const DESIGN_REVIEW_DIMENSIONS = [
-  { key: 'manufacturability', label: 'Manufacturability', weight: 25 },
-  { key: 'specCompleteness', label: 'Spec completeness', weight: 25 },
-  { key: 'costRealism', label: 'Cost realism', weight: 20 },
+  { key: 'resolution', label: 'Design resolution', weight: 25 },
+  { key: 'legibility', label: 'Detail legibility', weight: 20 },
+  { key: 'viewCoverage', label: 'View coverage', weight: 12 },
+  { key: 'buildability', label: 'Buildability at your scale', weight: 15 },
   { key: 'brandFit', label: 'Brand fit', weight: 12 },
-  { key: 'marketFit', label: 'Market fit', weight: 10 },
+  { key: 'marketFit', label: 'Market fit', weight: 8 },
   { key: 'differentiation', label: 'Differentiation', weight: 8 },
 ];
 
@@ -605,9 +606,15 @@ app.post('/api/analyze-design', metered('analyze-design'), async (req, res) => {
       Array.isArray(design?.palette) && design.palette.length && `Palette: ${design.palette.map(p => (typeof p === 'string' ? p : p.hex || p.name)).filter(Boolean).join(', ')}`,
       Array.isArray(design?.moodboard) && design.moodboard.length && `Moodboard has ${design.moodboard.length} reference(s) pinned.`,
       designNotes && `The founder's own notes on this design: ${String(designNotes).slice(0, 1200)}`,
-    ].filter(Boolean).join('\n') || 'No written context was supplied with this design — judge specCompleteness accordingly.';
+    ].filter(Boolean).join('\n') || 'No written context was supplied with this design — judge design resolution accordingly.';
 
-    const prompt = `You are a senior technical designer and sourcing lead reviewing a garment design BEFORE it becomes a tech pack. You have seen thousands of these. Your job is to find what will go wrong at the factory, not to encourage the designer.
+    const prompt = `You are a senior designer reviewing a garment design to answer ONE question: is this design resolved enough to sit down and write a tech pack from?
+
+SCOPE. This is the most important instruction here, and getting it wrong makes the review useless.
+You are reviewing the DESIGN stage, not the tech pack. The tech pack is the NEXT step, and it is where fabric weight/GSM, yarn counts, rib width, stitch types, seam allowances, points of measure, grading, care labels and trim part numbers get filled in. Those are not missing from this design, they are simply not this stage's job.
+NEVER fault the design for lacking a technical specification. Do not ask for GSM, composition, thread counts, stitch density, tolerances, POM tables, or supplier references.
+DO fault it for design DECISIONS that have not been made, because an unmade decision is what actually blocks the tech pack: an ambiguous hem, a pocket whose placement and size were never settled, a closure that is implied but never drawn, a back that has never been designed at all, linework where a seam and a topstitch look identical, proportions that read differently between views.
+The test for every finding: could a competent tech designer answer this themselves from the drawing, or would they have to come back and ask you what you meant? Only the second kind counts.
 
 WHAT YOU KNOW ABOUT THIS PIECE
 ${ctx}
@@ -615,38 +622,40 @@ ${ctx}
 CURRENT MARKET CONTEXT
 ${trendBlock}
 
-HOW TO SCORE — read this carefully, it is the point of the exercise.
-Score each dimension 0-100 against these anchors. Be harsh. Most designs at this stage are NOT close to production-ready, and saying so is the useful thing:
-- 0-30: fundamentally not makeable / nothing specified / would be rejected by a factory outright.
-- 31-55: the normal state of a real first draft. Recognisable garment, but a factory would come back with a list of questions before quoting.
-- 56-75: solid work with specific identified gaps that must close before sampling.
-- 76-89: genuinely production-ready; a competent factory could quote it with minor clarification.
-- 90-100: exceptional and complete. Reserve this. If you are scoring above 89 you should be able to name why it beats a professional studio's output.
-A competent-looking sketch with no specified fabric, trims or construction belongs in the 31-55 band no matter how attractive it is. Do not award points for the drawing being pretty.
+HOW TO SCORE
+Score each dimension 0-100 against these anchors. Be harsh - most designs are less resolved than their author thinks, and saying so now is cheaper than discovering it during sampling:
+- 0-30: an idea, not a design. Too little decided to begin speccing.
+- 31-55: the normal state of a real first pass. The garment reads, but a tech designer would have to come back with questions about what was meant.
+- 56-75: mostly resolved, with specific decisions still open.
+- 76-89: ready to spec. A tech designer could work straight through it and only ask about edge cases.
+- 90-100: exceptional, every view drawn and every detail unambiguous. Reserve it.
+Do not award points for the drawing being attractive. A beautiful rendering with an undesigned back belongs in the 31-55 band.
 
 THE DIMENSIONS
-- manufacturability: can a factory actually cut and sew this as drawn? Seam construction, closures, curves, panel count, whether the details are physically achievable in the implied fabric.
-- specCompleteness: is there enough here to QUOTE from? Fabric weight/composition, trims, stitch types, placements, colorway. Missing information scores low even if the design is good.
-- costRealism: does the implied construction fit the stated budget and the brand's quality tier? Panel count, trims and finishes drive cost. If no budget is stated, judge against the brand's stated budget philosophy.
-- brandFit: does this match the brand profile below — quality tier, risk tolerance, sustainability stance? A safe design for an aggressive brand is a miss, and so is the reverse.
+- resolution: how much of the garment has actually been decided? Silhouette, proportion, hem, neckline, closures, pockets, panelling. Areas left vague to figure out later score low.
+- legibility: can someone else read your construction intent off the drawing? Are seams, topstitching, folds, darts and edges distinguishable from one another, or does the linework leave it ambiguous?
+- viewCoverage: are the views needed to spec this present - front at minimum, back where it differs, and a detail view for anything unusual? An undesigned back is the single most common blocker at this stage.
+- buildability: judged as a DESIGN decision, not a manufacturing spec. Does the complexity - panel count, curve difficulty, unusual closures, hardware - fit the brand's stated budget and a first production run? Ambition that will not survive a factory quote belongs here.
+- brandFit: does this match the brand profile below - quality tier, risk tolerance, sustainability stance? A safe design for an aggressive brand is a miss, and so is the reverse.
 - marketFit: against the market context above only.
 - differentiation: could a customer tell this apart from a blank with a logo on it? Be blunt.
 
 FINDINGS
-Return 4 to 8 findings. Every one must point at something SPECIFIC you can see or that is specifically absent — "the collar has no specified interfacing or stitch type" not "consider adding more detail". Order them worst-first. At least two must be things that would actually block or delay a factory. If the design is genuinely good, say what is good in at most one finding and spend the rest on what still has to close.
-severity: "red" = blocks production or quoting, "amber" = will cause a factory question or a cost surprise, "blue" = worth deciding before sampling, "green" = genuinely resolved, use sparingly.
+Return 4 to 8 findings, worst first. Every one must name a DESIGN DECISION that is unmade or unclear, and must be something a tech designer could not resolve alone - "the back is never shown, so the yoke and hem treatment are undecided" not "specify the fabric weight". If the design is genuinely resolved, say so in at most one finding and spend the rest on what is still open.
+severity: "red" = blocks writing the tech pack at all, "amber" = a tech designer would have to stop and ask you, "blue" = worth settling now but workable, "green" = genuinely resolved, use sparingly.
 
 Return a JSON object with exactly this structure and nothing else:
 {
   "dimensions": {
-    "manufacturability": { "score": <0-100>, "reason": "one sentence naming the specific thing driving this score" },
-    "specCompleteness": { "score": <0-100>, "reason": "..." },
-    "costRealism": { "score": <0-100>, "reason": "..." },
+    "resolution": { "score": <0-100>, "reason": "one sentence naming the specific thing driving this score" },
+    "legibility": { "score": <0-100>, "reason": "..." },
+    "viewCoverage": { "score": <0-100>, "reason": "..." },
+    "buildability": { "score": <0-100>, "reason": "..." },
     "brandFit": { "score": <0-100>, "reason": "..." },
     "marketFit": { "score": <0-100>, "reason": "..." },
     "differentiation": { "score": <0-100>, "reason": "..." }
   },
-  "verdict": "one blunt sentence a founder can act on",
+  "verdict": "one blunt sentence on what to resolve before opening the tech pack",
   "notes": [ { "severity": "red" | "amber" | "blue" | "green", "text": "specific finding" } ]
 }`;
 
@@ -672,8 +681,8 @@ Return a JSON object with exactly this structure and nothing else:
     const reds = notes.filter(n => n && n.severity === 'red').length;
     const ambers = notes.filter(n => n && n.severity === 'amber').length;
     let cappedBy = null;
-    if (reds > 0 && score > 55) { score = 55; cappedBy = `${reds} blocking issue${reds === 1 ? '' : 's'}`; }
-    else if (ambers >= 3 && score > 75) { score = 75; cappedBy = `${ambers} unresolved factory questions`; }
+    if (reds > 0 && score > 55) { score = 55; cappedBy = `${reds} unmade decision${reds === 1 ? '' : 's'}`; }
+    else if (ambers >= 3 && score > 75) { score = 75; cappedBy = `${ambers} open questions for a tech designer`; }
 
     console.log(`✅ Design review complete — ${score}/100${cappedBy ? ` (capped by ${cappedBy})` : ''}, ${notes.length} findings`);
     res.json({ ok: true, analysis: { score, dimensions, verdict: raw.verdict || null, cappedBy, notes } });

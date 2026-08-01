@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, LayoutGroup } from 'framer-motion';
@@ -227,11 +227,17 @@ export default function Home() {
   const totalBudget = products.reduce((s, p) => s + p.budget, 0);
   const gateFlags = products.filter(p => p.readiness < 80 && p.stage === 'sourcing').length;
 
-  // The hero card always features the most recent design — products load
-  // newest-first, so take the head regardless of stage. (Concept-stage
-  // products used to be skipped, so a freshly created design never surfaced
-  // here until generating a tech pack advanced its stage to 'techpack'.)
-  const featured = products[0];
+  // The hero features what you LAST WORKED ON, which is not the same as the
+  // newest thing you made. products arrives ordered by created_at, so taking
+  // the head meant reopening an old design and saving an edit left it
+  // invisible here. updated_at is maintained by a trigger on every product
+  // write and touched explicitly on canvas save; falling back to created_at
+  // keeps rows from before migration 060 in a sensible order.
+  const featured = useMemo(() => {
+    if (!products.length) return undefined;
+    const stamp = p => new Date(p.updated_at || p.created_at || 0).getTime();
+    return products.reduce((best, p) => (stamp(p) > stamp(best) ? p : best), products[0]);
+  }, [products]);
   const featuredStageIdx = featured ? STAGES.findIndex(s => s.key === featured.stage) : -1;
   const nextStage = featuredStageIdx >= 0 && featuredStageIdx < STAGES.length - 1 ? STAGES[featuredStageIdx + 1] : null;
 

@@ -49,7 +49,7 @@ const TABS = [
 export default function DesignDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { products, designs, getUploadedFile, deleteProduct, updateProduct, activeBrand, categories, duplicateProduct, setProductStatus, updateDesignStatus, updateDesignFabricTags, saveBrandMockup } = useProducts();
+  const { products, designs, getUploadedFile, deleteProduct, updateProduct, touchProduct, activeBrand, categories, duplicateProduct, setProductStatus, updateDesignStatus, updateDesignFabricTags, saveBrandMockup } = useProducts();
   const { canAfford, openTopup, logUsage } = useAIUsage();
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -264,6 +264,11 @@ export default function DesignDetail() {
     }
 
     setHistoryRefreshKey(k => k + 1);
+    // Marks the product as worked on. A canvas save writes to designs and
+    // design_versions, so the products trigger never sees it, and without this
+    // the piece you just edited would not surface on Home as what you were
+    // last doing. Fire-and-forget: it must never fail a save.
+    touchProduct(id).catch(() => {});
     return { imageUrl: publicUrl, psdUrl };
   };
 

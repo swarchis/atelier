@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { currency, swatchGradient } from '../lib/format.js';
+import { currency } from '../lib/format.js';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { PhotoPanel } from '../components/decor.jsx';
+import CollectionCover from '../components/CollectionCover.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal.jsx';
 import { ContextMenuTarget } from '../components/ContextMenu.jsx';
@@ -121,7 +122,7 @@ export default function Collections() {
               return (
                 <ContextMenuTarget key={c.id} items={[{ label: 'Delete', icon: 'ph-trash', danger: true, onClick: () => setDeleteTarget(c) }]}>
                   <div className="card-raised card-hover" style={{ cursor: 'pointer' }} onClick={() => navigate(`/collections/${c.id}`)}>
-                    <PhotoPanel variant="weave" tone={COVER_TONES[ci % COVER_TONES.length]} aspect="16 / 6" label={c.name} icon="ph-stack" style={{ borderRadius: 'var(--r) var(--r) 0 0', border: 'none', borderBottom: '1px solid var(--border)' }} />
+                    <CollectionCover members={members} name={c.name} tone={COVER_TONES[ci % COVER_TONES.length]} style={{ borderRadius: 'var(--r) var(--r) 0 0', borderBottom: '1px solid var(--border)' }} />
                     <div className="corner-fold" style={{ '--fold-color': 'var(--c-organization)' }} />
                     <button
                       className="piece-move-btn"
@@ -146,12 +147,10 @@ export default function Collections() {
                           <div style={{ fontSize: 13, fontWeight: 500, marginTop: 4 }}>{c.launch_window || '—'}</div>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: -6 }}>
-                        {members.slice(0, 6).map((p, i) => (
-                          <div key={p.id} className="swatch" style={{ width: 30, height: 30, marginLeft: i === 0 ? 0 : -8, border: '2px solid var(--bg-1)', background: swatchGradient(p.id) }} />
-                        ))}
-                        {members.length > 6 && <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--ink-3)', alignSelf: 'center' }}>+{members.length - 6}</span>}
-                        {members.length === 0 && <span style={{ fontSize: 12, color: 'var(--ink-4)', fontStyle: 'italic' }}>No products added yet</span>}
+                      <div style={{ fontSize: 12, color: members.length ? 'var(--ink-3)' : 'var(--ink-4)', fontStyle: members.length ? 'normal' : 'italic' }}>
+                        {members.length
+                          ? `${members.length} piece${members.length === 1 ? '' : 's'} · ${members.map(m => m.name).join(', ')}`
+                          : 'No products added yet'}
                       </div>
                     </div>
                   </div>

@@ -216,6 +216,16 @@ export function ProductsProvider({ children }) {
     });
   };
 
+  // Canvas saves write to designs/design_versions, not products, so the
+  // products trigger never fires for them. This marks the product as worked on
+  // without pretending to change anything about it.
+  const touchProduct = async (id) => {
+    const stamp = new Date().toISOString();
+    const { error } = await supabase.from('products').update({ updated_at: stamp }).eq('id', id);
+    if (error) { console.error('Could not mark product as worked on:', error.message); return; }
+    setProducts(prev => prev.map(p => (p.id === id ? { ...p, updated_at: stamp } : p)));
+  };
+
   const updateProduct = async (id, updates) => {
     const { data, error } = await supabase.from('products').update(updates).eq('id', id).select().single();
     if (error) throw error;
@@ -619,7 +629,7 @@ export function ProductsProvider({ children }) {
 
   return (
     <ProductsContext.Provider value={{
-      products, collections, moveProduct, updateProduct, deleteProduct, toggleFavorite, designs, createDesign, createCollection,
+      products, collections, moveProduct, updateProduct, touchProduct, deleteProduct, toggleFavorite, designs, createDesign, createCollection,
       deleteCollection, updateBrand, refreshActiveBrand, getUploadedFile, activeBrand, brands, switchBrand, createBrand,
       brandMockups, saveBrandMockup, deleteBrandMockup,
       categories, createCategory, deleteCategory,
