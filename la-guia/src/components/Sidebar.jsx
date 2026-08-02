@@ -200,9 +200,15 @@ export default function Sidebar() {
           <i className="ph ph-compass nav-item-icon" style={{ color: 'var(--sb-ink-3)' }} />
           <span>Take a tour</span>
         </div>
-        <div className="nav-item" data-tour="keyboard-shortcuts-btn" onClick={openHelp} style={{ color: 'var(--sb-ink-2)', cursor: 'pointer', margin: '1px 0 8px' }}>
+        <div className="nav-item" data-tour="keyboard-shortcuts-btn" onClick={openHelp} style={{ color: 'var(--sb-ink-2)', cursor: 'pointer', margin: '1px 0' }}>
           <i className="ph ph-keyboard nav-item-icon" style={{ color: 'var(--sb-ink-3)' }} />
           <span>Keyboard shortcuts</span>
+        </div>
+        {/* Sits with the tour and the shortcuts because all three answer the
+            same question: how does this work. */}
+        <div className="nav-item" onClick={() => navigate('/guide')} style={{ color: 'var(--sb-ink-2)', cursor: 'pointer', margin: '1px 0 8px' }}>
+          <i className="ph ph-book-open nav-item-icon" style={{ color: 'var(--sb-ink-3)' }} />
+          <span>Feature reference</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 6px' }}>
           <div style={{

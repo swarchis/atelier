@@ -1,3 +1,4 @@
+import Guide from './pages/Guide.jsx';
 import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
@@ -41,6 +42,7 @@ export default function App() {
               <Route path="/update-password" element={<UpdatePassword />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route path="/terms" element={<TermsOfService />} />
+              <Route path="/guide" element={<Guide />} />
               <Route path="/*" element={
                 <ProtectedRoute>
                   <AuthenticatedApp />

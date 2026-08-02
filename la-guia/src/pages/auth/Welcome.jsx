@@ -694,6 +694,7 @@ export default function Welcome() {
           <nav className="ds-nav">
             <a href="#index" className="ds-nav-link">Index</a>
             <a href="#pricing" className="ds-nav-link">Pricing</a>
+            <a href="/guide" className="ds-nav-link" onClick={e => { e.preventDefault(); navigate('/guide'); }}>Reference</a>
             <button className="ds-btn ds-btn-ghost" onClick={() => navigate('/login')}>Log in</button>
             <button className="ds-btn ds-btn-solid" onClick={() => navigate('/signup')}>Start free</button>
           </nav>
@@ -807,6 +808,7 @@ export default function Welcome() {
           <div className="ds-foot-meta">Production OS for independent clothing brands</div>
           <div className="ds-foot-links">
             <a href="#" onClick={e => { e.preventDefault(); navigate('/login'); }}>Log in</a>
+            <a href="#" onClick={e => { e.preventDefault(); navigate('/guide'); }}>Feature reference</a>
             <a href="#" onClick={e => { e.preventDefault(); navigate('/terms'); }}>Terms</a>
             <a href="#" onClick={e => { e.preventDefault(); navigate('/privacy'); }}>Privacy</a>
           </div>
