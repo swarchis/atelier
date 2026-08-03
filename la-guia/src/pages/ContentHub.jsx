@@ -907,10 +907,10 @@ function EmailCampaignsTab({ activeBrand }) {
   };
 
   const removeContact = async (id) => {
-    const error = await checkWrote(
+    const removeError = await checkWrote(
       supabase.from('email_contacts').delete().eq('id', id).select('id')
     );
-    if (error) { setError(error.message); return; }
+    if (removeError) { setError(removeError.message); return; }
     setContacts(prev => prev.filter(c => c.id !== id));
   };
 

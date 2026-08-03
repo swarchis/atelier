@@ -219,7 +219,12 @@ export function ProductsProvider({ children }) {
       // action, so leaving it in place after a refused write shows the user a
       // stage the database does not have — and a viewer's every drag is refused.
       console.error('Failed to move product', error);
-      setProducts(prev => prev.map(p => (p.id === id ? { ...p, stage: previousStage } : p)));
+      // Only revert when we actually knew the old stage. If the product wasn't
+      // in `products` (archived, or a stale list), writing `undefined` back
+      // would be worse than leaving the optimistic value alone.
+      if (previousStage !== undefined) {
+        setProducts(prev => prev.map(p => (p.id === id ? { ...p, stage: previousStage } : p)));
+      }
       return;
     }
     supabase.from('product_stage_history').insert([{ product_id: id, stage }]).then(({ error: histErr }) => {

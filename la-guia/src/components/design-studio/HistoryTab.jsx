@@ -41,10 +41,10 @@ function VersionHistory({ productId, onApplyToCanvas, onRestoreVersion }) {
     // existed — a permanently broken thumbnail instead of a harmless no-op.
     // CLAUDE.md's rule is the same everywhere: storage goes only once the row
     // that references it is actually gone.
-    const error = await checkWrote(
+    const deleteError = await checkWrote(
       supabase.from('design_versions').delete().eq('id', versionId).select('id')
     );
-    if (error) { console.error('Could not delete that version:', error.message); return; }
+    if (deleteError) { setError('Could not delete that version: ' + deleteError.message); return; }
     // The layered file goes with the preview, or the (much larger) PSD orphans.
     const files = [v?.image_url, v?.psd_url].filter(Boolean).map(u => u.split('/').pop());
     if (files.length) await supabase.storage.from('mockups').remove(files);
@@ -127,10 +127,10 @@ function Comments({ productId }) {
   };
 
   const remove = async (id) => {
-    const error = await checkWrote(
+    const removeError = await checkWrote(
       supabase.from('design_comments').delete().eq('id', id).select('id')
     );
-    if (error) { setError('Could not delete that comment: ' + error.message); return; }
+    if (removeError) { setError('Could not delete that comment: ' + removeError.message); return; }
     setComments(prev => prev.filter(c => c.id !== id));
   };
 
