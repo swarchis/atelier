@@ -17,6 +17,13 @@ import { PhotoPanel } from '../components/decor.jsx';
 import CalendarGrid from '../components/CalendarGrid.jsx';
 import { toast } from '../lib/toast.js';
 
+// TikTok's photo-post limits, confirmed against its API reference rather than
+// guessed: 90 UTF-16 runes for the title, 4000 for the description. The counters
+// are advisory — the server truncates as a backstop, because a rejected publish
+// after the fact is a worse way to learn you were over.
+const TITLE_MAX = 90;
+const CAPTION_MAX = 4000;
+
 const TABS = [
   { key: 'hub', label: 'Grid Preview', icon: 'ph-squares-four' },
   { key: 'calendar', label: 'Drop Calendar', icon: 'ph-calendar' },
@@ -81,7 +88,7 @@ export default function ContentHub() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const { influencers, loading: influencersLoading, createInfluencer, updateInfluencer, deleteInfluencer, dealsByInfluencer, loadDeals, addDeal } = useInfluencers();
 
-  const [form, setForm] = useState({ platform: 'instagram', scheduledFor: '', caption: '', productId: '' });
+  const [form, setForm] = useState({ platform: 'instagram', scheduledFor: '', title: '', caption: '', productId: '', allowComments: true });
   const [saving, setSaving] = useState(false);
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -181,13 +188,19 @@ export default function ContentHub() {
       await schedulePost({
         platform: form.platform,
         scheduled_for: new Date(form.scheduledFor).toISOString(),
+        title: form.title.trim() || null,   // null means "fall back to the caption"
         caption: form.caption,
         product_id: form.productId || null,
         status: 'Scheduled',
-        image_url: finalImageUrl
+        image_url: finalImageUrl,
+        // Only TikTok reads these today, so only TikTok writes them — an options
+        // blob full of settings the target platform ignores reads as configuration
+        // that does something when it does not. privacy_level is deliberately
+        // absent: the server clamps visibility and must not take it from here.
+        options: form.platform === 'tiktok' ? { disable_comment: !form.allowComments } : {},
       });
 
-      setForm({ platform: 'instagram', scheduledFor: '', caption: '', productId: '' });
+      setForm({ platform: 'instagram', scheduledFor: '', title: '', caption: '', productId: '', allowComments: true });
       setFile(null); setPreviewUrl(null);
       setShowComposer(false);
       toast.success('Post scheduled.');
@@ -358,10 +371,52 @@ export default function ContentHub() {
                           </select>
                         </div>
                       </div>
+                      {/* Title and caption are separate because TikTok treats them
+                          separately: the title is the headline on the post, the
+                          description is its body. They used to be one field, so the
+                          title was silently the caption's first 90 characters. */}
                       <div className="form-group" style={{ marginBottom: 16 }}>
-                        <label className="form-label">Caption / Description *</label>
+                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>Title</span>
+                          <span style={{ fontWeight: 400, color: form.title.length > TITLE_MAX ? 'var(--red)' : 'var(--ink-3)' }}>
+                            {form.title.length}/{TITLE_MAX}
+                          </span>
+                        </label>
+                        <input
+                          className="form-input"
+                          placeholder="Optional — falls back to the start of your caption"
+                          value={form.title}
+                          onChange={e => setForm({ ...form, title: e.target.value })}
+                        />
+                        <div className="form-hint">Shown as the post's headline. TikTok caps this at {TITLE_MAX} characters.</div>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 16 }}>
+                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>Caption / Description *</span>
+                          <span style={{ fontWeight: 400, color: form.caption.length > CAPTION_MAX ? 'var(--red)' : 'var(--ink-3)' }}>
+                            {form.caption.length}/{CAPTION_MAX}
+                          </span>
+                        </label>
                         <textarea className="form-textarea" placeholder="Write a caption..." value={form.caption} onChange={e => setForm({...form, caption: e.target.value})} required />
                       </div>
+                      {/* TikTok-only, and only the setting that is honest today.
+                          Privacy and the commercial-content disclosure are not here
+                          on purpose: while the app is unaudited every post must be
+                          SELF_ONLY, so a privacy dropdown would offer choices that
+                          always fail. Those arrive with the audit-compliant post
+                          page, when they can tell the truth. */}
+                      {form.platform === 'tiktok' && (
+                        <div className="form-group" style={{ marginBottom: 16 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                            <input
+                              type="checkbox"
+                              checked={form.allowComments}
+                              onChange={e => setForm({ ...form, allowComments: e.target.checked })}
+                            />
+                            Allow comments on this TikTok post
+                          </label>
+                        </div>
+                      )}
                       <button className="btn btn-primary" type="submit" disabled={saving || !form.platform || !form.scheduledFor || !form.caption.trim()}>
                         <i className="ph ph-calendar-plus" /> {saving ? 'Saving...' : 'Add to Calendar'}
                       </button>

@@ -2947,10 +2947,22 @@ app.get('/api/social/callback/:platform', async (req, res) => {
 const TIKTOK_PUBLISH_POLL_ATTEMPTS = 10;
 const TIKTOK_PUBLISH_POLL_DELAY_MS = 3000;
 
-async function publishTikTokPhoto(accessToken, { caption, mediaUrl }) {
+async function publishTikTokPhoto(accessToken, { title: postTitle, caption, mediaUrl, options }) {
+  // PRIVACY IS RESOLVED HERE, NEVER FROM THE REQUEST. The composer does not send
+  // a privacy level and this must not start reading one: a client asking for
+  // PUBLIC_TO_EVERYONE while the app is unaudited gets the call rejected, and
+  // letting the browser choose a post's visibility is the same shape of mistake
+  // as the client-writable plan_tier this codebase already closed.
   const privacyLevel = process.env.TIKTOK_PRIVACY_LEVEL || 'SELF_ONLY';
-  const title = (caption || '').slice(0, 90);       // 90 UTF-16 runes, per spec
+
+  // A null title means the post predates separate titles, or the user left it
+  // blank — both fall back to the old behaviour so existing rows publish exactly
+  // as they did before. Truncation is a backstop for the UI counter; TikTok
+  // rejects the whole call if either field is over.
+  const title = ((postTitle || '').trim() || caption || '').slice(0, 90);
   const description = (caption || '').slice(0, 4000);
+
+  const opts = options || {};
 
   const init = await tiktokDisplayCall(
     'https://open.tiktokapis.com/v2/post/publish/content/init/',
@@ -2958,7 +2970,16 @@ async function publishTikTokPhoto(accessToken, { caption, mediaUrl }) {
     {
       method: 'POST',
       body: JSON.stringify({
-        post_info: { title, description, privacy_level: privacyLevel },
+        post_info: {
+          title,
+          description,
+          privacy_level: privacyLevel,
+          // Only send what the composer actually collected. The brand-content
+          // toggles are part of the audit-compliant post page, not this one, and
+          // declaring a commercial relationship the user never confirmed would be
+          // a false statement made on their behalf.
+          disable_comment: opts.disable_comment === true,
+        },
         source_info: {
           source: 'PULL_FROM_URL',
           photo_images: [mediaUrl],
@@ -3016,7 +3037,9 @@ async function publishPost(platform, brandId, post) {
     if (!process.env.API_URL) throw new Error('API_URL is not set, so TikTok has no verified address to pull the image from.');
     // TikTok pulls from our verified domain, not from Supabase directly.
     const mediaUrl = `${process.env.API_URL.replace(/\/+$/, '')}/api/media/content/${post.id}`;
-    return publishTikTokPhoto(accessToken, { caption: post.caption, mediaUrl });
+    return publishTikTokPhoto(accessToken, {
+      title: post.title, caption: post.caption, mediaUrl, options: post.options,
+    });
   }
 
   if (platform === 'pinterest') {
