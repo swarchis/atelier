@@ -23,8 +23,14 @@ const TABS = [
   { key: 'launch', label: 'Launch Planner', icon: 'ph-rocket-launch' },
   { key: 'influencers', label: 'Influencers', icon: 'ph-users-three' },
   { key: 'email', label: 'Email Campaigns', icon: 'ph-envelope-simple' },
-  { key: 'analytics', label: 'Analytics', icon: 'ph-chart-bar', comingSoon: true },
-  { key: 'accounts', label: 'Accounts', icon: 'ph-link', comingSoon: true },
+  // No `comingSoon` on these two since TikTok went live (2026-08-03): the
+  // Accounts tab genuinely connects TikTok, and Analytics shows real numbers
+  // once that account syncs. A blanket "Soon" on a tab that works would be the
+  // same lie in the other direction. The in-panel notices name the three
+  // platforms still waiting, and the Analytics one hides itself as soon as any
+  // synced post exists.
+  { key: 'analytics', label: 'Analytics', icon: 'ph-chart-bar' },
+  { key: 'accounts', label: 'Accounts', icon: 'ph-link' },
 ];
 
 const INFLUENCER_STATUSES = ['Prospect', 'Contacted', 'Negotiating', 'Active', 'Completed'];
@@ -517,8 +523,8 @@ export default function ContentHub() {
         {tab === 'analytics' && (
           <>
             {syncedPosts.length === 0 && (
-              <ComingSoonNotice what="Post analytics" platforms="Instagram, TikTok, YouTube and Pinterest">
-                Reach and engagement numbers come from the platforms. TikTok's read permissions are built and waiting on review; the other three need their own. Your planning is saved either way.
+              <ComingSoonNotice what="Post analytics" platforms="Instagram, YouTube and Pinterest">
+                Reach and engagement numbers come from the platforms. TikTok's read permissions are approved — connect the account and hit Sync to pull real numbers in. The other three still need their own approvals. Your planning is saved either way.
               </ComingSoonNotice>
             )}
             <CampaignAnalyticsTab posts={posts} syncedPosts={syncedPosts} accounts={accounts} activeBrand={activeBrand} />
@@ -528,7 +534,17 @@ export default function ContentHub() {
         {tab === 'accounts' && (
           <div className="card">
             <div style={{ padding: '14px 16px 0' }}>
-              <ComingSoonNotice what="Connecting social accounts" platforms="Instagram, TikTok, YouTube and Pinterest" />
+              {/* TikTok came off this list when its production app went live on
+                  2026-08-03 — Login Kit and the Content Posting API are approved,
+                  so connecting is real.
+                  `what` names the three platforms rather than "Connecting social
+                  accounts", because the banner renders as "{what} isn't live yet"
+                  and sits above ALL four rows. The generic wording told the user
+                  that connecting does not work, directly above a TikTok row where
+                  it now does. */}
+              <ComingSoonNotice what="Connecting Instagram, YouTube and Pinterest" platforms="Instagram, YouTube and Pinterest">
+                TikTok is approved — connect it below. The other three are still waiting on their own developer approvals.
+              </ComingSoonNotice>
             </div>
             {mergedAccounts.map(a => (
               <div className="list-row" key={a.platform}>
