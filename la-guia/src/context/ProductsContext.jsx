@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { useAuth } from './AuthContext.jsx';
 import { uploadDesignImage, uploadDesignPsd, isRenderableImageUrl, isPsdFile, psdToPngBlob, PSD_VERSION_LABEL } from '../lib/designImages.js';
 import { setActiveBrandId, setBrandProfile } from '../lib/aiApi.js';
+import { checkWrote } from '../lib/writeGuard.js';
 
 const ProductsContext = createContext(null);
 
@@ -208,9 +209,19 @@ export function ProductsProvider({ children }) {
   };
 
   const moveProduct = async (id, stage) => {
+    const previousStage = products.find(p => p.id === id)?.stage;
     setProducts(prev => prev.map(p => (p.id === id ? { ...p, stage } : p)));
-    const { error } = await supabase.from('products').update({ stage }).eq('id', id);
-    if (error) console.error('Failed to move product', error);
+    const error = await checkWrote(
+      supabase.from('products').update({ stage }).eq('id', id).select('id')
+    );
+    if (error) {
+      // Put the card back. The optimistic move above is the whole UI for this
+      // action, so leaving it in place after a refused write shows the user a
+      // stage the database does not have — and a viewer's every drag is refused.
+      console.error('Failed to move product', error);
+      setProducts(prev => prev.map(p => (p.id === id ? { ...p, stage: previousStage } : p)));
+      return;
+    }
     supabase.from('product_stage_history').insert([{ product_id: id, stage }]).then(({ error: histErr }) => {
       if (histErr) console.error('Failed to log stage history', histErr);
     });
@@ -221,7 +232,9 @@ export function ProductsProvider({ children }) {
   // without pretending to change anything about it.
   const touchProduct = async (id) => {
     const stamp = new Date().toISOString();
-    const { error } = await supabase.from('products').update({ updated_at: stamp }).eq('id', id);
+    const error = await checkWrote(
+      supabase.from('products').update({ updated_at: stamp }).eq('id', id).select('id')
+    );
     if (error) { console.error('Could not mark product as worked on:', error.message); return; }
     setProducts(prev => prev.map(p => (p.id === id ? { ...p, updated_at: stamp } : p)));
   };
@@ -240,13 +253,17 @@ export function ProductsProvider({ children }) {
   };
 
   const updateDesignStatus = async (productId, status) => {
-    const { error } = await supabase.from('designs').update({ status }).eq('product_id', productId);
+    const error = await checkWrote(
+      supabase.from('designs').update({ status }).eq('product_id', productId).select('id')
+    );
     if (error) throw error;
     setDesigns(prev => (prev[productId] ? { ...prev, [productId]: { ...prev[productId], status } } : prev));
   };
 
   const updateDesignFabricTags = async (productId, fabricTags) => {
-    const { error } = await supabase.from('designs').update({ fabric_tags: fabricTags }).eq('product_id', productId);
+    const error = await checkWrote(
+      supabase.from('designs').update({ fabric_tags: fabricTags }).eq('product_id', productId).select('id')
+    );
     if (error) throw error;
     setDesigns(prev => (prev[productId] ? { ...prev, [productId]: { ...prev[productId], fabricTags } } : prev));
   };
@@ -277,7 +294,9 @@ export function ProductsProvider({ children }) {
     }
 
     // 2. Delete the DB row
-    const { error } = await supabase.from('products').delete().eq('id', id);
+    const error = await checkWrote(
+      supabase.from('products').delete().eq('id', id).select('id')
+    );
     if (error) throw error;
     setProducts(prev => prev.filter(p => p.id !== id));
     setDesigns(prev => {
@@ -301,7 +320,9 @@ export function ProductsProvider({ children }) {
   };
 
   const deleteCategory = async (id) => {
-    const { error } = await supabase.from('categories').delete().eq('id', id);
+    const error = await checkWrote(
+      supabase.from('categories').delete().eq('id', id).select('id')
+    );
     if (error) throw error;
     setCategories(prev => prev.filter(c => c.id !== id));
   };
@@ -401,7 +422,9 @@ export function ProductsProvider({ children }) {
   };
 
   const deleteCollection = async (id) => {
-    const { error } = await supabase.from('collections').delete().eq('id', id);
+    const error = await checkWrote(
+      supabase.from('collections').delete().eq('id', id).select('id')
+    );
     if (error) throw error;
     setCollections(prev => prev.filter(c => c.id !== id));
     setProducts(prev => prev.map(p => (p.collection_id === id ? { ...p, collection_id: null } : p)));
@@ -580,7 +603,9 @@ export function ProductsProvider({ children }) {
 
   const deleteBrandMockup = async (id) => {
     const mockup = brandMockups.find(m => m.id === id);
-    const { error } = await supabase.from('brand_mockups').delete().eq('id', id);
+    const error = await checkWrote(
+      supabase.from('brand_mockups').delete().eq('id', id).select('id')
+    );
     if (error) throw error;
     setBrandMockups(prev => prev.filter(m => m.id !== id));
     // Best-effort storage cleanup; a leftover file is better than a failed delete.
@@ -622,7 +647,9 @@ export function ProductsProvider({ children }) {
   const deleteProductAsset = async (asset) => {
     const fileName = asset.file_url.split('/').pop();
     await supabase.storage.from('mockups').remove([fileName]);
-    const { error } = await supabase.from('product_assets').delete().eq('id', asset.id);
+    const error = await checkWrote(
+      supabase.from('product_assets').delete().eq('id', asset.id).select('id')
+    );
     if (error) throw error;
     setProductAssets(prev => ({ ...prev, [asset.product_id]: prev[asset.product_id].filter(a => a.id !== asset.id) }));
   };

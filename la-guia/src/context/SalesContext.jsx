@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import { useProducts } from './ProductsContext.jsx';
 
 const SalesContext = createContext(null);
@@ -86,7 +87,15 @@ export function SalesProvider({ children }) {
   const disconnectStore = async (platform = 'shopify') => {
     const conn = connections.find(c => c.platform === platform);
     if (!conn || !activeBrand) return;
-    await supabase.from('store_connections').delete().eq('id', conn.id);
+    // Same reasoning as social_accounts: DELETE is the client's only write here
+    // (059), so a silently-refused one leaves the stored credentials in place
+    // while the UI says the store is disconnected.
+    const error = await checkWrote(
+      supabase.from('store_connections').delete().eq('id', conn.id).select('id')
+    );
+    if (error) throw error;
+    // The revenue history is secondary — a refusal here leaves stale rows, which
+    // is untidy but not a false security claim, so it stays best-effort.
     await supabase.from('sales_data').delete().eq('brand_id', activeBrand.id).eq('platform', platform);
     await loadSalesData();
   };

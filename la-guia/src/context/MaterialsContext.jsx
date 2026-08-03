@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import { useProducts } from './ProductsContext.jsx';
 
 const MaterialsContext = createContext(null);
@@ -77,7 +78,9 @@ export function MaterialsProvider({ children }) {
   };
 
   const deleteMaterial = async (id) => {
-    const { error } = await supabase.from('materials').delete().eq('id', id);
+    const error = await checkWrote(
+      supabase.from('materials').delete().eq('id', id).select('id')
+    );
     if (error) throw error;
     setMaterials(prev => prev.filter(m => m.id !== id));
   };
@@ -132,7 +135,9 @@ export function MaterialsProvider({ children }) {
   };
 
   const unlinkVendor = async (linkId, materialId) => {
-    const { error } = await supabase.from('material_vendors').delete().eq('id', linkId);
+    const error = await checkWrote(
+      supabase.from('material_vendors').delete().eq('id', linkId).select('id')
+    );
     if (error) throw error;
     setVendorLinksByMaterial(prev => ({ ...prev, [materialId]: (prev[materialId] || []).filter(l => l.id !== linkId) }));
   };

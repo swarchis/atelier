@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useProducts } from './ProductsContext.jsx';
+import { checkWrote } from '../lib/writeGuard.js';
 
 const ProductionContext = createContext(null);
 
@@ -73,9 +74,17 @@ export function ProductionProvider({ children }) {
 
   const updateOrderStage = async (id, stage) => {
     const updates = { stage, delivered_at: stage === 'Delivered' ? new Date().toISOString() : null };
-    let { error } = await supabase.from('production_orders').update(updates).eq('id', id);
+    // The retry without delivered_at preserves the graceful-degradation pattern
+    // for a database missing that column. checkWrote also routes a REFUSED write
+    // here — the retry then fails the same way and throws, which is correct: a
+    // visible error beats a stage change the database never accepted.
+    let error = await checkWrote(
+      supabase.from('production_orders').update(updates).eq('id', id).select('id')
+    );
     if (error) {
-      ({ error } = await supabase.from('production_orders').update({ stage }).eq('id', id));
+      error = await checkWrote(
+        supabase.from('production_orders').update({ stage }).eq('id', id).select('id')
+      );
       if (error) throw error;
       setOrders(prev => prev.map(o => (o.id === id ? { ...o, stage } : o)));
       return;
@@ -182,8 +191,18 @@ export function ProductionProvider({ children }) {
       .map(r => ({ size: String(r.size || '').trim(), colorway: String(r.colorway || '').trim(), units: Number(r.units) || 0, received_units: r.received_units === '' || r.received_units == null ? null : Number(r.received_units) }))
       .filter(r => r.size);
 
-    const { error: delError } = await supabase.from('production_order_sizes').delete().eq('production_order_id', orderId);
+    // A refused delete here is worse than a failed save: the insert below would
+    // still run and the order would end up with both the old and new size rows,
+    // double-counting its units. Guarded even though this table carries no
+    // restrictive policy, because the failure mode is silent duplication.
+    const { data: existingSizes } = await supabase
+      .from('production_order_sizes').select('id').eq('production_order_id', orderId);
+    const { data: deletedSizes, error: delError } = await supabase
+      .from('production_order_sizes').delete().eq('production_order_id', orderId).select('id');
     if (delError) throw delError;
+    if ((existingSizes || []).length > 0 && (deletedSizes || []).length === 0) {
+      throw new Error('Could not replace the size breakdown — the old rows were not removed.');
+    }
 
     if (clean.length === 0) {
       setSizesByOrder(prev => ({ ...prev, [orderId]: [] }));
@@ -202,7 +221,9 @@ export function ProductionProvider({ children }) {
   };
 
   const deletePayment = async (paymentId, orderId) => {
-    const { error } = await supabase.from('production_payments').delete().eq('id', paymentId);
+    const error = await checkWrote(
+      supabase.from('production_payments').delete().eq('id', paymentId).select('id')
+    );
     if (error) throw error;
     setPaymentsByOrder(prev => ({ ...prev, [orderId]: (prev[orderId] || []).filter(p => p.id !== paymentId) }));
     setAllPayments(prev => prev.filter(p => p.id !== paymentId));

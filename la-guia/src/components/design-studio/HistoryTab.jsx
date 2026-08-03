@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase.js';
+import { checkWrote } from '../../lib/writeGuard.js';
 import { PSD_VERSION_LABEL } from '../../lib/designImages.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useUserPreferences } from '../../context/UserPreferencesContext.jsx';
@@ -35,12 +36,19 @@ function VersionHistory({ productId, onApplyToCanvas, onRestoreVersion }) {
 
   const remove = async (versionId) => {
     const v = versions.find(ver => ver.id === versionId);
-    // Remove the layered file alongside the preview, or deleting a version
-    // would leave its (much larger) PSD orphaned in storage.
+    // Row FIRST, files second. This used to remove the files up front, so a
+    // delete the database refused left the row pointing at bytes that no longer
+    // existed — a permanently broken thumbnail instead of a harmless no-op.
+    // CLAUDE.md's rule is the same everywhere: storage goes only once the row
+    // that references it is actually gone.
+    const error = await checkWrote(
+      supabase.from('design_versions').delete().eq('id', versionId).select('id')
+    );
+    if (error) { console.error('Could not delete that version:', error.message); return; }
+    // The layered file goes with the preview, or the (much larger) PSD orphans.
     const files = [v?.image_url, v?.psd_url].filter(Boolean).map(u => u.split('/').pop());
     if (files.length) await supabase.storage.from('mockups').remove(files);
-    const { error } = await supabase.from('design_versions').delete().eq('id', versionId);
-    if (!error) setVersions(prev => prev.filter(ver => ver.id !== versionId));
+    setVersions(prev => prev.filter(ver => ver.id !== versionId));
   };
 
   return (
@@ -119,8 +127,11 @@ function Comments({ productId }) {
   };
 
   const remove = async (id) => {
-    const { error } = await supabase.from('design_comments').delete().eq('id', id);
-    if (!error) setComments(prev => prev.filter(c => c.id !== id));
+    const error = await checkWrote(
+      supabase.from('design_comments').delete().eq('id', id).select('id')
+    );
+    if (error) { setError('Could not delete that comment: ' + error.message); return; }
+    setComments(prev => prev.filter(c => c.id !== id));
   };
 
   return (

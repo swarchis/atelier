@@ -9,6 +9,7 @@ import { useAIUsage } from '../context/AIUsageContext.jsx';
 import { useMaterials } from '../context/MaterialsContext.jsx';
 import { aiPost } from '../lib/aiApi.js';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import FlowStepper from '../components/FlowStepper.jsx';
 import TabBar from '../components/TabBar.jsx';
 import EmptyState from '../components/EmptyState.jsx';
@@ -323,7 +324,9 @@ export default function TechPackDetail() {
   const totalBomCost = bom.reduce((sum, item) => sum + ((parseFloat(item.qtyPerUnit) || 0) * (parseFloat(item.unitCost) || 0)), 0);
 
   const handleDeleteTechPack = async () => {
-    const { error } = await supabase.from('tech_packs').delete().eq('product_id', id);
+    const error = await checkWrote(
+      supabase.from('tech_packs').delete().eq('product_id', id).select('id')
+    );
     if (error) throw error;
     setHasTechPack(false);
     setImageUrl(null);
@@ -342,11 +345,17 @@ export default function TechPackDetail() {
   });
 
   const setApproval = async (status, comment) => {
-    const { error } = await supabase.from('tech_packs').update({
-      approval_status: status, approved_by: status === 'approved' ? user?.id : null,
-      approved_at: status === 'approved' ? new Date().toISOString() : null,
-      approval_comment: comment ?? approvalComment,
-    }).eq('product_id', id);
+    // The 052 trigger raises for non-admins, so that path already fails loudly.
+    // This guard covers the other one: an editor blocked by the restrictive
+    // UPDATE policy matches zero rows and gets no error at all, which would
+    // show an approval that the tech pack does not actually carry.
+    const error = await checkWrote(
+      supabase.from('tech_packs').update({
+        approval_status: status, approved_by: status === 'approved' ? user?.id : null,
+        approved_at: status === 'approved' ? new Date().toISOString() : null,
+        approval_comment: comment ?? approvalComment,
+      }).eq('product_id', id).select('id')
+    );
     if (error) { toast.error('Could not update approval status: ' + error.message); return; }
     setApprovalStatus(status);
     setApprovedAt(status === 'approved' ? new Date().toISOString() : null);

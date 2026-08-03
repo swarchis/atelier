@@ -6,6 +6,7 @@ import { useProduction } from '../context/ProductionContext.jsx';
 import { useInfluencers } from '../context/InfluencersContext.jsx';
 import { currency } from '../lib/format.js';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import { consumeOAuthHandoff } from '../lib/oauthHandoff.js';
 import { apiPost } from '../lib/aiApi.js';
 import TabBar from '../components/TabBar.jsx';
@@ -906,7 +907,10 @@ function EmailCampaignsTab({ activeBrand }) {
   };
 
   const removeContact = async (id) => {
-    await supabase.from('email_contacts').delete().eq('id', id);
+    const error = await checkWrote(
+      supabase.from('email_contacts').delete().eq('id', id).select('id')
+    );
+    if (error) { setError(error.message); return; }
     setContacts(prev => prev.filter(c => c.id !== id));
   };
 

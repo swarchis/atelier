@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase.js';
+import { checkWrote } from '../../lib/writeGuard.js';
 import { generateSku } from '../../lib/sku.js';
 
 function ChipList({ label, placeholder, items, onAdd, onRemove }) {
@@ -117,7 +118,9 @@ export default function SkuVariantsTab({ productId, product, brandName, onUpdate
   };
 
   const removeVariant = async id => {
-    const { error: deleteError } = await supabase.from('product_variants').delete().eq('id', id);
+    const deleteError = await checkWrote(
+      supabase.from('product_variants').delete().eq('id', id).select('id')
+    );
     if (deleteError) { setError(deleteError.message); return; }
     setVariants(prev => prev.filter(v => v.id !== id));
   };

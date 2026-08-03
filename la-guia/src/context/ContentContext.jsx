@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import { apiPost } from '../lib/aiApi.js';
 import { useProducts } from './ProductsContext.jsx';
 
@@ -73,7 +74,15 @@ export function ContentProvider({ children }) {
   // platform read actually populates it.
   const disconnectAccount = async (id) => {
     const account = accounts.find(a => a.id === id);
-    await supabase.from('social_accounts').delete().eq('id', id);
+    // DELETE is the client's only write on this table (054 revoked the rest), so
+    // it is the entire disconnect. A refused delete returns `{data: [], error:
+    // null}` — if that is not checked, the row and its access_token survive while
+    // the UI reports the account disconnected. Telling someone their token is
+    // revoked when it is not is the worst failure this file can produce.
+    const error = await checkWrote(
+      supabase.from('social_accounts').delete().eq('id', id).select('id')
+    );
+    if (error) throw error;
     // Drop the cached metrics too. Leaving them means Analytics keeps reporting
     // on an account the user just disconnected, which reads as us still being
     // connected to it.
@@ -146,7 +155,9 @@ export function ContentProvider({ children }) {
   };
 
   const updatePostStatus = async (id, status) => {
-    const { error } = await supabase.from('content_posts').update({ status }).eq('id', id);
+    const error = await checkWrote(
+      supabase.from('content_posts').update({ status }).eq('id', id).select('id')
+    );
     if (error) throw error;
     setPosts(prev => prev.map(p => p.id === id ? { ...p, status } : p));
   };

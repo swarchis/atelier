@@ -5,6 +5,7 @@ import { useProducts } from '../context/ProductsContext.jsx';
 import { useAIUsage } from '../context/AIUsageContext.jsx';
 import CreditCost from '../components/CreditCost.jsx';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import GarmentSilhouette, { CustomSilhouette, VectorSilhouette } from '../components/GarmentSilhouette.jsx';
 import PhotopeaEditor from '../components/PhotopeaEditor.jsx';
 import FlowStepper from '../components/FlowStepper.jsx';
@@ -400,7 +401,13 @@ export default function DesignDetail() {
   }, [id]);
 
   const persistStudioField = async (field, value) => {
-    await supabase.from('designs').update({ [field]: value }).eq('product_id', id);
+    // useAutosave prints "Saved" whenever this resolves, so it MUST throw on a
+    // refused write — otherwise the indicator is reporting that the promise
+    // settled, not that anything reached the database.
+    const error = await checkWrote(
+      supabase.from('designs').update({ [field]: value }).eq('product_id', id).select('id')
+    );
+    if (error) throw error;
   };
 
   const captureCanvasBase64 = async () => {
@@ -653,7 +660,13 @@ export default function DesignDetail() {
       if (data.ok) {
         await logUsage('analyze-design');
         setLocalAnalysis(data.analysis);
-        await supabase.from('designs').update({ analysis: data.analysis }).eq('product_id', id);
+        // Credits are already spent by this point, so a refused write means the
+        // user paid for a review they will not get back. Logged rather than
+        // thrown, so the result still shows on screen.
+        const analysisError = await checkWrote(
+          supabase.from('designs').update({ analysis: data.analysis }).eq('product_id', id).select('id')
+        );
+        if (analysisError) console.error('Design review was not saved:', analysisError.message);
 
         setTimeout(() => {
           document.getElementById('analysis-result-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -726,7 +739,12 @@ export default function DesignDetail() {
         updated_at: new Date().toISOString()
       }, { onConflict: 'product_id' });
 
-      await supabase.from('products').update({ stage: 'techpack' }).eq('id', id);
+      const stageError = await checkWrote(
+        supabase.from('products').update({ stage: 'techpack' }).eq('id', id).select('id')
+      );
+      // Non-fatal: the tech pack itself was written above, so still navigate
+      // there rather than stranding the user on a page whose work succeeded.
+      if (stageError) console.error('Could not move the product to Tech Pack:', stageError.message);
       navigate(`/tech-packs/${id}`);
 
     } catch (err) {

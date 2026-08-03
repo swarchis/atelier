@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import { useProducts } from './ProductsContext.jsx';
 
 const InfluencersContext = createContext(null);
@@ -41,7 +42,9 @@ export function InfluencersProvider({ children }) {
   };
 
   const deleteInfluencer = async (id) => {
-    const { error } = await supabase.from('influencers').delete().eq('id', id);
+    const error = await checkWrote(
+      supabase.from('influencers').delete().eq('id', id).select('id')
+    );
     if (error) throw error;
     setInfluencers(prev => prev.filter(i => i.id !== id));
   };

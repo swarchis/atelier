@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import { useProducts } from './ProductsContext.jsx';
 
 const PinnedContext = createContext(null);
@@ -29,7 +30,12 @@ export function PinnedProvider({ children }) {
   const togglePin = async (entityType, entityId) => {
     const existing = pinned.find(p => p.entity_type === entityType && p.entity_id === entityId);
     if (existing) {
-      await supabase.from('pinned_items').delete().eq('id', existing.id);
+      const error = await checkWrote(
+        supabase.from('pinned_items').delete().eq('id', existing.id).select('id')
+      );
+      // Leave the pin in place rather than clearing it locally — an unpin the
+      // database refused would otherwise reappear on the next load.
+      if (error) throw error;
       setPinned(prev => prev.filter(p => p.id !== existing.id));
     } else {
       const { data, error } = await supabase.from('pinned_items').insert([{ brand_id: activeBrand.id, entity_type: entityType, entity_id: entityId }]).select().single();

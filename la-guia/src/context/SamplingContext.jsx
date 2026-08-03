@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { checkWrote } from '../lib/writeGuard.js';
 import { useAuth } from './AuthContext.jsx';
 import { useProducts } from './ProductsContext.jsx';
 import { uploadDesignImage } from '../lib/designImages.js';
@@ -100,7 +101,9 @@ export function SamplingProvider({ children }) {
     }
 
     // 2. Delete the DB row
-    const { error } = await supabase.from('samples').delete().eq('id', id);
+    const error = await checkWrote(
+      supabase.from('samples').delete().eq('id', id).select('id')
+    );
     if (error) throw error;
     
     setSamples(prev => prev.filter(s => s.id !== id));
@@ -136,7 +139,9 @@ export function SamplingProvider({ children }) {
       await supabase.storage.from('mockups').remove([fileName]);
     }
 
-    const { error } = await supabase.from('sample_images').delete().eq('id', imageId);
+    const error = await checkWrote(
+      supabase.from('sample_images').delete().eq('id', imageId).select('id')
+    );
     if (error) throw error;
     
     setImages(prev => prev.filter(i => i.id !== imageId));
