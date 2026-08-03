@@ -10,3 +10,9 @@ dist/
 
 # OS / editor cruft
 .DS_Store
+
+# Local agent test harness — tooling for driving the app in a browser, not part
+# of the product. Kept out of the repo deliberately.
+.claude/skills/
+api/scripts/test-session.js
+api/scripts/test-brand.js
