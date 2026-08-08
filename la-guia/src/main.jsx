@@ -3,6 +3,11 @@ import ReactDOM from 'react-dom/client';
 import * as Sentry from '@sentry/react';
 import App from './App.jsx';
 import './index.css';
+import { installStaleDeployHandler } from './lib/staleDeploy.js';
+
+// Before React mounts: a chunk from a previous build failing to load is a
+// deploy problem with a known fix, not a crash to show the user.
+installStaleDeployHandler();
 
 // Production error monitoring. Errors only (no tracing/replay) to keep the
 // bundle + runtime cost minimal; enabled solely when a DSN is configured

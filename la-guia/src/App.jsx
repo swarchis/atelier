@@ -1,8 +1,9 @@
-import Guide from './pages/Guide.jsx';
 import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { UserPreferencesProvider } from './context/UserPreferencesContext.jsx';
+import AppErrorBoundary from './components/AppErrorBoundary.jsx';
+import Guide from './pages/Guide.jsx';
 
 // Welcome is the landing page — keep it eager so it paints on first load.
 // (Its one heavy dependency, the WebGL IntroGate/three.js, is lazy-loaded
@@ -30,10 +31,11 @@ function ProtectedRoute({ children }) {
 
 export default function App() {
   return (
+    <AppErrorBoundary>
     <AuthProvider>
       <UserPreferencesProvider>
         <BrowserRouter>
-          <Suspense fallback={null}>
+          <Suspense fallback={<div style={{ minHeight: '100vh' }} />}>
             <Routes>
               <Route path="/welcome" element={<Welcome />} />
               <Route path="/signup" element={<SignUp />} />
@@ -53,5 +55,6 @@ export default function App() {
         </BrowserRouter>
       </UserPreferencesProvider>
     </AuthProvider>
+    </AppErrorBoundary>
   );
 }

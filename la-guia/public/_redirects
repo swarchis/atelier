@@ -1,0 +1,4 @@
+# SPA fallback: every path that is not a real file serves index.html so deep
+# links like /guide and /vendors/<id> resolve to the app rather than a 404.
+# Cloudflare Pages serves existing files first, so this never shadows /assets.
+/*    /index.html   200
