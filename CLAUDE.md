@@ -270,13 +270,22 @@ an out-of-date DB should lose a feature, not the whole save.
   every save silently flattens.
 - Resend's free tier only delivers to your own verified address; team invites
   to anyone else fail silently while the `brand_members` row is still created.
-- **All AI is OpenAI now.** `OPENAI_API_KEY` powers both `gpt-image-1` (images)
-  and `gpt-5.4-mini` (all text, via `callAIText`). Gemini was removed on
-  2026-08-07 so spend lands on one dashboard; `GEMINI_API_KEY` is dead and can
-  be deleted from Railway. Text goes through `/v1/chat/completions` in JSON
-  mode, which **refuses the request unless the word "json" appears in the
-  messages** — that is why `callAIText` sends a system line saying so rather
-  than trusting each prompt's wording.
+- **All AI is OpenAI, with Gemini as a failsafe.** `OPENAI_API_KEY` powers both
+  `gpt-image-1` (images) and `gpt-5.4-mini` (all text). Text goes through
+  `/v1/chat/completions` in JSON mode, which **refuses the request unless the
+  word "json" appears in the messages** — that is why `callAIText` sends a
+  system line saying so rather than trusting each prompt's wording.
+- **`callAIText` fails over to `gemini-flash-lite-latest`, and what it does
+  *not* fail over on is the load-bearing part.** An `AIRefusal` (safety block,
+  or a response cut off by `length`) is a decision, not an outage — retrying it
+  on Gemini produces the same refusal, or an answer OpenAI deliberately
+  declined to give. Everything else fails over, including 401/400: an auth or
+  payload bug is ours, but the customer in front of it should still get a
+  working tech pack. **Every fallback logs `⚠️  OpenAI text failed … falling
+  back`** — grep for it. A failsafe nobody notices firing quietly becomes the
+  primary, and the credit prices in `aiCredits.js` are set against OpenAI's
+  cost, not flash-lite's. `GEMINI_API_KEY` is therefore still live; deleting it
+  removes the failsafe, it does not clean anything up.
 - Auth changes require deploying backend **and** frontend together — an old
   bundle won't send the JWT to a newly protected endpoint.
 - `LAUNCH.md` is the live operational checklist. Check it before claiming

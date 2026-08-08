@@ -64,6 +64,7 @@ export default function PrivacyPolicy() {
             <p>{APP_NAME} uses third-party AI providers to power its generation and analysis features. When you use one of those features, the data needed for that specific request is transmitted to the relevant provider over an encrypted connection:</p>
             <UL>
               <li><strong>OpenAI</strong> processes every AI feature — image generation and editing, and text generation and analysis (tech packs, vendor extraction, cost estimates, design critique, and the AI assistant) — receiving the text of your request, a summary of the relevant brand data, and any design image you attach.</li>
+              <li><strong>Google (Gemini)</strong> is a standby provider for text features only. If OpenAI is unavailable, that same request is sent to Google instead so the feature keeps working; in normal operation Google receives nothing. It is never used for image generation.</li>
               <li><strong>Tavily</strong> processes web searches for vendor discovery, receiving your search terms only — never your designs.</li>
             </UL>
             <p style={{ marginTop: 8 }}><strong>We do not train any AI model on your content</strong>, and we do not permit our providers to use content submitted through our accounts to train their models. We send only what the requested feature needs. We cannot, however, control a provider's own retention practices beyond our agreements with them — providers typically retain request data briefly for abuse monitoring.</p>

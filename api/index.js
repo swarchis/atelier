@@ -407,8 +407,15 @@ function safeShopifyShop(shop) {
 // materially stronger than flash-lite on the structured-JSON work every one of
 // these endpoints depends on. Verified against the live key before switching —
 // JSON mode, image input, and `temperature` all accepted.
+//
+// Gemini is kept as a FAILSAFE, not as a second provider: consolidating onto
+// one vendor also consolidates the outage. `callAIText` tries OpenAI and falls
+// back to flash-lite only when OpenAI is unreachable — see the routing rules
+// on that function, which are the part worth reading.
 const OPENAI_TEXT_MODEL = 'gpt-5.4-mini';
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
+const GEMINI_MODEL = 'gemini-flash-lite-latest';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 function cleanAIJSON(text) {
   return text.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -454,16 +461,16 @@ function verifyShopifySignature(rawBody, hmacHeader) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// A refusal is a DECISION, not an outage. Rerouting one to the other provider
+// just launders it into a second refusal (or, worse, an answer the first model
+// declined to give), and burns the user's latency to do it. These are thrown
+// as AIRefusal so the fallback can tell them apart from "OpenAI is down".
+class AIRefusal extends Error {}
+
 // Every caller expects a parsed JSON object back, so this always requests JSON
 // mode. Signature is unchanged from the Gemini version it replaced — one
 // optional base64 PNG — so the 14 call sites did not have to change shape.
-async function callAIText(prompt, imageBase64 = null) {
-  // Same fail-fast as callOpenAIImage: without this the request 401s and the
-  // user is told "Incorrect API key provided" for a key that isn't set at all.
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not set — add it in the API environment (platform.openai.com/api-keys).');
-  }
-
+async function callOpenAIText(prompt, imageBase64 = null) {
   // OpenAI's json_object mode REFUSES the request unless the word "json"
   // appears in the messages. Most prompts here already say so, but not all —
   // a system line makes it unconditional instead of depending on each prompt's
@@ -507,15 +514,110 @@ async function callAIText(prompt, imageBase64 = null) {
   // OpenAI's equivalent of Gemini's SAFETY finishReason. Kept as its own
   // message because "empty response" sends people debugging the wrong thing.
   if (choice.finish_reason === 'content_filter') {
-    throw new Error('AI Safety Block. Try removing any text from the drawing.');
+    throw new AIRefusal('AI Safety Block. Try removing any text from the drawing.');
   }
   // `length` means the model was cut off mid-object, so the JSON.parse below
   // would throw a syntax error that reads like a bug rather than a truncation.
+  // Not a refusal in the safety sense, but equally deterministic: the same
+  // oversized request would overflow flash-lite's smaller window too.
   if (choice.finish_reason === 'length') {
-    throw new Error('The AI response was too long to finish. Try a shorter request.');
+    throw new AIRefusal('The AI response was too long to finish. Try a shorter request.');
   }
 
   return JSON.parse(cleanAIJSON(choice.message.content));
+}
+
+// The failsafe. Kept deliberately close to the original implementation this
+// repo ran for months, so falling back is a return to known-good behaviour
+// rather than an untested code path discovered during an outage.
+async function callGeminiText(prompt, imageBase64 = null) {
+  const parts = [{ text: prompt }];
+  if (imageBase64) {
+    parts.push({ inline_data: { mime_type: 'image/png', data: imageBase64 } });
+  }
+
+  const payload = {
+    contents: [{ parts }],
+    generationConfig: { response_mime_type: 'application/json' },
+    safetySettings: [
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+    ],
+  };
+
+  const response = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    console.error('❌ Gemini API Error:', JSON.stringify(data, null, 2));
+    throw new Error(data.error?.message || `Gemini Error: ${response.status}`);
+  }
+
+  if (!data.candidates || data.candidates.length === 0 || !data.candidates[0].content) {
+    if (data.candidates?.[0]?.finishReason === 'SAFETY') {
+      throw new AIRefusal('AI Safety Block. Try removing any text from the drawing.');
+    }
+    throw new Error('Empty response from AI.');
+  }
+
+  return JSON.parse(cleanAIJSON(data.candidates[0].content.parts[0].text));
+}
+
+// Single entry point for all 14 text call sites. OpenAI is the provider;
+// Gemini is a failsafe for the case consolidating onto one vendor created —
+// an OpenAI outage taking every text feature down with it.
+//
+// ── WHAT DOES *NOT* FAIL OVER ───────────────────────────────────────────────
+// · AIRefusal — a safety block or an over-long request. Deterministic, so a
+//   retry elsewhere produces the same refusal a few seconds later, or gets an
+//   answer the first model deliberately declined to give.
+// · A missing GEMINI_API_KEY. Nothing to fail over to, so the original OpenAI
+//   error is what the user should see.
+//
+// Everything else does: 5xx, 429, a network error, a timeout, malformed JSON,
+// and — deliberately — 401/400. An auth or payload error is our bug, but the
+// customer in front of it should still get a working tech pack while we fix
+// it. `console.error` on every fallback is what stops that being silent; a
+// failsafe nobody notices firing is a failsafe that quietly becomes the
+// primary, and the credit model is priced on OpenAI, not on flash-lite.
+async function callAIText(prompt, imageBase64 = null) {
+  // Same fail-fast as callOpenAIImage: without this the request 401s and the
+  // user is told "Incorrect API key provided" for a key that isn't set at all.
+  if (!process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not set — add it in the API environment (platform.openai.com/api-keys).');
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      return await callOpenAIText(prompt, imageBase64);
+    } catch (err) {
+      if (err instanceof AIRefusal) throw err;
+      if (!process.env.GEMINI_API_KEY) throw err;
+      console.error(`⚠️  OpenAI text failed (${err.message}) — falling back to ${GEMINI_MODEL}.`);
+      try {
+        return await callGeminiText(prompt, imageBase64);
+      } catch (fallbackErr) {
+        if (fallbackErr instanceof AIRefusal) throw fallbackErr;
+        // Both providers are down. Surface the OpenAI error, not Gemini's —
+        // OpenAI is the one that is supposed to be serving this, so its error
+        // is the one worth debugging.
+        console.error(`❌ Gemini fallback also failed: ${fallbackErr.message}`);
+        throw err;
+      }
+    }
+  }
+
+  // No OpenAI key at all but a Gemini one is present — run on the failsafe
+  // rather than refusing outright. This is the shape a deploy has if
+  // OPENAI_API_KEY is ever removed or rotated badly.
+  console.error(`⚠️  OPENAI_API_KEY not set — running text on ${GEMINI_MODEL}.`);
+  return callGeminiText(prompt, imageBase64);
 }
 
 // ── OpenAI image generation (gpt-image-1) ───────────────────────────────────

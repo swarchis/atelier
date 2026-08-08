@@ -50,7 +50,7 @@ Every delete (design, tech pack, material, collection) goes through `ConfirmDele
 
 Both endpoints share one `callOpenAIImage` helper. `gpt-image-1` returns **real alpha**, so background removal, flat sketches, logos and silhouettes come back as genuinely transparent drop-in layers rather than the painted-white approximation an earlier provider could only fake. Every design-image prompt gets `IMAGE_OUTPUT_RULES` appended — the two biggest real-world failure modes were the model returning a contact sheet of variations on one canvas and the rendering style drifting run to run, so every mode pins one subject, one panel, consistent presentation, no stray text.
 
-*(History: the transform tools originally ran on Gemini's image model and the addition tools on Stable Diffusion via Pixazo. Both moved to `gpt-image-1`; `PIXAZO_API_KEY` is no longer read anywhere in this repo and can be deleted from your env. Text moved off Gemini to `gpt-5.4-mini` on 2026-08-07, so every AI feature — text and image — now bills to OpenAI; `GEMINI_API_KEY` is no longer read anywhere.)*
+*(History: the transform tools originally ran on Gemini's image model and the addition tools on Stable Diffusion via Pixazo. Both moved to `gpt-image-1`; `PIXAZO_API_KEY` is no longer read anywhere in this repo and can be deleted from your env. Text moved off Gemini to `gpt-5.4-mini` on 2026-08-07, so AI spend lands on one dashboard. Gemini flash-lite is retained purely as a failsafe: `callAIText` uses it only when OpenAI is unreachable, and logs loudly when it does.)*
 
 Also real: a moodboard (uploaded reference images), an AI color palette generator, AI trend inspiration (Tavily-grounded, cached once per category per day), AI-generated design variants, version history (every saved AI result), and a comment thread — all Supabase-backed per design. AI design critique (`/api/analyze-design`, scores a canvas snapshot) predates this and lives on the Canvas tab.
 
@@ -222,6 +222,7 @@ SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
 
 OPENAI_API_KEY=...
+GEMINI_API_KEY=...   # optional: text-only failsafe if OpenAI is down
 TAVILY_API_KEY=...
 STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
@@ -249,7 +250,7 @@ SENTRY_DSN=...
 
 **`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`**: the backend uses these for two things it can't do with an anon key — validating the caller's JWT on every metered route, and moving AI credits (grant/debit/refund/top-up), which are deliberately unreachable from any client. Without them `requireAuth` fails **closed** with a clear 500 rather than letting requests through unauthenticated, so every AI feature stops working. The service-role key bypasses RLS entirely: keep it server-side, never in `la-guia/.env.local`.
 
-**`OPENAI_API_KEY`**: powers every image feature — AI Design Studio's transform and addition tools, and silhouette generation — via `gpt-image-1`. Without it those tools return "OPENAI_API_KEY is not set" inline in the tool card; text AI is on the same key, so nothing works without it.
+**`OPENAI_API_KEY`**: powers every image feature — AI Design Studio's transform and addition tools, and silhouette generation — via `gpt-image-1`. Without it those tools return "OPENAI_API_KEY is not set" inline in the tool card. Text AI runs on the same key (`gpt-5.4-mini`), so a bad key breaks text too — unless `GEMINI_API_KEY` is set, in which case text silently fails over and only images stay broken.
 
 **`STRIPE_WEBHOOK_SECRET`**: required for AI credits to be granted at all. Subscriptions grant credits on `invoice.paid` and top-ups on `checkout.session.completed`, both of which arrive only by webhook — see the Billing section below.
 
@@ -367,9 +368,9 @@ Every AI endpoint listed in `AI_PATHS` (the generation/analysis ones) is **authe
 ## Gotchas
 
 - **Never commit `node_modules`.**
-- **Gemini Search grounding needs billing** — which is why vendor search uses Tavily. (Historical: Gemini is no longer used at all.)
+- **Gemini Search grounding needs billing** — which is why vendor search uses Tavily.
 - **Every image feature needs `OPENAI_API_KEY`** (`gpt-image-1`) — AI Design Studio's transform *and* addition tools, plus silhouette generation. A missing or unauthorized key surfaces as an inline error in that tool's card; text features use the SAME key now, so a bad key breaks everything, not just images.
-- **Image generation is the only real cost centre** — text calls run on `gpt-5.4-mini` at a fraction of a cent. If you change a prompt's `size`, `quality` or `background` in `api/index.js`, re-check the credit price for that feature in `api/config/aiCredits.js` against the $0.005-per-credit ceiling, and mirror any change into `la-guia/src/data/aiCredits.js`. The two files are kept in sync by hand — nothing enforces it.
+- **Image generation is the only real cost centre** — text calls run on `gpt-5.4-mini` (or `gemini-flash-lite-latest` when failing over) at a fraction of a cent. If you change a prompt's `size`, `quality` or `background` in `api/index.js`, re-check the credit price for that feature in `api/config/aiCredits.js` against the $0.005-per-credit ceiling, and mirror any change into `la-guia/src/data/aiCredits.js`. The two files are kept in sync by hand — nothing enforces it.
 - **A credit price change is not retroactive** — `TIER_CREDITS` is applied on the next `invoice.paid`, so existing subscribers keep their current allowance until their cycle renews.
 - **Photopea resizing** — the container doesn't reliably resize; use the capture/remount pattern in `DesignDetail.jsx`.
 - **Resend testing** — on the free tier without a verified domain, Resend only allows sending emails to the address you signed up with; invites to any other address will silently fail to deliver (the `brand_members` row is still created correctly).
