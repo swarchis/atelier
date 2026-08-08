@@ -85,7 +85,7 @@ const apiLimiter = rateLimit({
 });
 
 // Strict limiter for the expensive AI/generation endpoints — these each cost
-// real money (Gemini/Tavily), so cap them tightly per client.
+// real money (OpenAI/Tavily), so cap them tightly per client.
 const aiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
@@ -396,8 +396,19 @@ function safeShopifyShop(shop) {
   return clean;
 }
 
-const MODEL_NAME = "gemini-flash-lite-latest";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`;
+// ── OpenAI text generation (gpt-5.4-mini) ───────────────────────────────────
+// Replaced gemini-flash-lite-latest so the whole app bills to ONE provider.
+// Running text on Google and images on OpenAI meant two keys, two dashboards,
+// and two failure modes to explain — and made "my OpenAI usage didn't move"
+// a legitimate question rather than a bug.
+//
+// gpt-5.4-mini is the mini tier: multimodal (the vision path below feeds it
+// design sketches) and cheap enough to stay under the per-credit ceiling, but
+// materially stronger than flash-lite on the structured-JSON work every one of
+// these endpoints depends on. Verified against the live key before switching —
+// JSON mode, image input, and `temperature` all accepted.
+const OPENAI_TEXT_MODEL = 'gpt-5.4-mini';
+const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
 function cleanAIJSON(text) {
   return text.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -443,44 +454,68 @@ function verifyShopifySignature(rawBody, hmacHeader) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-async function callGemini(prompt, imageBase64 = null) {
-  const parts = [{ text: prompt }];
-  if (imageBase64) {
-    parts.push({ inline_data: { mime_type: "image/png", data: imageBase64 } });
+// Every caller expects a parsed JSON object back, so this always requests JSON
+// mode. Signature is unchanged from the Gemini version it replaced — one
+// optional base64 PNG — so the 14 call sites did not have to change shape.
+async function callAIText(prompt, imageBase64 = null) {
+  // Same fail-fast as callOpenAIImage: without this the request 401s and the
+  // user is told "Incorrect API key provided" for a key that isn't set at all.
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not set — add it in the API environment (platform.openai.com/api-keys).');
   }
 
-  const payload = {
-    contents: [{ parts }],
-    generationConfig: { response_mime_type: "application/json" },
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-    ]
-  };
+  // OpenAI's json_object mode REFUSES the request unless the word "json"
+  // appears in the messages. Most prompts here already say so, but not all —
+  // a system line makes it unconditional instead of depending on each prompt's
+  // wording, which is the kind of thing that breaks one endpoint silently.
+  const messages = [
+    { role: 'system', content: 'You are a precise assistant for a fashion production platform. Always reply with a single valid JSON object and nothing else.' },
+    {
+      role: 'user',
+      content: imageBase64
+        ? [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } },
+          ]
+        : prompt,
+    },
+  ];
 
-  const response = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
+  const response = await fetch(OPENAI_CHAT_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: OPENAI_TEXT_MODEL,
+      messages,
+      response_format: { type: 'json_object' },
+    }),
   });
 
   const data = await response.json();
   if (!response.ok) {
-    console.error("❌ Gemini API Error:", JSON.stringify(data, null, 2));
-    throw new Error(data.error?.message || `Gemini Error: ${response.status}`);
+    console.error('❌ OpenAI text API Error:', JSON.stringify(data, null, 2));
+    throw new Error(data.error?.message || `OpenAI Error: ${response.status}`);
   }
 
-  if (!data.candidates || data.candidates.length === 0 || !data.candidates[0].content) {
-    if (data.candidates?.[0]?.finishReason === 'SAFETY') {
-      throw new Error("AI Safety Block. Try removing any text from the drawing.");
-    }
-    throw new Error("Empty response from AI.");
+  const choice = data.choices && data.choices[0];
+  if (!choice || !choice.message || typeof choice.message.content !== 'string') {
+    throw new Error('Empty response from AI.');
+  }
+  // OpenAI's equivalent of Gemini's SAFETY finishReason. Kept as its own
+  // message because "empty response" sends people debugging the wrong thing.
+  if (choice.finish_reason === 'content_filter') {
+    throw new Error('AI Safety Block. Try removing any text from the drawing.');
+  }
+  // `length` means the model was cut off mid-object, so the JSON.parse below
+  // would throw a syntax error that reads like a bug rather than a truncation.
+  if (choice.finish_reason === 'length') {
+    throw new Error('The AI response was too long to finish. Try a shorter request.');
   }
 
-  const rawText = data.candidates[0].content.parts[0].text;
-  return JSON.parse(cleanAIJSON(rawText));
+  return JSON.parse(cleanAIJSON(choice.message.content));
 }
 
 // ── OpenAI image generation (gpt-image-1) ───────────────────────────────────
@@ -659,7 +694,7 @@ Return a JSON object with exactly this structure and nothing else:
   "notes": [ { "severity": "red" | "amber" | "blue" | "green", "text": "specific finding" } ]
 }`;
 
-    const raw = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64);
+    const raw = await callAIText(prompt + brandProfileBlock(req.body.brandProfile), imageBase64);
 
     // Aggregate here so the headline number is arithmetic, not a vibe.
     const dims = raw.dimensions || {};
@@ -711,7 +746,7 @@ Return a JSON object with this exact structure:
   ]
 }`;
 
-    const techPackData = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64);
+    const techPackData = await callAIText(prompt + brandProfileBlock(req.body.brandProfile), imageBase64);
     console.log("✅ Tech Pack successful");
     res.json({ ok: true, techPackData });
   } catch (error) {
@@ -722,7 +757,7 @@ Return a JSON object with this exact structure:
 
 // Full tech pack generation — takes whatever the founder filled in on the
 // intake questionnaire (any field can be blank) plus an optional canvas
-// image, and asks Gemini to produce a complete, industry-standard tech pack:
+// image, and asks the model to produce a complete, industry-standard tech pack:
 // fills gaps sensibly from the garment category/image, but never overwrites
 // anything the founder actually typed. The frontend always shows an
 // accuracy warning on AI-filled fields regardless of how confident this
@@ -754,7 +789,7 @@ Return a JSON object with exactly this structure (every array can be empty if ge
   "complianceNotes": "string — certifications, safety, labeling regulations relevant to this garment/market"
 }`;
 
-    const techPackData = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64 || null);
+    const techPackData = await callAIText(prompt + brandProfileBlock(req.body.brandProfile), imageBase64 || null);
     console.log("✅ Full tech pack generation successful");
     res.json({ ok: true, techPackData });
   } catch (error) {
@@ -793,7 +828,7 @@ Return a JSON object with exactly this structure:
   "priceRange": "string or null (e.g. '$8-$12/unit FOB') — only if a price is actually mentioned, never estimated"
 }`;
 
-    const parsed = await callGemini(prompt);
+    const parsed = await callAIText(prompt);
     console.log("✅ Vendor parse successful");
     res.json({ ok: true, vendor: parsed });
   } catch (error) {
@@ -827,7 +862,7 @@ Write a concise, professional email (under 200 words), with a placeholder for th
   "body": "string (plain text, use \\n for line breaks, no markdown)"
 }`;
 
-    const draft = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
+    const draft = await callAIText(prompt + brandProfileBlock(req.body.brandProfile));
     console.log("✅ Email draft successful");
     res.json({ ok: true, draft });
   } catch (error) {
@@ -995,7 +1030,7 @@ Do not invent details not supported by the text. Return a JSON object with exact
   "broader": [ same shape as above ]
 }`;
 
-    const parsed = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64 || null);
+    const parsed = await callAIText(prompt + brandProfileBlock(req.body.brandProfile), imageBase64 || null);
 
     // Every address the searches actually contained. The prompt forbids
     // inventing one, but "the prompt says not to" is not a guarantee — and this
@@ -1015,7 +1050,7 @@ Do not invent details not supported by the text. Return a JSON object with exact
     }
 
     const PARKING_SIGNALS = ['buy this domain', 'domain is for sale', 'this domain may be for sale', 'domain for sale', 'sedo.com', 'hugedomains', 'afternic', 'dan.com', 'godaddy.com/domainsearch', 'the lease to own', 'inquire about this domain'];
-    // These urls come from Tavily results as filtered by Gemini — web text, so
+    // These urls come from Tavily results as filtered by the model — web text, so
     // untrusted, even though no user types them directly. Two guards: refuse
     // private/loopback/metadata hosts outright, and do not follow redirects,
     // since a public host answering 302 -> 169.254.169.254 would otherwise walk
@@ -1115,7 +1150,7 @@ Return a JSON object with exactly this structure:
   ]
 }`;
 
-    const analysis = await callGemini(prompt);
+    const analysis = await callAIText(prompt);
     console.log("✅ Vendor fit analysis successful");
     res.json({ ok: true, analysis });
   } catch (error) {
@@ -2264,7 +2299,7 @@ Return a JSON object with exactly this structure:
 }
 Return 2 to 4 suggestions, ordered most important first. Use "warning" only for things that need action soon (a gate flag, a near-term deadline, hitting a plan limit); use "success" sparingly, only when something is genuinely going well and worth acknowledging; otherwise "info".`;
 
-    const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
+    const result = await callAIText(prompt + brandProfileBlock(req.body.brandProfile));
     console.log("✅ Dashboard suggestions successful");
     res.json({ ok: true, suggestions: result.suggestions || [] });
   } catch (error) {
@@ -2354,7 +2389,7 @@ app.post('/api/design/ai-image', metered('design-ai-image'), async (req, res) =>
 // ---------------------------------------------------------
 // Generates a standalone graphic (a logo/icon, or a pattern swatch) with no
 // input image — this is what feeds the frontend's "add as a new layer"
-// action (PhotopeaEditor.addLayer) instead of the Gemini modes above, which
+// action (PhotopeaEditor.addLayer) instead of the text-driven modes above, which
 // replace the whole canvas. Kept as a separate endpoint/provider rather than
 // folded into /api/design/ai-image since it's a genuinely different
 // capability (isolated-asset generation vs. whole-image editing), not just
@@ -2363,7 +2398,7 @@ const ELEMENT_MODE_PROMPTS = {
   'add-element': (p) => `exactly one single graphic, centered: ${p || 'a simple minimalist icon'}. One design only — no alternates, no variations, no sheet of options`,
   'pattern': (p) => `a seamless, tileable, repeating textile pattern: ${p || 'an abstract pattern'}`,
   // Used for Design.jsx's "Generate silhouette" (custom garment types outside
-  // the 9 hand-drawn presets). An earlier version had Gemini guess raw SVG
+  // the 9 hand-drawn presets). An earlier version had the model guess raw SVG
   // path coordinates for this, which is a spatial-reasoning task text models
   // are bad at blind — results were unrecognizable for anything but the
   // simplest shapes. An actual image model reasons in pixel space, so it's
@@ -2454,7 +2489,7 @@ Return a JSON object with exactly this structure:
 { "palette": [ { "name": "descriptive color name", "hex": "#RRGGBB", "role": "primary" | "secondary" | "accent" | "neutral" } ] }
 Exactly 5 entries: one primary, one secondary, one accent, and two neutrals.`;
 
-    const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile), imageBase64 || null);
+    const result = await callAIText(prompt + brandProfileBlock(req.body.brandProfile), imageBase64 || null);
     console.log("✅ Color palette successful");
     res.json({ ok: true, palette: result.palette || [] });
   } catch (error) {
@@ -2500,7 +2535,7 @@ Return a JSON object with exactly this structure:
 { "trends": [ { "theme": "short trend name", "detail": "1-2 sentence description of what this means for the design", "category": "silhouette" | "color" | "fabric" | "detail" } ] }
 Return 3 to 6 entries.`;
 
-    const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
+    const result = await callAIText(prompt + brandProfileBlock(req.body.brandProfile));
     console.log("✅ Trend inspiration successful");
     res.json({ ok: true, trends: result.trends || [] });
   } catch (error) {
@@ -2513,7 +2548,7 @@ Return 3 to 6 entries.`;
 // added to the Materials Library with real information rather than a bare name.
 //
 // One Tavily search PER MATERIAL (they share no facts — "12oz cotton twill" and
-// "YKK #5 zipper" have nothing to say about each other), then a SINGLE Gemini
+// "YKK #5 zipper" have nothing to say about each other), then a SINGLE model
 // pass over all of them. That keeps this at one metered charge per save no
 // matter how many materials are on the row, which is why it takes an array
 // rather than being called in a loop from the client.
@@ -2577,7 +2612,7 @@ Rules that matter more than completeness:
 Return a JSON object with exactly this structure, one entry per material, in the same order:
 { "materials": [ { "name": "exactly the material name given", "category": "short fibre/material family e.g. Cotton, Polyester, Metal hardware, or null", "type": "fabric" | "trim" | "notion", "riskLevel": "Low" | "Medium" | "High" | null, "warning": "string or null", "handlingNotes": "string or null", "sustainabilityInfo": "string or null", "certifications": [], "availability": "Unknown" } ] }`;
 
-    const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
+    const result = await callAIText(prompt + brandProfileBlock(req.body.brandProfile));
     console.log(`✅ Material research successful (${names.length} material${names.length === 1 ? '' : 's'})`);
     res.json({ ok: true, materials: result.materials || [] });
   } catch (error) {
@@ -3352,7 +3387,7 @@ app.post('/api/social/publish/:platform', requireAuth, async (req, res) => {
 // The frontend gathers a text summary of the brand's own products/vendors/
 // etc. from its already-loaded contexts (same "client assembles context,
 // server just prompts" shape as /api/dashboard-suggestions) and posts it
-// here alongside the message and a short prior-turn transcript. callGemini
+// here alongside the message and a short prior-turn transcript. callAIText
 // always asks for JSON back, so a conversational reply gets wrapped in a
 // single { "reply": "..." } object rather than returned as raw text.
 app.post('/api/chat-reply', requireTier('premium'), metered('chat-reply'), async (req, res) => {
@@ -3378,7 +3413,7 @@ Be concise and direct — a couple of short paragraphs or a short list at most, 
 Return a JSON object with exactly this structure:
 { "reply": "string, plain text, use \\n for line breaks, no markdown headers or bullet asterisks" }`;
 
-    const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
+    const result = await callAIText(prompt + brandProfileBlock(req.body.brandProfile));
     console.log("✅ Chat reply successful");
     res.json({ ok: true, reply: result.reply });
   } catch (error) {
@@ -3447,7 +3482,7 @@ Return a JSON object with exactly this structure:
   "dutyNote": "one short sentence, including a reminder this isn't customs/tax advice"
 }`;
 
-    const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
+    const result = await callAIText(prompt + brandProfileBlock(req.body.brandProfile));
     console.log("✅ Quote economics successful");
     res.json({
       ok: true,
@@ -3500,7 +3535,7 @@ Return a JSON object with exactly this structure:
 }
 Include one "levers" entry for every non-choice id, and one "choiceLevers" entry (with every one of its listed option ids) for every choice id.`;
 
-    const result = await callGemini(prompt + brandProfileBlock(req.body.brandProfile));
+    const result = await callAIText(prompt + brandProfileBlock(req.body.brandProfile));
     console.log("✅ Cost simulator successful");
     res.json({ ok: true, levers: result.levers || [], choiceLevers: result.choiceLevers || [] });
   } catch (error) {

@@ -52,8 +52,7 @@ export const LIABILITY_FLOOR_USD = 100;
 export const SUBPROCESSORS = [
   { name: 'Supabase', purpose: 'Database, authentication and file storage (your account, brand data, uploaded designs)', region: 'United States' },
   { name: 'Stripe', purpose: 'Payment processing and subscription billing. Card details go to Stripe directly and are never stored on our servers', region: 'United States' },
-  { name: 'OpenAI', purpose: 'Image generation and editing (AI Design Studio, silhouettes, patterns, logos). Receives the design image and prompt for the request you make', region: 'United States' },
-  { name: 'Google (Gemini)', purpose: 'Text generation (tech packs, vendor extraction, cost estimates, chat assistant). Receives the text and any image you attach to that request', region: 'United States' },
+  { name: 'OpenAI', purpose: 'All AI features — image generation and editing (AI Design Studio, silhouettes, patterns, logos) and text generation (tech packs, vendor extraction, cost estimates, chat assistant). Receives the prompt, a summary of the relevant brand data, and any design image attached to that request', region: 'United States' },
   { name: 'Tavily', purpose: 'Web search used to find and research manufacturers. Receives your search terms, not your designs', region: 'United States' },
   { name: 'Photopea', purpose: 'The in-app design canvas is an embedded Photopea editor. Design files you open or save on the canvas are processed in that embedded editor in your browser', region: 'Czech Republic / EU' },
   { name: 'Resend', purpose: 'Outbound email — team invitations, vendor outreach and email campaigns you send', region: 'United States' },

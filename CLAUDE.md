@@ -270,8 +270,13 @@ an out-of-date DB should lose a feature, not the whole save.
   every save silently flattens.
 - Resend's free tier only delivers to your own verified address; team invites
   to anyone else fail silently while the `brand_members` row is still created.
-- Image features need `OPENAI_API_KEY` (`gpt-image-1`); text features need
-  `GEMINI_API_KEY`. "AI works but images don't" is almost always the former.
+- **All AI is OpenAI now.** `OPENAI_API_KEY` powers both `gpt-image-1` (images)
+  and `gpt-5.4-mini` (all text, via `callAIText`). Gemini was removed on
+  2026-08-07 so spend lands on one dashboard; `GEMINI_API_KEY` is dead and can
+  be deleted from Railway. Text goes through `/v1/chat/completions` in JSON
+  mode, which **refuses the request unless the word "json" appears in the
+  messages** — that is why `callAIText` sends a system line saying so rather
+  than trusting each prompt's wording.
 - Auth changes require deploying backend **and** frontend together — an old
   bundle won't send the JWT to a newly protected endpoint.
 - `LAUNCH.md` is the live operational checklist. Check it before claiming

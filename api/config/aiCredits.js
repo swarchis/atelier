@@ -21,9 +21,12 @@
 //     Top-up M $25 -> net $23.98,  800 cr -> max cost $4.00  (16.7%) -> 83.3% margin
 //     Top-up L $50 -> net $48.25, 1750 cr -> max cost $8.75  (18.1%) -> 81.9% margin
 //
-// Text actions (Gemini Flash-Lite, ~$0.001) are effectively free to serve, so
-// their credit prices reflect perceived value rather than cost. Image
-// generation is the only real cost centre.
+// Text actions (gpt-5.4-mini, a fraction of a cent per call) are near-free to
+// serve, so their credit prices reflect perceived value rather than cost. They
+// were priced this way when text ran on Gemini Flash-Lite; the mini tier is a
+// step up in cost, so if text prices ever approach the ceiling, re-check the
+// cheapest action — `chat-reply` at 1 credit is the tightest, with $0.005 of
+// headroom. Image generation is still the only real cost centre.
 
 const FEATURE_COST = {
   // ── Text / search: API cost ~$0.0005-$0.002, priced for perceived value ──
@@ -40,7 +43,7 @@ const FEATURE_COST = {
   'generate-tech-pack-full': 10,
   'search-vendors': 10,
   'design-trend-inspiration': 10,
-  'research-materials': 10,   // one Tavily search per material + a single Gemini pass, charged per save not per material
+  'research-materials': 10,   // one Tavily search per material + a single model pass, charged per save not per material
 
   // ── Images (OpenAI gpt-image-1): the real cost centre ────────────────────
   'design-generate-element': 10,  // logo/pattern, medium 1024x1024 ~$0.042 -> $0.0042/cr
