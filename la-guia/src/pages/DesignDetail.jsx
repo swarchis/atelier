@@ -17,7 +17,7 @@ import InspirationTab from '../components/design-studio/InspirationTab.jsx';
 import VariantsTab from '../components/design-studio/VariantsTab.jsx';
 import HistoryTab from '../components/design-studio/HistoryTab.jsx';
 import SkuVariantsTab from '../components/design-studio/SkuVariantsTab.jsx';
-import { blobToBase64, uploadDesignImage, uploadDesignPsd, deleteMockupFiles, PSD_VERSION_LABEL, appendViewToPsd } from '../lib/designImages.js';
+import { blobToBase64, uploadDesignImage, uploadDesignPsd, deleteMockupFiles, PSD_VERSION_LABEL, appendViewToPsd, composeViewsForReview } from '../lib/designImages.js';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import Splitter from '../components/Splitter.jsx';
 import AssetsTab from '../components/design-studio/AssetsTab.jsx';
@@ -85,6 +85,7 @@ export default function DesignDetail() {
   // FRONT view; these are switchable tabs beside it so generating a new angle
   // never destroys the front.
   const [views, setViews] = useState([]);
+  const viewUploadRef = useRef(null);
   const [activeView, setActiveView] = useState('front');
   const [switchingView, setSwitchingView] = useState(null);
   const [frontImageUrl, setFrontImageUrl] = useState(null);
@@ -519,6 +520,35 @@ export default function DesignDetail() {
     }
   };
 
+  // Add a view without going through AI. Generating one was the only way to
+  // get a second view, which made an obvious workflow impossible: you already
+  // have a back-view photo or flat, and you just want it in here.
+  const addViewManually = async (file) => {
+    const key = `view-${Date.now()}`;
+    const label = window.prompt('Name this view', 'Back') || 'Back';
+    setSwitchingView(key);
+    setCaptureError(null);
+    try {
+      // Save whatever is on the canvas first, or switching to the new view
+      // would throw away unsaved work on the current one.
+      try { await saveActiveView(); } catch (err) { console.error('Could not save the current view:', err); }
+
+      const imageUrl = await uploadDesignImage(file, id, 'view');
+      const entry = { key, label: label.trim().slice(0, 24) || 'Back', imageUrl };
+      const next = [...views, entry];
+      setViews(next);
+      await persistStudioField('views', next);
+      await openIntoCanvas({ imageUrl });
+      setActiveView(key);
+      setTab('canvas');
+      toast.success(`"${entry.label}" added as a view.`);
+    } catch (err) {
+      setCaptureError('Could not add that view: ' + err.message);
+    } finally {
+      setSwitchingView(null);
+    }
+  };
+
   const deleteView = async (key) => {
     const next = views.filter(v => v.key !== key);
     setViews(next);
@@ -638,15 +668,38 @@ export default function DesignDetail() {
       const url = await photopeaRef.current.capture();
       setSnapshot(url);
 
-      const response = await fetch(url);
+      // The review gets EVERY view, not just the tab you happen to be on.
+      // The canvas shows one view at a time, so reviewing from the Back tab
+      // used to hide the front and vice versa — and the review would then
+      // report the missing view as the design's biggest problem. The live
+      // canvas goes first (it is the only one guaranteed current), followed by
+      // the saved image of every other view.
+      const otherViews = [
+        activeView !== 'front' ? frontImageUrl : null,
+        ...views.filter(v => v.key !== activeView).map(v => v.imageUrl),
+      ].filter(Boolean);
+
+      let reviewImage = url;
+      if (otherViews.length) {
+        try {
+          const composed = await composeViewsForReview([url, ...otherViews]);
+          if (composed) reviewImage = composed;
+        } catch (err) {
+          // A blocked image must not cost the whole review; fall back to the
+          // single live view.
+          console.error('Could not combine views for review:', err);
+        }
+      }
+
+      const response = await fetch(reviewImage);
       const blob = await response.blob();
-      
+
       const base64data = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result.split(',')[1]);
         reader.readAsDataURL(blob);
       });
-          
+
       const apiRes = await aiPost('/api/analyze-design', {
         imageBase64: base64data,
         product: product ? { name: product.name, category: product.category, stage: product.stage, risk: product.risk, budget: product.budget } : null,
@@ -1009,7 +1062,7 @@ export default function DesignDetail() {
               <div className="canvas-panel-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
                   {/* One tab per garment view. Front is the main canvas; extra
-                      views are added by the AI "Generate a View" tool. */}
+                      views come from "Generate a View" or the Add view button. */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     {viewTabs.map(v => {
                       const isActive = activeView === v.key;
@@ -1050,6 +1103,31 @@ export default function DesignDetail() {
                         </div>
                       );
                     })}
+                    <input
+                      ref={viewUploadRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      style={{ display: 'none' }}
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (file) addViewManually(file);
+                      }}
+                    />
+                    <button
+                      onClick={() => viewUploadRef.current?.click()}
+                      disabled={!!switchingView}
+                      title="Add a view from an image on your computer"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '4px 9px', fontSize: 12, fontWeight: 500,
+                        background: 'transparent', color: 'var(--ink-3)',
+                        border: '1px dashed var(--border-2)', borderRadius: 'var(--r-sm)',
+                        cursor: switchingView ? 'default' : 'pointer',
+                      }}
+                    >
+                      <i className="ph ph-plus" style={{ fontSize: 11 }} /> Add view
+                    </button>
                   </div>
                   <span className="canvas-panel-badge">
                     <span className="canvas-panel-dot" style={{ background: statusMeta.color }} />

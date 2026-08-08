@@ -209,3 +209,54 @@ export async function appendViewToPsd(psdBlob, viewImageUrl, layerName = 'New vi
 
   return new Blob([writePsd(next)], { type: 'image/vnd.adobe.photoshop' });
 }
+
+// Lays several view images out side by side and returns one PNG data URL.
+//
+// The design review sends a single image, and the canvas only ever shows one
+// view at a time — so reviewing a design from the Back tab used to hide the
+// front, and reviewing from Front hid the back. "The back view is missing" was
+// then the review's most common finding on designs that had one. Compositing
+// first means it judges the whole garment whichever tab happens to be open.
+//
+// Analysis only. Nothing here touches the canvas or what gets saved.
+export async function composeViewsForReview(imageUrls, maxEdge = 1100) {
+  const sources = (imageUrls || []).filter(Boolean);
+  if (sources.length === 0) return null;
+
+  const loaded = await Promise.all(sources.map(src => new Promise(resolve => {
+    const img = new Image();
+    // Supabase storage serves CORS headers; without this the canvas would be
+    // tainted and toDataURL would throw. A failure resolves null and that view
+    // is left out rather than losing the whole review.
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  })));
+  const usable = loaded.filter(Boolean);
+  if (usable.length === 0) return null;
+  if (usable.length === 1) return sources[loaded.indexOf(usable[0])];
+
+  // Normalise to a common height so the views read as one lineup.
+  const height = Math.min(maxEdge, Math.max(...usable.map(i => i.height)));
+  const widths = usable.map(i => Math.max(1, Math.round(i.width * (height / i.height))));
+  const gap = 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = widths.reduce((a, b) => a + b, 0) + gap * (usable.length - 1);
+  canvas.height = height;
+
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  let x = 0;
+  usable.forEach((img, i) => {
+    ctx.drawImage(img, x, 0, widths[i], height);
+    x += widths[i] + gap;
+  });
+
+  try {
+    return canvas.toDataURL('image/png');
+  } catch {
+    return null; // tainted canvas: fall back to the single-view capture
+  }
+}
