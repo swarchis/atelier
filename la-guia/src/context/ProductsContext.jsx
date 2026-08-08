@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { validateUpload } from '../lib/uploadGuard.js';
 import { useAuth } from './AuthContext.jsx';
 import { uploadDesignImage, uploadDesignPsd, isRenderableImageUrl, isPsdFile, psdToPngBlob, PSD_VERSION_LABEL } from '../lib/designImages.js';
 import { setActiveBrandId, setBrandProfile } from '../lib/aiApi.js';
@@ -628,9 +629,14 @@ export function ProductsProvider({ children }) {
 
   const uploadProductAsset = async (productId, file) => {
     if (!activeBrand) throw new Error("No active brand");
-    const ext = file.name.split('.').pop();
+    // The extension used to come from `file.name.split('.').pop()`, i.e. from
+    // the uploader. `mockups` is a PUBLIC bucket, so a file named x.svg or
+    // x.html landed at a public url on our own domain serving whatever was in
+    // it — stored XSS with no exploit required. It now comes from a validated
+    // allowlist, and anything off that list never reaches storage.
+    const { ext } = validateUpload(file, 'asset');
     const fileName = `${productId}-asset-${Date.now()}.${ext}`;
-    
+
     const { error: uploadError } = await supabase.storage.from('mockups').upload(fileName, file, { upsert: true });
     if (uploadError) throw uploadError;
 

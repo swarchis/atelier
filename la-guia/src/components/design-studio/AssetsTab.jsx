@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useProducts } from '../../context/ProductsContext.jsx';
 import EmptyState from '../EmptyState.jsx';
+import { validateUpload, acceptAttr } from '../../lib/uploadGuard.js';
 
 export default function AssetsTab({ productId }) {
   const { productAssets, loadProductAssets, uploadProductAsset, deleteProductAsset } = useProducts();
@@ -22,6 +23,12 @@ export default function AssetsTab({ productId }) {
     setError(null);
     try {
       for (const file of files) {
+        // Validated here as well as in uploadProductAsset so the first bad file
+        // in a multi-select names itself, rather than failing anonymously
+        // halfway through the batch.
+        validateUpload(file, 'asset');
+      }
+      for (const file of files) {
         await uploadProductAsset(productId, file);
       }
     } catch (err) {
@@ -40,9 +47,10 @@ export default function AssetsTab({ productId }) {
             <span className="card-title" style={{ display: 'block' }}>Product Media Bin</span>
             <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4 }}>
               Store high-res photoshoot images, factory BTS videos, and packaging artwork directly on this product.
+              Images, video and PDFs, up to 200MB each.
             </div>
           </div>
-          <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={handleUpload} />
+          <input ref={fileRef} type="file" accept={acceptAttr('asset')} multiple style={{ display: 'none' }} onChange={handleUpload} />
           <button className="btn btn-primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
             {uploading ? <><i className="ph ph-spinner ph-spin" /> Uploading…</> : <><i className="ph ph-upload-simple" /> Upload Files</>}
           </button>

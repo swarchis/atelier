@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { acceptAttr } from '../../lib/uploadGuard.js';
 import { blobToBase64, uploadDesignImage } from '../../lib/designImages.js';
 import { aiPost } from '../../lib/aiApi.js';
 import { supabase } from '../../lib/supabase.js';
@@ -40,7 +41,7 @@ function Moodboard({ productId, moodboard, onChange }) {
     <div className="card-raised" style={{ padding: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <span className="card-title">Moodboard</span>
-        <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUpload} />
+        <input ref={fileRef} type="file" accept={acceptAttr('image')} multiple style={{ display: 'none' }} onChange={handleUpload} />
         <button className="btn btn-sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
           {uploading ? 'Uploading…' : <><i className="ph ph-upload-simple" /> Upload inspiration</>}
         </button>

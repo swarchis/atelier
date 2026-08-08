@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { featureLocationIndex } from '../data/guide.js';
 import { useAuth } from './AuthContext.jsx';
 import { useProducts } from './ProductsContext.jsx';
 import { useVendors } from './VendorsContext.jsx';
@@ -232,6 +233,14 @@ export function ChatProvider({ children }) {
     lines.push(`\nProduction orders (${orders.length}): ${orders.slice(0, 20).map(o => `${o.products?.name || 'product'} via ${o.vendors?.name || 'vendor'}: ${o.stage}, due ${o.due_date || 'unset'}, ${o.units || '—'} units`).join('; ') || 'None.'}`);
 
     lines.push(`\nMaterials library (${materials.length}): ${materials.slice(0, 20).map(m => m.name).join(', ') || 'None.'}`);
+
+    // Where every feature lives. "Where do I generate a tech pack" is the
+    // most common question a new user has, and without this the assistant
+    // knows the brand's data but nothing about the app around it, so it
+    // guesses at navigation.
+    lines.push(`
+WHERE FEATURES LIVE IN ATELIER (use these exact paths when someone asks where to find something; if a feature is not on this list, say you are not sure rather than inventing a menu):
+${featureLocationIndex()}`);
 
     return lines.join('\n');
   };

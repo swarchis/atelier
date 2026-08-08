@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { validateUpload, acceptAttr } from '../../lib/uploadGuard.js';
 import { base64ToDataUrl, base64ToBlob, blobToBase64, uploadDesignImage } from '../../lib/designImages.js';
 import { aiPost } from '../../lib/aiApi.js';
 import { useAIUsage } from '../../context/AIUsageContext.jsx';
@@ -58,6 +59,7 @@ function ToolCard({ tool, kind, productId, onCapture, onApplyToCanvas, onAddView
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
+    try { if (file) validateUpload(file, 'image'); } catch (err) { setError(err.message); e.target.value = ''; return; }
     if (!file) return;
     setError(null);
     try {
@@ -132,7 +134,7 @@ function ToolCard({ tool, kind, productId, onCapture, onApplyToCanvas, onAddView
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {tool.needsUpload && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <input ref={uploadRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleUpload} />
+              <input ref={uploadRef} type="file" accept={acceptAttr('image')} style={{ display: 'none' }} onChange={handleUpload} />
               <button className="btn btn-sm" onClick={() => uploadRef.current?.click()}>
                 <i className="ph ph-upload-simple" /> {uploadName ? 'Choose a different sketch' : 'Upload sketch'}
               </button>

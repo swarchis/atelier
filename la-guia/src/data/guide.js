@@ -376,3 +376,25 @@ export const GUIDE_PLAN_ROWS = [
   { label: 'Content planner and campaigns', free: false, basic: false, premium: true },
   { label: 'AI assistant', free: false, basic: false, premium: true },
 ];
+
+// Compact feature index for the AI assistant: one line per feature, name then
+// location. Derived from GUIDE rather than written twice, so "where is X" can
+// never answer with a path that no longer exists.
+//
+// Sent with each assistant message. Roughly 1.5k tokens against a 1-credit
+// action whose ceiling is $0.005, so the cost is noise next to being able to
+// answer the single most common support question.
+export function featureLocationIndex() {
+  const lines = [];
+  for (const section of GUIDE) {
+    for (const group of section.groups) {
+      for (const item of group.items) {
+        const bits = [`${item.name} — ${item.where}`];
+        if (item.cost) bits.push(`${item.cost} credits`);
+        if (item.plan && item.plan !== 'free') bits.push(item.plan === 'soon' ? 'not live yet' : `${item.plan} plan`);
+        lines.push(`- ${bits.join(' · ')}`);
+      }
+    }
+  }
+  return lines.join('\n');
+}

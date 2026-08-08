@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { validateUpload, acceptAttr } from '../lib/uploadGuard.js';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useAIUsage } from '../context/AIUsageContext.jsx';
@@ -245,6 +246,15 @@ const startFromUpload = async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
   if (atProductLimit) { navigate('/settings'); return; }
+  // Checked before anything is created, so a rejected file leaves no half-made
+  // product behind.
+  try {
+    validateUpload(file, 'design');
+  } catch (err) {
+    toast.error(err.message);
+    e.target.value = '';
+    return;
+  }
   setLoading(true);
   try {
     // Strips file extensions like ".png" or ".jpg" so "Jacket.png" becomes "Jacket"
@@ -415,7 +425,7 @@ const startFromUpload = async (e) => {
                 <input
                   ref={mockupFileRef}
                   type="file"
-                  accept="image/*,.psd,.psb"
+                  accept={acceptAttr('design')}
                   style={{ display: 'none' }}
                   onChange={handleSaveMockup}
                 />
@@ -436,7 +446,7 @@ const startFromUpload = async (e) => {
               >
                 <i className="ph ph-upload-simple" style={{ fontSize: 22, marginBottom: 8, display: 'block', color: 'var(--c-design)' }} />
                 Upload your own mockup, sketch, or reference photo
-                <input ref={fileRef} type="file" accept="image/*,.psd,.psb" style={{ display: 'none' }} onChange={startFromUpload} />
+                <input ref={fileRef} type="file" accept={acceptAttr('design')} style={{ display: 'none' }} onChange={startFromUpload} />
               </div>
 
               <div style={{ marginTop: 20, padding: '12px 14px', background: 'var(--bg-3)', borderRadius: 'var(--r-sm)' }}>

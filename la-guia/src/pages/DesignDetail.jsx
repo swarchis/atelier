@@ -18,6 +18,7 @@ import VariantsTab from '../components/design-studio/VariantsTab.jsx';
 import HistoryTab from '../components/design-studio/HistoryTab.jsx';
 import SkuVariantsTab from '../components/design-studio/SkuVariantsTab.jsx';
 import { blobToBase64, uploadDesignImage, uploadDesignPsd, deleteMockupFiles, PSD_VERSION_LABEL, appendViewToPsd, composeViewsForReview } from '../lib/designImages.js';
+import { validateUpload, acceptAttr } from '../lib/uploadGuard.js';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import Splitter from '../components/Splitter.jsx';
 import AssetsTab from '../components/design-studio/AssetsTab.jsx';
@@ -533,6 +534,7 @@ export default function DesignDetail() {
       // would throw away unsaved work on the current one.
       try { await saveActiveView(); } catch (err) { console.error('Could not save the current view:', err); }
 
+      validateUpload(file, 'image');
       const imageUrl = await uploadDesignImage(file, id, 'view');
       const entry = { key, label: label.trim().slice(0, 24) || 'Back', imageUrl };
       const next = [...views, entry];
@@ -1106,7 +1108,7 @@ export default function DesignDetail() {
                     <input
                       ref={viewUploadRef}
                       type="file"
-                      accept="image/png,image/jpeg,image/webp"
+                      accept={acceptAttr('image')}
                       style={{ display: 'none' }}
                       onChange={e => {
                         const file = e.target.files?.[0];
